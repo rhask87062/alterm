@@ -12,9 +12,8 @@ pub enum SidebarAction {
     NewTerminal,
     /// Split the focused pane with a new AI chat.
     NewAiChat,
-    // Future actions (placeholders):
-    // NewWebView,
-    // OpenSettings,
+    /// Open the settings panel in a pane.
+    OpenSettings,
 }
 
 /// Render the sidebar as a vertical column of square icon buttons.
@@ -53,13 +52,13 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         false,
     );
 
-    // Settings button — disabled placeholder
-    let settings_btn = sidebar_button::<M>(
+    // Settings button — active
+    let settings_btn = sidebar_button(
         "\u{2699}",
-        "Settings (coming soon)",
-        None,
+        "Settings (Ctrl+Shift+,)",
+        Some(map(SidebarAction::OpenSettings)),
         btn_size,
-        false,
+        true,
     );
 
     let col = column![terminal_btn, ai_btn, web_btn, settings_btn]

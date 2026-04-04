@@ -10,6 +10,7 @@ use gpu_renderer::grid::RenderGrid;
 use terminal::{PtyHandle, TerminalEvent, TerminalState};
 
 use crate::ai_chat::AIChatState;
+use crate::settings_panel::SettingsState;
 
 /// How many ticks before the cursor blink state toggles.
 const BLINK_TICKS: u32 = 30;
@@ -37,6 +38,9 @@ pub enum Block {
     },
     AIChat {
         state: AIChatState,
+    },
+    Settings {
+        state: SettingsState,
     },
 }
 
@@ -69,6 +73,13 @@ impl Block {
     pub fn new_ai_chat(provider: String, model: String) -> Self {
         Block::AIChat {
             state: AIChatState::new(provider, model),
+        }
+    }
+
+    /// Create a new settings panel block with a working copy of the given config.
+    pub fn new_settings(config: altermative_config::AppConfig) -> Self {
+        Block::Settings {
+            state: SettingsState::new(config),
         }
     }
 
@@ -115,6 +126,9 @@ impl Block {
             Block::AIChat { .. } => {
                 // Streaming is driven by external messages, not ticks.
             }
+            Block::Settings { .. } => {
+                // Settings is a pure UI panel — nothing to tick.
+            }
         }
 
         // Rebuild the cached grid only when something changed.
@@ -130,6 +144,7 @@ impl Block {
                 }
             }
             Block::AIChat { .. } => {}
+            Block::Settings { .. } => {}
         }
     }
 
@@ -145,6 +160,7 @@ impl Block {
                 *cached_grid = None;
             }
             Block::AIChat { .. } => {}
+            Block::Settings { .. } => {}
         }
         self.refresh_cache();
     }
@@ -157,6 +173,7 @@ impl Block {
                 (state.rows() as u16, state.cols() as u16)
             }
             Block::AIChat { .. } => (0, 0),
+            Block::Settings { .. } => (0, 0),
         }
     }
 
@@ -166,6 +183,9 @@ impl Block {
             Block::Terminal { .. } => "Terminal".to_string(),
             Block::AIChat { state } => {
                 format!("AI Chat ({})", state.provider_name)
+            }
+            Block::Settings { state } => {
+                if state.dirty { "Settings *".to_string() } else { "Settings".to_string() }
             }
         }
     }
@@ -178,6 +198,11 @@ impl Block {
     /// Whether this block is an AI chat.
     pub fn is_ai_chat(&self) -> bool {
         matches!(self, Block::AIChat { .. })
+    }
+
+    /// Whether this block is a settings panel.
+    pub fn is_settings(&self) -> bool {
+        matches!(self, Block::Settings { .. })
     }
 
     /// Build a render-ready grid from the block's current terminal state.
@@ -193,8 +218,8 @@ impl Block {
                     RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
                 })
             }
-            Block::AIChat { .. } => {
-                // AI chat doesn't use the terminal canvas — return empty grid.
+            Block::AIChat { .. } | Block::Settings { .. } => {
+                // Non-terminal blocks don't use the terminal canvas.
                 RenderGrid {
                     cells: Vec::new(),
                     rows: 0,
@@ -220,7 +245,7 @@ impl Block {
                     *dirty = false;
                 }
             }
-            Block::AIChat { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } => {}
         }
     }
 
@@ -231,7 +256,7 @@ impl Block {
                 *cursor_visible = true;
                 *blink_count = 0;
             }
-            Block::AIChat { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } => {}
         }
     }
 
@@ -245,7 +270,7 @@ impl Block {
                 state.scroll(lines);
                 *dirty = true;
             }
-            Block::AIChat { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } => {}
         }
         self.refresh_cache();
     }
@@ -283,7 +308,7 @@ impl Block {
                     Some(output.join("\n"))
                 }
             }
-            Block::AIChat { .. } => None,
+            Block::AIChat { .. } | Block::Settings { .. } => None,
         }
     }
 }
