@@ -153,9 +153,12 @@ impl Block {
     /// Returns a cached grid when nothing has changed since the last render.
     pub fn render_grid(&self) -> RenderGrid {
         match self {
-            Block::Terminal { cached_grid, .. } => {
-                // Return the cached grid — always populated by tick().
-                cached_grid.clone().expect("render_grid called before tick; cache is empty")
+            Block::Terminal { cached_grid, state, palette, cursor_visible, .. } => {
+                // Return cached grid if available, otherwise build on demand
+                // (handles the case where view() is called before the first tick)
+                cached_grid.clone().unwrap_or_else(|| {
+                    RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
+                })
             }
         }
     }
