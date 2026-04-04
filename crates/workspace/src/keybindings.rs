@@ -1,0 +1,174 @@
+/// Keybinding registry — maps keyboard shortcuts to workspace actions.
+///
+/// Centralises all shortcut matching so that main.rs and the command palette
+/// can share a single source of truth for bindings.
+use iced::keyboard::key::Named;
+use iced::keyboard::{Key, Modifiers};
+
+/// Every action that can be triggered by a keyboard shortcut.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    NewTab,
+    CloseTab,
+    NextTab,
+    PrevTab,
+    JumpToTab(usize),
+    RenameTab,
+
+    SplitRight,
+    SplitDown,
+    ClosePane,
+    MaximizeToggle,
+
+    FocusUp,
+    FocusDown,
+    FocusLeft,
+    FocusRight,
+
+    CommandPalette,
+    OpenSettings,
+    Copy,
+    Paste,
+}
+
+impl Action {
+    /// Human-readable label for the command palette / menus.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Action::NewTab => "New Tab",
+            Action::CloseTab => "Close Tab",
+            Action::NextTab => "Next Tab",
+            Action::PrevTab => "Previous Tab",
+            Action::JumpToTab(_) => "Jump to Tab",
+            Action::RenameTab => "Rename Tab",
+            Action::SplitRight => "Split Right",
+            Action::SplitDown => "Split Down",
+            Action::ClosePane => "Close Pane",
+            Action::MaximizeToggle => "Toggle Maximize",
+            Action::FocusUp => "Focus Up",
+            Action::FocusDown => "Focus Down",
+            Action::FocusLeft => "Focus Left",
+            Action::FocusRight => "Focus Right",
+            Action::CommandPalette => "Command Palette",
+            Action::OpenSettings => "Open Settings",
+            Action::Copy => "Copy",
+            Action::Paste => "Paste",
+        }
+    }
+
+    /// Shortcut hint string for display (e.g. "Ctrl+Shift+T").
+    pub fn shortcut_hint(&self) -> &'static str {
+        match self {
+            Action::NewTab => "Ctrl+Shift+T",
+            Action::CloseTab => "Ctrl+Shift+W",
+            Action::NextTab => "Ctrl+Tab",
+            Action::PrevTab => "Ctrl+Shift+Tab",
+            Action::JumpToTab(_) => "Ctrl+1-9",
+            Action::RenameTab => "F2",
+            Action::SplitRight => "Ctrl+Shift+D",
+            Action::SplitDown => "Ctrl+Shift+E",
+            Action::ClosePane => "Ctrl+Shift+X",
+            Action::MaximizeToggle => "Ctrl+Shift+Z",
+            Action::FocusUp => "Ctrl+Shift+Up",
+            Action::FocusDown => "Ctrl+Shift+Down",
+            Action::FocusLeft => "Ctrl+Shift+Left",
+            Action::FocusRight => "Ctrl+Shift+Right",
+            Action::CommandPalette => "Ctrl+Shift+P",
+            Action::OpenSettings => "Ctrl+Shift+,",
+            Action::Copy => "Ctrl+Shift+C",
+            Action::Paste => "Ctrl+Shift+V",
+        }
+    }
+}
+
+/// Match a key + modifiers combination to a workspace [`Action`].
+///
+/// Returns `None` when the key combo doesn't match any registered shortcut.
+pub fn match_shortcut(key: &Key, mods: &Modifiers) -> Option<Action> {
+    // ── F-keys (no modifiers required) ──────────────────────────────
+    if let Key::Named(Named::F2) = key {
+        return Some(Action::RenameTab);
+    }
+
+    // ── Ctrl+Tab / Ctrl+Shift+Tab ───────────────────────────────────
+    if mods.control() {
+        if let Key::Named(Named::Tab) = key {
+            return if mods.shift() {
+                Some(Action::PrevTab)
+            } else {
+                Some(Action::NextTab)
+            };
+        }
+    }
+
+    // ── Ctrl+<digit> — jump to tab ──────────────────────────────────
+    if mods.control() && !mods.shift() {
+        if let Key::Character(ref c) = key {
+            let s = c.as_str();
+            if let Ok(n) = s.parse::<usize>() {
+                if (1..=9).contains(&n) {
+                    return Some(Action::JumpToTab(n));
+                }
+            }
+        }
+    }
+
+    // ── Ctrl+Shift combos ───────────────────────────────────────────
+    if mods.control() && mods.shift() {
+        // Letter shortcuts
+        if let Key::Character(ref c) = key {
+            let ch = c.as_str().to_ascii_lowercase();
+            match ch.as_str() {
+                "t" => return Some(Action::NewTab),
+                "w" => return Some(Action::CloseTab),
+                "d" => return Some(Action::SplitRight),
+                "e" => return Some(Action::SplitDown),
+                "x" => return Some(Action::ClosePane),
+                "z" => return Some(Action::MaximizeToggle),
+                "p" => return Some(Action::CommandPalette),
+                "c" => return Some(Action::Copy),
+                "v" => return Some(Action::Paste),
+                "," => return Some(Action::OpenSettings),
+                _ => {}
+            }
+        }
+
+        // Arrow shortcuts for focus navigation
+        if let Key::Named(ref named) = key {
+            match named {
+                Named::ArrowUp => return Some(Action::FocusUp),
+                Named::ArrowDown => return Some(Action::FocusDown),
+                Named::ArrowLeft => return Some(Action::FocusLeft),
+                Named::ArrowRight => return Some(Action::FocusRight),
+                _ => {}
+            }
+        }
+    }
+
+    None
+}
+
+/// Return a list of all "palette-worthy" actions with their labels and hints.
+///
+/// Excludes per-digit JumpToTab variants — only includes one representative.
+pub fn all_palette_actions() -> Vec<Action> {
+    vec![
+        Action::NewTab,
+        Action::CloseTab,
+        Action::NextTab,
+        Action::PrevTab,
+        Action::RenameTab,
+        Action::SplitRight,
+        Action::SplitDown,
+        Action::ClosePane,
+        Action::MaximizeToggle,
+        Action::FocusUp,
+        Action::FocusDown,
+        Action::FocusLeft,
+        Action::FocusRight,
+        Action::CommandPalette,
+        Action::OpenSettings,
+        Action::Copy,
+        Action::Paste,
+    ]
+}

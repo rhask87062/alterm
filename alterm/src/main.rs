@@ -8,7 +8,7 @@ use iced::window;
 use iced::{Element, Event, Fill, Subscription, Task, Theme};
 
 use gpu_renderer::widget::TerminalView;
-use workspace::{sidebar_view, tab_bar_view, Block, SidebarAction, Tab, TabBarAction};
+use workspace::{match_shortcut, sidebar_view, tab_bar_view, Action, Block, SidebarAction, Tab, TabBarAction};
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -69,6 +69,16 @@ impl Altermative {
     /// Get a mutable reference to the active tab.
     fn active_tab_mut(&mut self) -> &mut Tab {
         &mut self.tabs[self.active_tab]
+    }
+
+    /// Move focus to the adjacent pane in the given direction.
+    fn focus_adjacent(&mut self, direction: pane_grid::Direction) {
+        let tab = self.active_tab_mut();
+        if let Some(focused) = tab.focus {
+            if let Some(adjacent) = tab.panes.adjacent(focused, direction) {
+                tab.focus = Some(adjacent);
+            }
+        }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -186,87 +196,80 @@ impl Altermative {
             }
 
             Message::KeyboardInput(key, modifiers) => {
-                // Tab management shortcuts: Ctrl+Shift+T/W, Ctrl+Shift+Tab
-                if modifiers.control() && modifiers.shift() {
-                    if let Key::Character(ref c) = key {
-                        let ch = c.as_str().to_ascii_lowercase();
-                        match ch.as_str() {
-                            "t" => return self.update(Message::NewTab),
-                            "w" => {
-                                let idx = self.active_tab;
-                                return self.update(Message::CloseTab(idx));
-                            }
-                            // Pane management shortcuts
-                            "d" => return self.update(Message::SplitHorizontal),
-                            "e" => return self.update(Message::SplitVertical),
-                            "x" => return self.update(Message::ClosePane),
-                            "z" => return self.update(Message::MaximizeToggle),
-                            "v" => {
-                                return iced::clipboard::read()
-                                    .map(Message::ClipboardContent);
-                            }
-                            "c" => {
-                                log::debug!("Ctrl+Shift+C — copy not yet implemented");
-                                return Task::none();
-                            }
-                            _ => {}
+                // Route through the keybinding registry first.
+                if let Some(action) = match_shortcut(&key, &modifiers) {
+                    match action {
+                        Action::NewTab => return self.update(Message::NewTab),
+                        Action::CloseTab => {
+                            let idx = self.active_tab;
+                            return self.update(Message::CloseTab(idx));
                         }
-                    }
-
-                    // Ctrl+Shift+Arrow — navigate to adjacent pane.
-                    if let Key::Named(ref named) = key {
-                        let direction = match named {
-                            Named::ArrowLeft => Some(pane_grid::Direction::Left),
-                            Named::ArrowRight => Some(pane_grid::Direction::Right),
-                            Named::ArrowUp => Some(pane_grid::Direction::Up),
-                            Named::ArrowDown => Some(pane_grid::Direction::Down),
-                            _ => None,
-                        };
-                        if let Some(dir) = direction {
-                            let tab = self.active_tab_mut();
-                            if let Some(focused) = tab.focus {
-                                if let Some(adjacent) = tab.panes.adjacent(focused, dir) {
-                                    tab.focus = Some(adjacent);
-                                }
+                        Action::NextTab => {
+                            if self.tabs.len() > 1 {
+                                let next = (self.active_tab + 1) % self.tabs.len();
+                                return self.update(Message::SelectTab(next));
                             }
                             return Task::none();
                         }
-                    }
-
-                    // Ctrl+Shift+Tab — previous tab
-                    if let Key::Named(Named::Tab) = key {
-                        if self.tabs.len() > 1 {
-                            let prev = if self.active_tab == 0 {
-                                self.tabs.len() - 1
-                            } else {
-                                self.active_tab - 1
-                            };
-                            return self.update(Message::SelectTab(prev));
-                        }
-                        return Task::none();
-                    }
-                }
-
-                // Ctrl+Tab — next tab (without Shift)
-                if modifiers.control() && !modifiers.shift() {
-                    if let Key::Named(Named::Tab) = key {
-                        if self.tabs.len() > 1 {
-                            let next = (self.active_tab + 1) % self.tabs.len();
-                            return self.update(Message::SelectTab(next));
-                        }
-                        return Task::none();
-                    }
-
-                    // Ctrl+1-9 — jump to tab by number
-                    if let Key::Character(ref c) = key {
-                        if let Ok(n) = c.as_str().parse::<usize>() {
-                            if n >= 1 && n <= 9 {
-                                let idx = n - 1;
-                                if idx < self.tabs.len() {
-                                    return self.update(Message::SelectTab(idx));
-                                }
+                        Action::PrevTab => {
+                            if self.tabs.len() > 1 {
+                                let prev = if self.active_tab == 0 {
+                                    self.tabs.len() - 1
+                                } else {
+                                    self.active_tab - 1
+                                };
+                                return self.update(Message::SelectTab(prev));
                             }
                             return Task::none();
+                        }
+                        Action::JumpToTab(n) => {
+                            let idx = n - 1;
+                            if idx < self.tabs.len() {
+                                return self.update(Message::SelectTab(idx));
+                            }
+                            return Task::none();
+                        }
+                        Action::RenameTab => {
+                            // TODO: implement rename UI
+                            log::debug!("RenameTab — not yet implemented");
+                            return Task::none();
+                        }
+                        Action::SplitRight => return self.update(Message::SplitHorizontal),
+                        Action::SplitDown => return self.update(Message::SplitVertical),
+                        Action::ClosePane => return self.update(Message::ClosePane),
+                        Action::MaximizeToggle => return self.update(Message::MaximizeToggle),
+                        Action::FocusUp => {
+                            self.focus_adjacent(pane_grid::Direction::Up);
+                            return Task::none();
+                        }
+                        Action::FocusDown => {
+                            self.focus_adjacent(pane_grid::Direction::Down);
+                            return Task::none();
+                        }
+                        Action::FocusLeft => {
+                            self.focus_adjacent(pane_grid::Direction::Left);
+                            return Task::none();
+                        }
+                        Action::FocusRight => {
+                            self.focus_adjacent(pane_grid::Direction::Right);
+                            return Task::none();
+                        }
+                        Action::CommandPalette => {
+                            // TODO: implement command palette (Task 6)
+                            log::debug!("CommandPalette — not yet implemented");
+                            return Task::none();
+                        }
+                        Action::OpenSettings => {
+                            log::debug!("OpenSettings — not yet implemented");
+                            return Task::none();
+                        }
+                        Action::Copy => {
+                            log::debug!("Copy — not yet implemented");
+                            return Task::none();
+                        }
+                        Action::Paste => {
+                            return iced::clipboard::read()
+                                .map(Message::ClipboardContent);
                         }
                     }
                 }
