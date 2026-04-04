@@ -10,7 +10,7 @@ use iced::{Background, Border, Color, Element, Event, Fill, Length, Subscription
 use gpu_renderer::widget::TerminalView;
 use workspace::{
     match_shortcut, sidebar_view, tab_bar_view, Action, Block, CommandPalette, SidebarAction, Tab,
-    TabBarAction, CELL_HEIGHT, CELL_WIDTH,
+    TabBarAction, CELL_HEIGHT,
 };
 
 fn main() -> iced::Result {
@@ -26,12 +26,14 @@ fn main() -> iced::Result {
 
 /// Estimated height consumed by the tab bar (padding + button + padding).
 const TAB_BAR_HEIGHT: f32 = 33.0;
-/// Estimated height consumed by each pane's title bar.
+/// Estimated height consumed by each pane's title bar (padding 4 + text 12 + padding 4 + border).
 const PANE_TITLE_BAR_HEIGHT: f32 = 28.0;
 /// Width of the sidebar.
 const SIDEBAR_WIDTH: f32 = 44.0;
-/// Extra pixels consumed by borders and pane_grid spacing.
-const CHROME_PADDING: f32 = 6.0;
+/// Spacing between panes — must match `.spacing(2)` on the PaneGrid widget.
+const PANE_GRID_SPACING: f32 = 2.0;
+/// Minimum pane size — must match `.min_size(120)` on the PaneGrid widget.
+const PANE_GRID_MIN_SIZE: f32 = 120.0;
 
 struct Altermative {
     tabs: Vec<Tab>,
@@ -79,8 +81,14 @@ impl Altermative {
     fn new() -> (Self, Task<Message>) {
         let window_width = 900.0_f32;
         let window_height = 600.0_f32;
-        let (pane_w, pane_h) = Self::pane_content_area(window_width, window_height, 1, 1);
-        let first_tab = Tab::new_with_size(pane_w, pane_h)
+
+        // Initial size estimate for a single-pane tab at launch.
+        // resize_all_panes() will correct this once the window opens.
+        let grid_width = (window_width - SIDEBAR_WIDTH).max(80.0);
+        let grid_height = (window_height - TAB_BAR_HEIGHT).max(40.0);
+        let content_height = (grid_height - PANE_TITLE_BAR_HEIGHT).max(CELL_HEIGHT * 2.0);
+
+        let first_tab = Tab::new_with_size(grid_width, content_height)
             .expect("Failed to create initial tab");
 
         let app = Altermative {
@@ -114,47 +122,36 @@ impl Altermative {
         }
     }
 
-    /// Calculate the pixel area available for a single pane's terminal content,
-    /// given the window size and how many pane columns/rows exist.
+    /// Resize every terminal in the active tab to its exact pixel dimensions.
     ///
-    /// This is an estimate — the pane_grid distributes space proportionally but
-    /// we assume equal distribution for simplicity.
-    fn pane_content_area(
-        window_width: f32,
-        window_height: f32,
-        pane_cols: u16,
-        pane_rows: u16,
-    ) -> (f32, f32) {
-        let usable_w = (window_width - SIDEBAR_WIDTH - CHROME_PADDING).max(80.0);
-        let usable_h = (window_height - TAB_BAR_HEIGHT - CHROME_PADDING).max(40.0);
-        let per_pane_w = usable_w / pane_cols.max(1) as f32;
-        let per_pane_h = usable_h / pane_rows.max(1) as f32 - PANE_TITLE_BAR_HEIGHT;
-        (per_pane_w.max(CELL_WIDTH * 10.0), per_pane_h.max(CELL_HEIGHT * 2.0))
-    }
-
-    /// Resize every terminal in the active tab to match the current window size.
-    ///
-    /// For simplicity we give every pane the same size estimate (equal division
-    /// of the available area).  This is correct for a single-pane tab and a
-    /// reasonable approximation for splits; more accurate per-pane sizing would
-    /// require querying the pane_grid's layout, which isn't exposed.
+    /// Uses `pane_grid::Node::pane_regions()` to get the precise rectangle for
+    /// each pane, then derives terminal rows/cols from those pixel dimensions.
+    /// This replaces the old sqrt(n) heuristic and gives each pane the correct
+    /// size regardless of layout (e.g. full-width bottom pane vs narrow top panes).
     fn resize_all_panes(&mut self) {
-        let n = self.active_tab().panes.len() as u16;
-        // Heuristic: estimate grid arrangement as roughly sqrt(n) x sqrt(n).
-        let pane_cols = (n as f32).sqrt().ceil() as u16;
-        let pane_rows = ((n as f32) / pane_cols as f32).ceil() as u16;
-        let (pw, ph) = Self::pane_content_area(
-            self.window_width,
-            self.window_height,
-            pane_cols,
-            pane_rows,
-        );
-        let (rows, cols) = Block::size_from_pixels(pw, ph);
+        use iced::Size;
+
+        // The pane_grid occupies the window minus the tab bar and sidebar.
+        let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
+        let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
+        let bounds = Size::new(grid_width, grid_height);
+
         let tab = self.active_tab_mut();
-        for (_pane, block) in tab.panes.iter_mut() {
-            let (cur_rows, cur_cols) = block.dimensions();
-            if cur_rows != rows || cur_cols != cols {
-                block.resize(rows, cols);
+        let regions = tab.panes.layout().pane_regions(
+            PANE_GRID_SPACING,
+            PANE_GRID_MIN_SIZE,
+            bounds,
+        );
+
+        for (pane, rect) in &regions {
+            let content_width = rect.width;
+            let content_height = (rect.height - PANE_TITLE_BAR_HEIGHT).max(CELL_HEIGHT * 2.0);
+            let (rows, cols) = Block::size_from_pixels(content_width, content_height);
+            if let Some(block) = tab.panes.get_mut(*pane) {
+                let (cur_rows, cur_cols) = block.dimensions();
+                if cur_rows != rows || cur_cols != cols {
+                    block.resize(rows, cols);
+                }
             }
         }
     }
