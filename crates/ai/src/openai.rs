@@ -1,6 +1,16 @@
-use crate::{ChatMessage, Provider, ProviderConfig, StreamEvent};
+use crate::{ChatMessage, Provider, ProviderConfig, Role, StreamEvent};
+use eventsource_stream::Eventsource;
+use futures_util::StreamExt;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
+/// OpenAI-compatible provider.
+///
+/// Works with any API that follows the OpenAI chat completions format:
+/// - OpenAI (`https://api.openai.com/v1`)
+/// - xAI Grok (`https://api.x.ai/v1`)
+/// - LM Studio (`http://localhost:1234/v1`)
+/// - Ollama (`http://localhost:11434/v1`)
 pub struct OpenAIProvider {
     client: reqwest::Client,
 }
@@ -13,14 +23,118 @@ impl OpenAIProvider {
     }
 }
 
+impl Default for OpenAIProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Provider for OpenAIProvider {
     async fn stream_chat(
         &self,
-        _config: &ProviderConfig,
-        _messages: &[ChatMessage],
-        _tx: mpsc::Sender<StreamEvent>,
+        config: &ProviderConfig,
+        messages: &[ChatMessage],
+        tx: mpsc::Sender<StreamEvent>,
     ) {
-        todo!()
+        let url = format!("{}/chat/completions", config.base_url);
+
+        // Build messages array — prepend system prompt if present
+        let mut msgs: Vec<Value> = Vec::new();
+        if let Some(ref system) = config.system_prompt {
+            msgs.push(json!({
+                "role": "system",
+                "content": system
+            }));
+        }
+        for msg in messages {
+            let role = match msg.role {
+                Role::System => "system",
+                Role::User => "user",
+                Role::Assistant => "assistant",
+            };
+            msgs.push(json!({
+                "role": role,
+                "content": &msg.content
+            }));
+        }
+
+        let body = json!({
+            "model": &config.model,
+            "messages": msgs,
+            "max_tokens": config.max_tokens,
+            "temperature": config.temperature,
+            "stream": true
+        });
+
+        let mut request = self.client.post(&url).json(&body);
+
+        if let Some(ref key) = config.api_key {
+            request = request.header("Authorization", format!("Bearer {key}"));
+        }
+
+        let response = match request.send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    let _ = tx
+                        .send(StreamEvent::Error(format!(
+                            "OpenAI API error {status}: {body}"
+                        )))
+                        .await;
+                    return;
+                }
+                resp
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(StreamEvent::Error(format!("Request failed: {e}")))
+                    .await;
+                return;
+            }
+        };
+
+        let mut stream = response.bytes_stream().eventsource();
+
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(ev) => {
+                    let data = ev.data.trim().to_string();
+
+                    // OpenAI signals end-of-stream with [DONE]
+                    if data == "[DONE]" {
+                        break;
+                    }
+
+                    // Parse the SSE data as JSON
+                    if let Ok(parsed) = serde_json::from_str::<Value>(&data) {
+                        if let Some(content) = parsed
+                            .get("choices")
+                            .and_then(|c| c.get(0))
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("content"))
+                            .and_then(|v| v.as_str())
+                        {
+                            if !content.is_empty() {
+                                if tx.send(StreamEvent::Token(content.to_string())).await.is_err()
+                                {
+                                    // Receiver dropped
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(StreamEvent::Error(format!("SSE parse error: {e}")))
+                        .await;
+                    break;
+                }
+            }
+        }
+
+        let _ = tx.send(StreamEvent::Done).await;
     }
 
     fn name(&self) -> &'static str {
