@@ -101,6 +101,23 @@ pub struct AIConfig {
     pub providers: AIProviders,
 }
 
+impl AIConfig {
+    /// Get the model name for a given provider, falling back to a sensible default.
+    pub fn provider_model(&self, provider: &str) -> String {
+        self.providers.get(provider)
+            .map(|e| e.model.clone())
+            .unwrap_or_else(|| match provider {
+                "openai" => "gpt-4o".to_string(),
+                "anthropic" => "claude-sonnet-4-20250514".to_string(),
+                "gemini" => "gemini-2.0-flash".to_string(),
+                "grok" => "grok-3".to_string(),
+                "lmstudio" => "default".to_string(),
+                "ollama" => "llama3.2".to_string(),
+                _ => "default".to_string(),
+            })
+    }
+}
+
 impl Default for AIConfig {
     fn default() -> Self {
         Self {
@@ -126,6 +143,21 @@ pub struct AIProviders {
     pub grok: Option<ProviderEntry>,
     pub lmstudio: Option<ProviderEntry>,
     pub ollama: Option<ProviderEntry>,
+}
+
+impl AIProviders {
+    /// Get the provider entry by name.
+    pub fn get(&self, name: &str) -> Option<&ProviderEntry> {
+        match name {
+            "openai" => self.openai.as_ref(),
+            "anthropic" => self.anthropic.as_ref(),
+            "gemini" => self.gemini.as_ref(),
+            "grok" => self.grok.as_ref(),
+            "lmstudio" => self.lmstudio.as_ref(),
+            "ollama" => self.ollama.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 impl Default for AIProviders {

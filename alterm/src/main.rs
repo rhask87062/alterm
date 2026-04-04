@@ -94,6 +94,8 @@ enum Message {
     AIStreamToken(pane_grid::Pane, String),
     AIStreamDone(pane_grid::Pane),
     AIStreamError(pane_grid::Pane, String),
+    AIProviderChanged(pane_grid::Pane, String),
+    AIModelChanged(pane_grid::Pane, String),
     ToggleAIChat,
     // Settings panel
     OpenSettings,
@@ -642,6 +644,20 @@ impl Altermative {
                     state.set_error(err);
                 }
             }
+            Message::AIProviderChanged(pane, provider) => {
+                let new_model = self.config.ai.provider_model(&provider);
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    state.provider_name = provider;
+                    state.model_name = new_model;
+                }
+            }
+            Message::AIModelChanged(pane, model) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    state.model_name = model;
+                }
+            }
 
             // -- Settings panel --
             Message::OpenSettings => {
@@ -684,9 +700,19 @@ impl Altermative {
                     if let Err(e) = state.save() {
                         log::error!("Failed to save settings: {e}");
                     } else {
-                        // Apply saved config back to the app.
                         self.config = state.config.clone();
                         log::info!("Settings saved and applied");
+                    }
+                }
+                // Update all existing AI chat blocks with the new provider/model
+                let new_provider = self.config.ai.default_provider.clone();
+                let new_model = self.config.ai.provider_model(&new_provider);
+                for tab in &mut self.tabs {
+                    for (_pane, block) in tab.panes.iter_mut() {
+                        if let Block::AIChat { state } = block {
+                            state.provider_name = new_provider.clone();
+                            state.model_name = new_model.clone();
+                        }
                     }
                 }
             }
@@ -1028,13 +1054,24 @@ fn ai_chat_view<'a>(
     state: &'a workspace::AIChatState,
     has_terminal_context: bool,
 ) -> Element<'a, Message> {
-    // Header: provider / model + context indicator
-    let provider_label = text(format!(
-        "Provider: {} / {}",
-        state.provider_name, state.model_name
-    ))
-    .size(11)
-    .color(Color::from_rgb(0.55, 0.60, 0.70));
+    // Header: provider/model dropdowns + context indicator
+    let providers: Vec<String> = vec![
+        "openai".into(), "anthropic".into(), "gemini".into(),
+        "grok".into(), "lmstudio".into(), "ollama".into(),
+    ];
+    let provider_picker = pick_list(
+        providers,
+        Some(state.provider_name.clone()),
+        move |selected| Message::AIProviderChanged(pane, selected),
+    )
+    .text_size(11)
+    .padding(Padding::from([2, 6]));
+
+    let model_input = text_input("model", &state.model_name)
+        .on_input(move |val| Message::AIModelChanged(pane, val))
+        .size(11)
+        .padding(Padding::from([2, 6]))
+        .width(Length::Fixed(180.0));
 
     let context_label = if has_terminal_context {
         text("Context: Terminal (focused)")
@@ -1046,8 +1083,8 @@ fn ai_chat_view<'a>(
             .color(Color::from_rgb(0.40, 0.40, 0.45))
     };
 
-    let header_row = row![provider_label, iced::widget::space().width(Fill), context_label]
-        .spacing(8)
+    let header_row = row![provider_picker, model_input, iced::widget::space().width(Fill), context_label]
+        .spacing(6)
         .align_y(iced::Alignment::Center);
 
     let header = container(header_row)
