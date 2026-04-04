@@ -1,13 +1,15 @@
 /// Block — the core abstraction for content living inside a pane.
 ///
-/// A `Block` wraps a unit of terminal state (and, in the future, AI chat,
-/// browser views, etc.) so that the workspace layer can manage multiple panes
-/// uniformly without knowing the details of each content type.
+/// A `Block` wraps a unit of terminal state or AI chat session so that the
+/// workspace layer can manage multiple panes uniformly without knowing the
+/// details of each content type.
 use tokio::sync::mpsc;
 
 use gpu_renderer::colors::AnsiPalette;
 use gpu_renderer::grid::RenderGrid;
 use terminal::{PtyHandle, TerminalEvent, TerminalState};
+
+use crate::ai_chat::AIChatState;
 
 /// How many ticks before the cursor blink state toggles.
 const BLINK_TICKS: u32 = 30;
@@ -32,6 +34,9 @@ pub enum Block {
         dirty: bool,
         /// Cached render grid to avoid rebuilding when nothing changed.
         cached_grid: Option<RenderGrid>,
+    },
+    AIChat {
+        state: AIChatState,
     },
 }
 
@@ -60,9 +65,16 @@ impl Block {
         })
     }
 
+    /// Create a new AI chat block for the given provider and model.
+    pub fn new_ai_chat(provider: String, model: String) -> Self {
+        Block::AIChat {
+            state: AIChatState::new(provider, model),
+        }
+    }
+
     /// Drive the block forward one tick:
-    /// - drain all pending PTY output and feed it to the terminal,
-    /// - advance the cursor blink counter.
+    /// - Terminal: drain pending PTY output and advance cursor blink.
+    /// - AIChat: no-op (streaming is handled via messages).
     pub fn tick(&mut self) {
         match self {
             Block::Terminal {
@@ -100,13 +112,16 @@ impl Block {
                     *dirty = true;
                 }
             }
+            Block::AIChat { .. } => {
+                // Streaming is driven by external messages, not ticks.
+            }
         }
 
         // Rebuild the cached grid only when something changed.
         self.refresh_cache();
     }
 
-    /// Send raw input bytes to the PTY.
+    /// Send raw input bytes to the PTY (no-op for non-terminal blocks).
     pub fn write_input(&mut self, data: &[u8]) {
         match self {
             Block::Terminal { pty, .. } => {
@@ -114,10 +129,11 @@ impl Block {
                     log::warn!("Block::write_input failed: {e}");
                 }
             }
+            Block::AIChat { .. } => {}
         }
     }
 
-    /// Resize both the terminal grid and the PTY.
+    /// Resize both the terminal grid and the PTY (no-op for non-terminal blocks).
     pub fn resize(&mut self, rows: u16, cols: u16) {
         match self {
             Block::Terminal { state, pty, dirty, cached_grid, .. } => {
@@ -128,16 +144,19 @@ impl Block {
                 *dirty = true;
                 *cached_grid = None;
             }
+            Block::AIChat { .. } => {}
         }
         self.refresh_cache();
     }
 
     /// Return the current terminal dimensions (rows, cols).
+    /// For non-terminal blocks, returns (0, 0).
     pub fn dimensions(&self) -> (u16, u16) {
         match self {
             Block::Terminal { state, .. } => {
                 (state.rows() as u16, state.cols() as u16)
             }
+            Block::AIChat { .. } => (0, 0),
         }
     }
 
@@ -145,12 +164,26 @@ impl Block {
     pub fn title(&self) -> String {
         match self {
             Block::Terminal { .. } => "Terminal".to_string(),
+            Block::AIChat { state } => {
+                format!("AI Chat ({})", state.provider_name)
+            }
         }
+    }
+
+    /// Whether this block is a terminal.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Block::Terminal { .. })
+    }
+
+    /// Whether this block is an AI chat.
+    pub fn is_ai_chat(&self) -> bool {
+        matches!(self, Block::AIChat { .. })
     }
 
     /// Build a render-ready grid from the block's current terminal state.
     ///
     /// Returns a cached grid when nothing has changed since the last render.
+    /// For non-terminal blocks, returns a minimal empty grid.
     pub fn render_grid(&self) -> RenderGrid {
         match self {
             Block::Terminal { cached_grid, state, palette, cursor_visible, .. } => {
@@ -159,6 +192,16 @@ impl Block {
                 cached_grid.clone().unwrap_or_else(|| {
                     RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
                 })
+            }
+            Block::AIChat { .. } => {
+                // AI chat doesn't use the terminal canvas — return empty grid.
+                RenderGrid {
+                    cells: Vec::new(),
+                    rows: 0,
+                    cols: 0,
+                    display_offset: 0,
+                    total_history: 0,
+                }
             }
         }
     }
@@ -177,6 +220,7 @@ impl Block {
                     *dirty = false;
                 }
             }
+            Block::AIChat { .. } => {}
         }
     }
 
@@ -187,19 +231,59 @@ impl Block {
                 *cursor_visible = true;
                 *blink_count = 0;
             }
+            Block::AIChat { .. } => {}
         }
     }
 
     /// Scroll the terminal viewport by the given number of lines.
     ///
     /// Positive = scroll up (toward history), negative = scroll down.
+    /// No-op for non-terminal blocks.
     pub fn scroll(&mut self, lines: i32) {
         match self {
             Block::Terminal { state, dirty, .. } => {
                 state.scroll(lines);
                 *dirty = true;
             }
+            Block::AIChat { .. } => {}
         }
         self.refresh_cache();
+    }
+
+    /// Read the last N lines of visible text from the terminal.
+    ///
+    /// Returns `None` for non-terminal blocks. The returned string contains
+    /// one line per element, with trailing whitespace trimmed.
+    pub fn recent_output(&self, lines: usize) -> Option<String> {
+        match self {
+            Block::Terminal { state, .. } => {
+                let rows = state.rows();
+                let cols = state.cols();
+                let start = if rows > lines { rows - lines } else { 0 };
+
+                let mut output = Vec::new();
+                for row in start..rows {
+                    let mut line = String::with_capacity(cols);
+                    for col in 0..cols {
+                        if let Some(cell) = state.cell(row, col) {
+                            line.push(cell.c);
+                        }
+                    }
+                    output.push(line.trim_end().to_string());
+                }
+
+                // Trim trailing empty lines.
+                while output.last().map_or(false, |l| l.is_empty()) {
+                    output.pop();
+                }
+
+                if output.is_empty() {
+                    None
+                } else {
+                    Some(output.join("\n"))
+                }
+            }
+            Block::AIChat { .. } => None,
+        }
     }
 }

@@ -3,15 +3,24 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
-use iced::widget::{button, column, container, opaque, pane_grid, row, stack, text, text_input, Column};
+use iced::widget::{
+    button, column, container, opaque, pane_grid, row, scrollable, stack, text, text_input,
+    Column,
+};
 use iced::window;
-use iced::{Background, Border, Color, Element, Event, Fill, Length, Subscription, Task, Theme};
+use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Subscription, Task, Theme};
 
 use gpu_renderer::widget::TerminalView;
 use workspace::{
     match_shortcut, sidebar_view, tab_bar_view, Action, Block, CommandPalette, SidebarAction, Tab,
     TabBarAction, CELL_HEIGHT,
 };
+
+use ai::{
+    anthropic::AnthropicProvider, gemini::GeminiProvider, openai::OpenAIProvider, Provider,
+    ProviderConfig, StreamEvent,
+};
+use altermative_config::AppConfig;
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -44,6 +53,8 @@ struct Altermative {
     /// Current window dimensions in logical pixels.
     window_width: f32,
     window_height: f32,
+    /// Application configuration (loaded from disk at startup).
+    config: AppConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -77,12 +88,25 @@ enum Message {
     PaletteSubmit,
     // Window resize
     WindowResized(f32, f32),
+    // AI chat messages
+    AIInputChanged(pane_grid::Pane, String),
+    AISendMessage(pane_grid::Pane),
+    AIStreamToken(pane_grid::Pane, String),
+    AIStreamDone(pane_grid::Pane),
+    AIStreamError(pane_grid::Pane, String),
+    ToggleAIChat,
 }
 
 impl Altermative {
     fn new() -> (Self, Task<Message>) {
         let window_width = 900.0_f32;
         let window_height = 600.0_f32;
+
+        // Load config from default path.
+        let config = AppConfig::load(&AppConfig::config_path()).unwrap_or_else(|e| {
+            log::warn!("Failed to load config: {e}, using defaults");
+            AppConfig::default()
+        });
 
         // Initial size estimate for a single-pane tab at launch.
         // resize_all_panes() will correct this once the window opens.
@@ -100,6 +124,7 @@ impl Altermative {
             scroll_accumulator: 0.0,
             window_width,
             window_height,
+            config,
         };
 
         (app, Task::none())
@@ -126,15 +151,9 @@ impl Altermative {
     }
 
     /// Resize every terminal in the active tab to its exact pixel dimensions.
-    ///
-    /// Uses `pane_grid::Node::pane_regions()` to get the precise rectangle for
-    /// each pane, then derives terminal rows/cols from those pixel dimensions.
-    /// This replaces the old sqrt(n) heuristic and gives each pane the correct
-    /// size regardless of layout (e.g. full-width bottom pane vs narrow top panes).
     fn resize_all_panes(&mut self) {
         use iced::Size;
 
-        // The pane_grid occupies the window minus the tab bar and sidebar.
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
         let bounds = Size::new(grid_width, grid_height);
@@ -160,7 +179,6 @@ impl Altermative {
     }
 
     /// Scroll the focused pane by the given number of lines.
-    /// Positive = up (toward history), negative = down (toward recent).
     fn scroll_focused(&mut self, lines: i32) {
         let tab = self.active_tab_mut();
         if let Some(focused) = tab.focus {
@@ -168,6 +186,53 @@ impl Altermative {
                 block.scroll(lines);
             }
         }
+    }
+
+    /// Get the recent terminal output from any terminal pane in the active tab.
+    /// Prefers the focused pane if it's a terminal; otherwise finds the first terminal.
+    fn terminal_context(&self, lines: usize) -> Option<String> {
+        let tab = self.active_tab();
+
+        // Try the focused pane first.
+        if let Some(focused) = tab.focus {
+            if let Some(block) = tab.panes.get(focused) {
+                if let Some(output) = block.recent_output(lines) {
+                    return Some(output);
+                }
+            }
+        }
+
+        // Fall back to any terminal pane in the tab.
+        for (_pane, block) in tab.panes.iter() {
+            if let Some(output) = block.recent_output(lines) {
+                return Some(output);
+            }
+        }
+
+        None
+    }
+
+    /// Build a `ProviderConfig` from the app config for the given provider name.
+    fn provider_config(&self, provider_name: &str) -> Option<ProviderConfig> {
+        let ai_cfg = &self.config.ai;
+        let entry = match provider_name {
+            "openai" => ai_cfg.providers.openai.as_ref(),
+            "anthropic" => ai_cfg.providers.anthropic.as_ref(),
+            "gemini" => ai_cfg.providers.gemini.as_ref(),
+            "grok" => ai_cfg.providers.grok.as_ref(),
+            "lmstudio" => ai_cfg.providers.lmstudio.as_ref(),
+            "ollama" => ai_cfg.providers.ollama.as_ref(),
+            _ => None,
+        }?;
+
+        Some(ProviderConfig {
+            base_url: entry.resolved_base_url(provider_name),
+            api_key: entry.api_key.clone(),
+            model: entry.model.clone(),
+            max_tokens: ai_cfg.max_tokens,
+            temperature: ai_cfg.temperature,
+            system_prompt: Some(ai_cfg.system_prompt.clone()),
+        })
     }
 
     /// Dispatch a keybinding [`Action`] into the appropriate [`Message`].
@@ -238,6 +303,7 @@ impl Altermative {
                 log::debug!("OpenSettings — not yet implemented");
                 Task::none()
             }
+            Action::ToggleAIChat => self.update(Message::ToggleAIChat),
             Action::Copy => {
                 log::debug!("Copy — not yet implemented");
                 Task::none()
@@ -254,7 +320,6 @@ impl Altermative {
                 Task::none()
             }
             Action::ScrollPageUp => {
-                // Scroll by roughly half a screen
                 let rows = self.active_tab().panes.iter().next()
                     .map(|(_, b)| b.dimensions().0 as i32 / 2)
                     .unwrap_or(12);
@@ -450,10 +515,127 @@ impl Altermative {
                 SidebarAction::NewTerminal => {
                     return self.update(Message::SidebarNewTerminal);
                 }
+                SidebarAction::NewAiChat => {
+                    return self.update(Message::ToggleAIChat);
+                }
             },
             Message::SidebarNewTerminal => {
                 // Split the focused pane with a new terminal (right).
                 return self.update(Message::SplitHorizontal);
+            }
+
+            // -- AI Chat --
+            Message::ToggleAIChat => {
+                let provider_name = self.config.ai.default_provider.clone();
+
+                // Find the model for this provider.
+                let model_name = match provider_name.as_str() {
+                    "openai" => self.config.ai.providers.openai.as_ref()
+                        .map(|e| e.model.clone()).unwrap_or_else(|| "gpt-4o".to_string()),
+                    "anthropic" => self.config.ai.providers.anthropic.as_ref()
+                        .map(|e| e.model.clone()).unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
+                    "gemini" => self.config.ai.providers.gemini.as_ref()
+                        .map(|e| e.model.clone()).unwrap_or_else(|| "gemini-2.0-flash".to_string()),
+                    "grok" => self.config.ai.providers.grok.as_ref()
+                        .map(|e| e.model.clone()).unwrap_or_else(|| "grok-2".to_string()),
+                    "lmstudio" => self.config.ai.providers.lmstudio.as_ref()
+                        .map(|e| e.model.clone()).unwrap_or_else(|| "local-model".to_string()),
+                    "ollama" => self.config.ai.providers.ollama.as_ref()
+                        .map(|e| e.model.clone()).unwrap_or_else(|| "llama3.2".to_string()),
+                    _ => "unknown".to_string(),
+                };
+
+                let block = Block::new_ai_chat(provider_name, model_name);
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if let Some((new_pane, _split)) =
+                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
+                    {
+                        tab.focus = Some(new_pane);
+                    }
+                }
+                self.resize_all_panes();
+            }
+
+            Message::AIInputChanged(pane, value) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    state.input = value;
+                }
+            }
+            Message::AISendMessage(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    let txt = state.input.trim().to_string();
+                    if txt.is_empty() {
+                        return Task::none();
+                    }
+                    state.input.clear();
+                    state.add_user_message(txt);
+                    state.start_streaming();
+                } else {
+                    return Task::none();
+                }
+
+                // Check if provider is configured.
+                let provider_name = if let Some(Block::AIChat { state }) = self.active_tab().panes.get(pane) {
+                    state.provider_name.clone()
+                } else {
+                    return Task::none();
+                };
+
+                let provider_cfg = match self.provider_config(&provider_name) {
+                    Some(c) => c,
+                    None => {
+                        return Task::done(Message::AIStreamError(
+                            pane,
+                            format!(
+                                "No API key configured for '{provider_name}'. \
+                                 Add one in Settings (Ctrl+Shift+,) or edit \
+                                 ~/.config/altermative/config.toml"
+                            ),
+                        ));
+                    }
+                };
+
+                // Build messages for the API.
+                let api_messages = if let Some(Block::AIChat { state }) = self.active_tab().panes.get(pane) {
+                    state.chat_messages_for_api()
+                } else {
+                    return Task::none();
+                };
+
+                // Inject terminal context into the system prompt.
+                let mut config = provider_cfg;
+                if let Some(context) = self.terminal_context(50) {
+                    let system = config.system_prompt.unwrap_or_default();
+                    config.system_prompt = Some(format!(
+                        "{system}\n\nHere is the user's recent terminal output:\n```\n{context}\n```"
+                    ));
+                }
+
+                // Spawn a streaming task.
+                let pname = provider_name.clone();
+                return Task::stream(async_stream(pane, pname, config, api_messages));
+            }
+
+            Message::AIStreamToken(pane, token) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    state.append_token(token);
+                }
+            }
+            Message::AIStreamDone(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    state.finish_streaming();
+                }
+            }
+            Message::AIStreamError(pane, err) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    state.set_error(err);
+                }
             }
 
             // Command palette messages
@@ -500,6 +682,19 @@ impl Altermative {
                 // Route through the keybinding registry.
                 if let Some(action) = match_shortcut(&key, &modifiers) {
                     return self.dispatch_action(action);
+                }
+
+                // If the focused pane is an AI chat, don't forward keyboard input
+                // to a PTY. The text_input widget handles it.
+                {
+                    let tab = self.active_tab();
+                    if let Some(focused) = tab.focus {
+                        if let Some(block) = tab.panes.get(focused) {
+                            if block.is_ai_chat() {
+                                return Task::none();
+                            }
+                        }
+                    }
                 }
 
                 // Reset cursor blink on keypress.
@@ -564,10 +759,17 @@ impl Altermative {
             pane_grid::PaneGrid::new(&tab.panes, |pane, block, _maximized| {
                 let is_focused = focus == Some(pane);
 
-                // Build the terminal canvas.
-                let grid = block.render_grid();
-                let terminal_view = TerminalView::new(grid);
-                let content: Element<'_, Message> = terminal_view.view();
+                // Build content based on block type.
+                let content: Element<'_, Message> = match block {
+                    Block::Terminal { .. } => {
+                        let grid = block.render_grid();
+                        let terminal_view = TerminalView::new(grid);
+                        terminal_view.view()
+                    }
+                    Block::AIChat { state } => {
+                        ai_chat_view(pane, state)
+                    }
+                };
 
                 // Title bar with control buttons.
                 let title = text(block.title()).size(12);
@@ -709,7 +911,7 @@ impl Altermative {
         container(
             container(palette_styled)
                 .center_x(Fill)
-                .padding(iced::Padding { top: 60.0, right: 0.0, bottom: 0.0, left: 0.0 }),
+                .padding(Padding { top: 60.0, right: 0.0, bottom: 0.0, left: 0.0 }),
         )
         .width(Fill)
         .height(Fill)
@@ -757,6 +959,259 @@ impl Altermative {
 
         Subscription::batch([tick, events])
     }
+}
+
+// ---------------------------------------------------------------------------
+// AI Chat view
+// ---------------------------------------------------------------------------
+
+/// Build the AI chat view for a pane.
+fn ai_chat_view<'a>(
+    pane: pane_grid::Pane,
+    state: &'a workspace::AIChatState,
+) -> Element<'a, Message> {
+    // Header: provider / model
+    let header_text = text(format!(
+        "Provider: {} / {}",
+        state.provider_name, state.model_name
+    ))
+    .size(11)
+    .color(Color::from_rgb(0.55, 0.60, 0.70));
+
+    let header = container(header_text)
+        .width(Fill)
+        .padding(Padding::from([6, 10]))
+        .style(|_theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
+            border: Border {
+                color: Color::from_rgb(0.15, 0.15, 0.20),
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+    // Chat messages
+    let mut message_elements: Vec<Element<'a, Message>> = Vec::new();
+
+    if state.messages.is_empty() && !state.streaming {
+        // Empty state — show a helpful hint.
+        let hint = text("Ask a question about your terminal output, get help with commands, \
+                         or chat about anything. The AI can see your recent terminal output for context.")
+            .size(12)
+            .color(Color::from_rgb(0.40, 0.40, 0.45));
+        message_elements.push(
+            container(hint)
+                .width(Fill)
+                .padding(Padding::from([20, 12]))
+                .into(),
+        );
+    }
+
+    for msg in &state.messages {
+        let (label, label_color, content_color, bg) = match msg.role.as_str() {
+            "user" => (
+                "You",
+                Color::from_rgb(0.40, 0.70, 1.0),
+                Color::from_rgb(0.85, 0.87, 0.90),
+                Color::from_rgb(0.10, 0.12, 0.16),
+            ),
+            "assistant" => (
+                "AI",
+                Color::from_rgb(0.40, 0.85, 0.55),
+                Color::from_rgb(0.82, 0.84, 0.88),
+                Color::from_rgb(0.08, 0.10, 0.12),
+            ),
+            "error" => (
+                "Error",
+                Color::from_rgb(0.95, 0.40, 0.35),
+                Color::from_rgb(0.90, 0.55, 0.50),
+                Color::from_rgb(0.15, 0.08, 0.08),
+            ),
+            _ => (
+                "System",
+                Color::from_rgb(0.60, 0.60, 0.65),
+                Color::from_rgb(0.70, 0.70, 0.75),
+                Color::from_rgb(0.10, 0.10, 0.12),
+            ),
+        };
+
+        let role_label = text(format!("{label}:"))
+            .size(12)
+            .color(label_color);
+        let content = text(&msg.content)
+            .size(13)
+            .color(content_color);
+
+        let msg_widget = column![role_label, content].spacing(2);
+
+        let msg_container: Element<'a, Message> = container(msg_widget)
+            .width(Fill)
+            .padding(Padding::from([8, 12]))
+            .style(move |_theme: &Theme| iced::widget::container::Style {
+                background: Some(Background::Color(bg)),
+                border: Border {
+                    color: Color::from_rgb(0.12, 0.12, 0.15),
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into();
+
+        message_elements.push(msg_container);
+    }
+
+    // Show in-progress streaming response.
+    if state.streaming && !state.current_response.is_empty() {
+        let role_label = text("AI:")
+            .size(12)
+            .color(Color::from_rgb(0.40, 0.85, 0.55));
+        let content = text(format!("{}\u{2588}", state.current_response))
+            .size(13)
+            .color(Color::from_rgb(0.82, 0.84, 0.88));
+
+        let msg_widget = column![role_label, content].spacing(2);
+
+        let msg_container: Element<'a, Message> = container(msg_widget)
+            .width(Fill)
+            .padding(Padding::from([8, 12]))
+            .style(|_theme: &Theme| iced::widget::container::Style {
+                background: Some(Background::Color(Color::from_rgb(0.08, 0.10, 0.12))),
+                ..Default::default()
+            })
+            .into();
+
+        message_elements.push(msg_container);
+    } else if state.streaming {
+        // Streaming but no tokens yet — show a waiting indicator.
+        let waiting = text("AI is thinking...")
+            .size(12)
+            .color(Color::from_rgb(0.50, 0.50, 0.55));
+        message_elements.push(
+            container(waiting)
+                .width(Fill)
+                .padding(Padding::from([8, 12]))
+                .into(),
+        );
+    }
+
+    let messages_column = Column::from_vec(message_elements).spacing(2);
+
+    let chat_scroll = scrollable(messages_column)
+        .width(Fill)
+        .height(Fill);
+
+    // Input area
+    let input_field = text_input("Type a message...", &state.input)
+        .on_input(move |val| Message::AIInputChanged(pane, val))
+        .on_submit(Message::AISendMessage(pane))
+        .size(13)
+        .padding(Padding::from([8, 10]));
+
+    let send_enabled = !state.input.trim().is_empty() && !state.streaming;
+
+    let mut send_btn = button(text("Send").size(12).center())
+        .padding(Padding::from([8, 14]))
+        .style(|_theme: &Theme, status: button::Status| {
+            let bg = match status {
+                button::Status::Hovered => Color::from_rgb(0.25, 0.55, 0.85),
+                button::Status::Pressed => Color::from_rgb(0.20, 0.45, 0.75),
+                _ => Color::from_rgb(0.22, 0.50, 0.80),
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: Color::WHITE,
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+
+    if send_enabled {
+        send_btn = send_btn.on_press(Message::AISendMessage(pane));
+    }
+
+    let input_row = row![input_field, send_btn]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
+
+    let input_container = container(input_row)
+        .width(Fill)
+        .padding(Padding::from([6, 8]))
+        .style(|_theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.09))),
+            border: Border {
+                color: Color::from_rgb(0.15, 0.15, 0.20),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+    // Assemble: header + scrollable messages + input
+    let layout = column![header, chat_scroll, input_container];
+
+    container(layout)
+        .width(Fill)
+        .height(Fill)
+        .style(|_theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+            ..Default::default()
+        })
+        .into()
+}
+
+// ---------------------------------------------------------------------------
+// AI streaming helper
+// ---------------------------------------------------------------------------
+
+/// Create a stream of Messages from an AI provider streaming response.
+fn async_stream(
+    pane: pane_grid::Pane,
+    provider_name: String,
+    config: ProviderConfig,
+    messages: Vec<ai::ChatMessage>,
+) -> impl futures_util::Stream<Item = Message> {
+    iced::stream::channel(64, move |mut sender: futures::channel::mpsc::Sender<Message>| async move {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+
+        // Spawn the provider call in a background task.
+        let cfg = config;
+        let msgs = messages;
+        tokio::spawn(async move {
+            match provider_name.as_str() {
+                "anthropic" => {
+                    let p = AnthropicProvider::new();
+                    p.stream_chat(&cfg, &msgs, tx).await;
+                }
+                "gemini" => {
+                    let p = GeminiProvider::new();
+                    p.stream_chat(&cfg, &msgs, tx).await;
+                }
+                _ => {
+                    // OpenAI-compatible: openai, grok, lmstudio, ollama
+                    let p = OpenAIProvider::new();
+                    p.stream_chat(&cfg, &msgs, tx).await;
+                }
+            }
+        });
+
+        // Forward events from the mpsc channel to the iced stream.
+        while let Some(event) = rx.recv().await {
+            let msg = match event {
+                StreamEvent::Token(t) => Message::AIStreamToken(pane, t),
+                StreamEvent::Done => Message::AIStreamDone(pane),
+                StreamEvent::Error(e) => Message::AIStreamError(pane, e),
+            };
+            if sender.try_send(msg).is_err() {
+                break;
+            }
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -82,7 +82,11 @@ dependencies = [
 name = "alterm"
 version = "0.1.0"
 dependencies = [
+ "ai",
+ "altermative-config",
  "env_logger",
+ "futures",
+ "futures-util",
  "gpu-renderer",
  "iced",
  "log",
@@ -5587,6 +5591,8 @@ dependencies = [
 name = "workspace"
 version = "0.1.0"
 dependencies = [
+ "ai",
+ "altermative-config",
  "gpu-renderer",
  "iced",
  "log",

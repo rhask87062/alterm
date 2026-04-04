@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 terminal = { workspace = true }
 gpu-renderer = { workspace = true }
+ai = { workspace = true }
+altermative-config = { workspace = true }
 iced = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
