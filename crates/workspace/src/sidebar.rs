@@ -10,8 +10,9 @@ use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 pub enum SidebarAction {
     /// Split the focused pane with a new terminal.
     NewTerminal,
+    /// Split the focused pane with a new AI chat.
+    NewAiChat,
     // Future actions (placeholders):
-    // NewAiChat,
     // NewWebView,
     // OpenSettings,
 }
@@ -34,13 +35,13 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         true,
     );
 
-    // AI button — disabled placeholder
-    let ai_btn = sidebar_button::<M>(
+    // AI button — active
+    let ai_btn = sidebar_button(
         "AI",
-        "AI chat (coming soon)",
-        None,
+        "AI chat (split)",
+        Some(map(SidebarAction::NewAiChat)),
         btn_size,
-        false,
+        true,
     );
 
     // Web button — disabled placeholder
