@@ -11,7 +11,7 @@ use gpu_renderer::colors::AnsiPalette;
 use gpu_renderer::grid::RenderGrid;
 use gpu_renderer::widget::TerminalView;
 use gpu_renderer::RendererMessage;
-use terminal::{PtyHandle, TerminalEvent, TerminalState};
+use terminal::{AlacrittyEvent, PtyHandle, TerminalEvent, TerminalState};
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -29,6 +29,8 @@ struct Altermative {
     pty: Option<PtyHandle>,
     pty_rx: Option<mpsc::Receiver<TerminalEvent>>,
     palette: AnsiPalette,
+    cursor_visible: bool,
+    blink_count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +61,8 @@ impl Altermative {
             pty,
             pty_rx,
             palette,
+            cursor_visible: true,
+            blink_count: 0,
         };
 
         (app, Task::none())
@@ -93,8 +97,32 @@ impl Altermative {
                         }
                     }
                 }
+
+                // Drain terminal events (title changes, bell, etc.).
+                for event in self.terminal.drain_events() {
+                    match event {
+                        AlacrittyEvent::Title(title) => {
+                            log::debug!("Terminal title changed: {title}");
+                        }
+                        AlacrittyEvent::Bell => {
+                            log::debug!("Terminal bell");
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Cursor blink: toggle every ~500ms (62 ticks at 8ms each).
+                self.blink_count += 1;
+                if self.blink_count >= 62 {
+                    self.blink_count = 0;
+                    self.cursor_visible = !self.cursor_visible;
+                }
             }
             Message::KeyboardInput(key, modifiers) => {
+                // Reset cursor blink on keypress so cursor stays visible while typing.
+                self.cursor_visible = true;
+                self.blink_count = 0;
+
                 // Ctrl+Shift+C: copy (TODO: selection text extraction)
                 // Ctrl+Shift+V: paste from clipboard
                 if modifiers.control() && modifiers.shift() {
@@ -171,7 +199,11 @@ impl Altermative {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let grid = RenderGrid::from_terminal(&self.terminal, &self.palette);
+        let grid = RenderGrid::from_terminal_with_cursor(
+            &self.terminal,
+            &self.palette,
+            self.cursor_visible,
+        );
         let terminal_view = TerminalView::new(grid);
         let element: Element<'static, RendererMessage> = terminal_view.view();
         element.map(Message::Renderer)

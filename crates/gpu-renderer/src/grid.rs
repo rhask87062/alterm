@@ -46,12 +46,28 @@ impl RenderGrid {
     /// Build a `RenderGrid` from the current visible state of `term`.
     ///
     /// Color names are resolved through `palette`.  The cursor position is
-    /// obtained from `term.cursor_point()`.
+    /// obtained from `term.cursor_point()`.  When `cursor_visible` is false,
+    /// the cursor cell will not be marked (for cursor blink support).
     pub fn from_terminal(term: &TerminalState, palette: &AnsiPalette) -> Self {
+        Self::from_terminal_with_cursor(term, palette, true)
+    }
+
+    /// Like [`from_terminal`](Self::from_terminal), but allows controlling
+    /// cursor visibility for blink support.
+    pub fn from_terminal_with_cursor(
+        term: &TerminalState,
+        palette: &AnsiPalette,
+        cursor_visible: bool,
+    ) -> Self {
         let rows = term.rows();
         let cols = term.cols();
 
-        let cursor: Point = term.cursor_point();
+        let cursor: Point = if cursor_visible {
+            term.cursor_point()
+        } else {
+            // Place cursor off-screen so no cell gets marked as cursor.
+            Point::new(Line(-1), Column(0))
+        };
 
         let mut cells: Vec<Vec<RenderCell>> = Vec::with_capacity(rows);
 

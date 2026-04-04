@@ -8,3 +8,6 @@ pub mod term;
 pub use event::TerminalEvent;
 pub use pty::PtyHandle;
 pub use term::TerminalState;
+
+/// Re-export alacritty_terminal events so consumers don't need a direct dependency.
+pub use alacritty_terminal::event::Event as AlacrittyEvent;
