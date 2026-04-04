@@ -3,15 +3,12 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
+use iced::widget::{button, container, pane_grid, text};
 use iced::window;
-use iced::{Element, Event, Subscription, Task, Theme};
-use tokio::sync::mpsc;
+use iced::{Element, Event, Fill, Subscription, Task, Theme};
 
-use gpu_renderer::colors::AnsiPalette;
-use gpu_renderer::grid::RenderGrid;
 use gpu_renderer::widget::TerminalView;
-use gpu_renderer::RendererMessage;
-use terminal::{AlacrittyEvent, PtyHandle, TerminalEvent, TerminalState};
+use workspace::Block;
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -25,44 +22,35 @@ fn main() -> iced::Result {
 }
 
 struct Altermative {
-    terminal: TerminalState,
-    pty: Option<PtyHandle>,
-    pty_rx: Option<mpsc::Receiver<TerminalEvent>>,
-    palette: AnsiPalette,
-    cursor_visible: bool,
-    blink_count: u32,
+    panes: pane_grid::State<Block>,
+    focus: Option<pane_grid::Pane>,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     Tick,
     KeyboardInput(Key, Modifiers),
-    WindowResized(iced::Size),
     MouseScroll(f32),
     ClipboardContent(Option<String>),
-    Renderer(RendererMessage),
+    PaneClicked(pane_grid::Pane),
+    PaneDragged(pane_grid::DragEvent),
+    PaneResized(pane_grid::ResizeEvent),
+    SplitHorizontal,
+    SplitVertical,
+    ClosePane,
+    MaximizeToggle,
 }
 
 impl Altermative {
     fn new() -> (Self, Task<Message>) {
-        let terminal = TerminalState::new(24, 80);
-        let palette = AnsiPalette::default();
+        let first_block = Block::new_terminal(24, 80)
+            .expect("Failed to spawn initial terminal");
 
-        let (pty, pty_rx) = match PtyHandle::spawn(24, 80) {
-            Ok((handle, rx)) => (Some(handle), Some(rx)),
-            Err(e) => {
-                log::error!("Failed to spawn PTY: {e}");
-                (None, None)
-            }
-        };
+        let (panes, first_pane) = pane_grid::State::new(first_block);
 
         let app = Altermative {
-            terminal,
-            pty,
-            pty_rx,
-            palette,
-            cursor_visible: true,
-            blink_count: 0,
+            panes,
+            focus: Some(first_pane),
         };
 
         (app, Task::none())
@@ -71,183 +59,296 @@ impl Altermative {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
-                // Drain all available PTY output.
-                if let Some(rx) = &mut self.pty_rx {
-                    loop {
-                        match rx.try_recv() {
-                            Ok(TerminalEvent::PtyOutput(data)) => {
-                                self.terminal.process_output(&data);
-                            }
-                            Ok(TerminalEvent::PtyExited(code)) => {
-                                log::info!("PTY exited with code {code}");
-                                self.pty_rx = None;
-                                break;
-                            }
-                            Ok(TerminalEvent::PtyError(e)) => {
-                                log::error!("PTY error: {e}");
-                                self.pty_rx = None;
-                                break;
-                            }
-                            Err(mpsc::error::TryRecvError::Empty) => break,
-                            Err(mpsc::error::TryRecvError::Disconnected) => {
-                                log::info!("PTY channel disconnected");
-                                self.pty_rx = None;
-                                break;
-                            }
+                // Tick all panes.
+                for (_pane, block) in self.panes.iter_mut() {
+                    block.tick();
+                }
+            }
+            Message::PaneClicked(pane) => {
+                self.focus = Some(pane);
+            }
+            Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
+                self.panes.drop(pane, target);
+            }
+            Message::PaneDragged(_) => {
+                // Picked / Canceled — nothing to do.
+            }
+            Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
+                self.panes.resize(split, ratio);
+            }
+            Message::SplitHorizontal => {
+                if let Some(focused) = self.focus {
+                    if let Ok(block) = Block::new_terminal(24, 80) {
+                        if let Some((new_pane, _split)) =
+                            self.panes.split(pane_grid::Axis::Vertical, focused, block)
+                        {
+                            self.focus = Some(new_pane);
                         }
                     }
                 }
-
-                // Drain terminal events (title changes, bell, etc.).
-                for event in self.terminal.drain_events() {
-                    match event {
-                        AlacrittyEvent::Title(title) => {
-                            log::debug!("Terminal title changed: {title}");
+            }
+            Message::SplitVertical => {
+                if let Some(focused) = self.focus {
+                    if let Ok(block) = Block::new_terminal(24, 80) {
+                        if let Some((new_pane, _split)) =
+                            self.panes.split(pane_grid::Axis::Horizontal, focused, block)
+                        {
+                            self.focus = Some(new_pane);
                         }
-                        AlacrittyEvent::Bell => {
-                            log::debug!("Terminal bell");
-                        }
-                        _ => {}
                     }
                 }
-
-                // Cursor blink: toggle every ~500ms (62 ticks at 8ms each).
-                self.blink_count += 1;
-                if self.blink_count >= 62 {
-                    self.blink_count = 0;
-                    self.cursor_visible = !self.cursor_visible;
+            }
+            Message::ClosePane => {
+                if let Some(focused) = self.focus {
+                    if self.panes.len() > 1 {
+                        if let Some((_closed_block, sibling)) = self.panes.close(focused) {
+                            self.focus = Some(sibling);
+                        }
+                    }
+                }
+            }
+            Message::MaximizeToggle => {
+                if let Some(focused) = self.focus {
+                    if self.panes.maximized().is_some() {
+                        self.panes.restore();
+                    } else {
+                        self.panes.maximize(focused);
+                    }
                 }
             }
             Message::KeyboardInput(key, modifiers) => {
-                // Reset cursor blink on keypress so cursor stays visible while typing.
-                self.cursor_visible = true;
-                self.blink_count = 0;
-
-                // Ctrl+Shift+C: copy (TODO: selection text extraction)
-                // Ctrl+Shift+V: paste from clipboard
+                // Pane management shortcuts: Ctrl+Shift+...
                 if modifiers.control() && modifiers.shift() {
                     if let Key::Character(ref c) = key {
                         let ch = c.as_str().to_ascii_lowercase();
-                        if ch == "v" {
-                            // Read clipboard and send contents to PTY.
-                            return iced::clipboard::read().map(Message::ClipboardContent);
+                        match ch.as_str() {
+                            "d" => return self.update(Message::SplitHorizontal),
+                            "e" => return self.update(Message::SplitVertical),
+                            "x" => return self.update(Message::ClosePane),
+                            "z" => return self.update(Message::MaximizeToggle),
+                            "v" => {
+                                return iced::clipboard::read()
+                                    .map(Message::ClipboardContent);
+                            }
+                            "c" => {
+                                log::debug!("Ctrl+Shift+C — copy not yet implemented");
+                                return Task::none();
+                            }
+                            _ => {}
                         }
-                        if ch == "c" {
-                            // TODO: Extract selected text from terminal selection.
-                            // The alacritty_terminal Selection API requires significant
-                            // wiring (mouse tracking, selection state management).
-                            // For now, log a note; copy will be implemented in a
-                            // future iteration when mouse selection is added.
-                            log::debug!("Ctrl+Shift+C pressed — copy not yet implemented (no selection)");
+                    }
+
+                    // Ctrl+Shift+Arrow — navigate to adjacent pane.
+                    if let Key::Named(ref named) = key {
+                        let direction = match named {
+                            Named::ArrowLeft => Some(pane_grid::Direction::Left),
+                            Named::ArrowRight => Some(pane_grid::Direction::Right),
+                            Named::ArrowUp => Some(pane_grid::Direction::Up),
+                            Named::ArrowDown => Some(pane_grid::Direction::Down),
+                            _ => None,
+                        };
+                        if let Some(dir) = direction {
+                            if let Some(focused) = self.focus {
+                                if let Some(adjacent) = self.panes.adjacent(focused, dir) {
+                                    self.focus = Some(adjacent);
+                                }
+                            }
                             return Task::none();
                         }
                     }
                 }
+
+                // Reset cursor blink on keypress.
+                if let Some(focused) = self.focus {
+                    if let Some(block) = self.panes.get_mut(focused) {
+                        block.reset_cursor_blink();
+                    }
+                }
+
+                // Forward to focused terminal.
                 if let Some(bytes) = key_to_bytes(&key, &modifiers) {
-                    if let Some(pty) = &mut self.pty {
-                        if let Err(e) = pty.write(&bytes) {
-                            log::error!("Failed to write to PTY: {e}");
+                    if let Some(focused) = self.focus {
+                        if let Some(block) = self.panes.get_mut(focused) {
+                            block.write_input(&bytes);
                         }
                     }
                 }
             }
             Message::ClipboardContent(content) => {
                 if let Some(text) = content {
-                    if let Some(pty) = &mut self.pty {
-                        // Use bracketed paste mode: wrap pasted text in
-                        // ESC[200~ ... ESC[201~ so the shell can distinguish
-                        // pasted text from typed input.
-                        let mut paste_bytes = Vec::new();
-                        paste_bytes.extend_from_slice(b"\x1b[200~");
-                        paste_bytes.extend_from_slice(text.as_bytes());
-                        paste_bytes.extend_from_slice(b"\x1b[201~");
-                        if let Err(e) = pty.write(&paste_bytes) {
-                            log::error!("Failed to paste to PTY: {e}");
+                    if let Some(focused) = self.focus {
+                        if let Some(block) = self.panes.get_mut(focused) {
+                            let mut paste_bytes = Vec::new();
+                            paste_bytes.extend_from_slice(b"\x1b[200~");
+                            paste_bytes.extend_from_slice(text.as_bytes());
+                            paste_bytes.extend_from_slice(b"\x1b[201~");
+                            block.write_input(&paste_bytes);
                         }
                     }
                 }
             }
             Message::MouseScroll(delta_y) => {
-                // Positive delta_y = scroll up (toward history), negative = scroll down.
-                // The alacritty Scroll::Delta convention: positive = scroll up (toward history).
+                // TODO: route scroll to the pane under the mouse cursor.
+                // For now, scroll the focused pane.
                 let lines = delta_y.round() as i32;
                 if lines != 0 {
-                    self.terminal.scroll(lines);
-                }
-            }
-            Message::WindowResized(size) => {
-                let cell_width: f32 = 14.0 * 0.6;   // 8.4
-                let cell_height: f32 = 14.0 * 1.4;   // 19.6
-                let new_cols = (size.width / cell_width).floor().max(1.0) as usize;
-                let new_rows = (size.height / cell_height).floor().max(1.0) as usize;
-
-                if new_rows != self.terminal.rows() || new_cols != self.terminal.cols() {
-                    self.terminal.resize(new_rows, new_cols);
-                    if let Some(pty) = &self.pty {
-                        if let Err(e) = pty.resize(new_rows as u16, new_cols as u16) {
-                            log::error!("PTY resize failed: {e}");
+                    if let Some(focused) = self.focus {
+                        if let Some(block) = self.panes.get_mut(focused) {
+                            block.scroll(lines);
                         }
                     }
-                    log::debug!("Resized terminal to {new_rows}x{new_cols}");
                 }
-            }
-            Message::Renderer(_msg) => {
-                // RendererMessage is currently empty; future mouse events will go here.
             }
         }
         Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let grid = RenderGrid::from_terminal_with_cursor(
-            &self.terminal,
-            &self.palette,
-            self.cursor_visible,
-        );
-        let terminal_view = TerminalView::new(grid);
-        let element: Element<'static, RendererMessage> = terminal_view.view();
-        element.map(Message::Renderer)
+        let focus = self.focus;
+        let total_panes = self.panes.len();
+
+        let pane_grid_widget = pane_grid::PaneGrid::new(&self.panes, |pane, block, _is_maximized| {
+            let is_focused = focus == Some(pane);
+
+            // Build the terminal canvas.
+            let grid = block.render_grid();
+            let terminal_view = TerminalView::new(grid);
+            let content: Element<'_, Message> = terminal_view.view();
+
+            // Title bar.
+            let title = text(block.title()).size(12);
+
+            let title_bar = if total_panes > 1 {
+                let close_btn: Element<'_, Message> = button(text("X").size(12))
+                    .on_press(Message::ClosePane)
+                    .padding(2)
+                    .into();
+
+                pane_grid::TitleBar::new(title)
+                    .controls(close_btn)
+                    .padding(4)
+                    .style(move |theme: &Theme| {
+                        title_bar_style(theme, is_focused)
+                    })
+            } else {
+                pane_grid::TitleBar::new(title)
+                    .padding(4)
+                    .style(move |theme: &Theme| {
+                        title_bar_style(theme, is_focused)
+                    })
+            };
+
+            pane_grid::Content::new(content)
+                .title_bar(title_bar)
+                .style(move |theme: &Theme| {
+                    pane_content_style(theme, is_focused)
+                })
+        })
+        .on_click(Message::PaneClicked)
+        .on_drag(Message::PaneDragged)
+        .on_resize(10, Message::PaneResized)
+        .spacing(2)
+        .width(Fill)
+        .height(Fill);
+
+        container(pane_grid_widget)
+            .width(Fill)
+            .height(Fill)
+            .into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
         let tick = iced::time::every(Duration::from_millis(8)).map(|_| Message::Tick);
 
-        let events = iced::event::listen_with(|event, status, _window: window::Id| {
-            match &event {
-                Event::Window(window::Event::Resized(size)) => {
-                    return Some(Message::WindowResized(*size));
-                }
-                Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
-                    let y = match delta {
-                        iced::mouse::ScrollDelta::Lines { y, .. } => *y,
-                        iced::mouse::ScrollDelta::Pixels { y, .. } => *y / 19.6, // convert pixels to lines
-                    };
-                    if y.abs() > 0.001 {
-                        // Positive y from iced = scroll up = toward history.
-                        // alacritty Scroll::Delta: positive = scroll up toward history.
-                        return Some(Message::MouseScroll(y * 3.0)); // 3 lines per scroll notch
+        let events =
+            iced::event::listen_with(|event, status, _window: window::Id| {
+                match &event {
+                    Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                        let y = match delta {
+                            iced::mouse::ScrollDelta::Lines { y, .. } => *y,
+                            iced::mouse::ScrollDelta::Pixels { y, .. } => *y / 19.6,
+                        };
+                        if y.abs() > 0.001 {
+                            return Some(Message::MouseScroll(y * 3.0));
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
-            }
 
-            if status == Status::Captured {
-                return None;
-            }
-            match event {
-                Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key,
-                    modifiers,
-                    text: _,
-                    ..
-                }) => Some(Message::KeyboardInput(key, modifiers)),
-                _ => None,
-            }
-        });
+                if status == Status::Captured {
+                    return None;
+                }
+                match event {
+                    Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                        key,
+                        modifiers,
+                        text: _,
+                        ..
+                    }) => Some(Message::KeyboardInput(key, modifiers)),
+                    _ => None,
+                }
+            });
 
         Subscription::batch([tick, events])
     }
 }
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
+
+fn title_bar_style(
+    _theme: &Theme,
+    is_focused: bool,
+) -> iced::widget::container::Style {
+    use iced::{Background, Border, Color};
+
+    let bg = if is_focused {
+        Color::from_rgb(0.15, 0.15, 0.20)
+    } else {
+        Color::from_rgb(0.10, 0.10, 0.12)
+    };
+
+    iced::widget::container::Style {
+        background: Some(Background::Color(bg)),
+        text_color: Some(Color::from_rgb(0.8, 0.8, 0.8)),
+        border: Border {
+            color: if is_focused {
+                Color::from_rgb(0.3, 0.5, 0.8)
+            } else {
+                Color::TRANSPARENT
+            },
+            width: if is_focused { 1.0 } else { 0.0 },
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn pane_content_style(
+    _theme: &Theme,
+    is_focused: bool,
+) -> iced::widget::container::Style {
+    use iced::{Background, Border, Color};
+
+    iced::widget::container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.05, 0.05, 0.05))),
+        border: Border {
+            color: if is_focused {
+                Color::from_rgb(0.3, 0.5, 0.8)
+            } else {
+                Color::from_rgb(0.15, 0.15, 0.15)
+            },
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Key mapping
+// ---------------------------------------------------------------------------
 
 /// Convert an iced keyboard key press into the bytes that should be sent to the PTY.
 fn key_to_bytes(key: &Key, modifiers: &Modifiers) -> Option<Vec<u8>> {

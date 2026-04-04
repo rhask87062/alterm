@@ -8,7 +8,6 @@ use iced::mouse;
 use iced::widget::Canvas;
 
 use crate::grid::RenderGrid;
-use crate::RendererMessage;
 
 // ---------------------------------------------------------------------------
 // TerminalView
@@ -42,12 +41,13 @@ impl TerminalView {
     ///
     /// Consumes `self` so that the grid data is moved into the canvas program
     /// and lives as long as the returned element.
-    pub fn view(self) -> Element<'static, RendererMessage> {
+    pub fn view<M: 'static>(self) -> Element<'static, M> {
         let program = TerminalCanvas {
             grid: self.grid,
             font_size: self.font_size,
             cell_width: self.cell_width,
             cell_height: self.cell_height,
+            _msg: std::marker::PhantomData,
         };
 
         Canvas::new(program)
@@ -62,14 +62,15 @@ impl TerminalView {
 // ---------------------------------------------------------------------------
 
 /// Internal canvas program that owns grid data and font metrics.
-struct TerminalCanvas {
+struct TerminalCanvas<M> {
     grid: RenderGrid,
     font_size: f32,
     cell_width: f32,
     cell_height: f32,
+    _msg: std::marker::PhantomData<M>,
 }
 
-impl canvas::Program<RendererMessage> for TerminalCanvas {
+impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
     type State = ();
 
     fn draw(

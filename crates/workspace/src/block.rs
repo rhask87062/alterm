@@ -6,6 +6,7 @@
 use tokio::sync::mpsc;
 
 use gpu_renderer::colors::AnsiPalette;
+use gpu_renderer::grid::RenderGrid;
 use terminal::{PtyHandle, TerminalEvent, TerminalState};
 
 /// How many ticks before the cursor blink state toggles.
@@ -101,6 +102,36 @@ impl Block {
     pub fn title(&self) -> String {
         match self {
             Block::Terminal { .. } => "Terminal".to_string(),
+        }
+    }
+
+    /// Build a render-ready grid from the block's current terminal state.
+    pub fn render_grid(&self) -> RenderGrid {
+        match self {
+            Block::Terminal { state, palette, cursor_visible, .. } => {
+                RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
+            }
+        }
+    }
+
+    /// Reset cursor blink so the cursor is immediately visible (e.g. on keypress).
+    pub fn reset_cursor_blink(&mut self) {
+        match self {
+            Block::Terminal { cursor_visible, blink_count, .. } => {
+                *cursor_visible = true;
+                *blink_count = 0;
+            }
+        }
+    }
+
+    /// Scroll the terminal viewport by the given number of lines.
+    ///
+    /// Positive = scroll up (toward history), negative = scroll down.
+    pub fn scroll(&mut self, lines: i32) {
+        match self {
+            Block::Terminal { state, .. } => {
+                state.scroll(lines);
+            }
         }
     }
 }
