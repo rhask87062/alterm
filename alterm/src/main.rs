@@ -43,6 +43,11 @@ enum Message {
     SplitVertical,
     ClosePane,
     MaximizeToggle,
+    // Per-pane title bar controls
+    SplitPaneRight(pane_grid::Pane),
+    SplitPaneDown(pane_grid::Pane),
+    ClosePaneId(pane_grid::Pane),
+    MaximizeTogglePane(pane_grid::Pane),
     // Tab management
     NewTab,
     CloseTab(usize),
@@ -234,6 +239,44 @@ impl Altermative {
                 }
             }
 
+            // Per-pane title bar controls (operate on a specific pane)
+            Message::SplitPaneRight(pane) => {
+                let tab = self.active_tab_mut();
+                if let Ok(block) = Block::new_terminal(24, 80) {
+                    if let Some((new_pane, _split)) =
+                        tab.panes.split(pane_grid::Axis::Vertical, pane, block)
+                    {
+                        tab.focus = Some(new_pane);
+                    }
+                }
+            }
+            Message::SplitPaneDown(pane) => {
+                let tab = self.active_tab_mut();
+                if let Ok(block) = Block::new_terminal(24, 80) {
+                    if let Some((new_pane, _split)) =
+                        tab.panes.split(pane_grid::Axis::Horizontal, pane, block)
+                    {
+                        tab.focus = Some(new_pane);
+                    }
+                }
+            }
+            Message::ClosePaneId(pane) => {
+                let tab = self.active_tab_mut();
+                if tab.panes.len() > 1 {
+                    if let Some((_closed_block, sibling)) = tab.panes.close(pane) {
+                        tab.focus = Some(sibling);
+                    }
+                }
+            }
+            Message::MaximizeTogglePane(pane) => {
+                let tab = self.active_tab_mut();
+                if tab.panes.maximized().is_some() {
+                    tab.panes.restore();
+                } else {
+                    tab.panes.maximize(pane);
+                }
+            }
+
             // -- Tab management --
             Message::NewTab => {
                 if let Ok(new_tab) = Tab::new() {
@@ -386,8 +429,9 @@ impl Altermative {
         let tab_bar = tab_bar_view(&titles, self.active_tab, Message::TabBarAction);
 
         // Pane grid for the active tab
+        let is_maximized = tab.panes.maximized().is_some();
         let pane_grid_widget =
-            pane_grid::PaneGrid::new(&tab.panes, |pane, block, _is_maximized| {
+            pane_grid::PaneGrid::new(&tab.panes, |pane, block, _maximized| {
                 let is_focused = focus == Some(pane);
 
                 // Build the terminal canvas.
@@ -395,24 +439,32 @@ impl Altermative {
                 let terminal_view = TerminalView::new(grid);
                 let content: Element<'_, Message> = terminal_view.view();
 
-                // Title bar.
+                // Title bar with control buttons.
                 let title = text(block.title()).size(12);
 
-                let title_bar = if total_panes > 1 {
-                    let close_btn: Element<'_, Message> = button(text("X").size(12))
-                        .on_press(Message::ClosePane)
-                        .padding(2)
-                        .into();
+                // Build control buttons row
+                let split_right_btn = title_bar_button("|", Message::SplitPaneRight(pane));
+                let split_down_btn = title_bar_button("\u{2014}", Message::SplitPaneDown(pane));
+                let maximize_label = if is_maximized { "\u{29C9}" } else { "\u{25A1}" };
+                let maximize_btn = title_bar_button(maximize_label, Message::MaximizeTogglePane(pane));
 
-                    pane_grid::TitleBar::new(title)
-                        .controls(close_btn)
-                        .padding(4)
-                        .style(move |theme: &Theme| title_bar_style(theme, is_focused))
+                let controls: Element<'_, Message> = if total_panes > 1 {
+                    let close_btn = title_bar_button("\u{00D7}", Message::ClosePaneId(pane));
+                    row![split_right_btn, split_down_btn, maximize_btn, close_btn]
+                        .spacing(2)
+                        .align_y(iced::Alignment::Center)
+                        .into()
                 } else {
-                    pane_grid::TitleBar::new(title)
-                        .padding(4)
-                        .style(move |theme: &Theme| title_bar_style(theme, is_focused))
+                    row![split_right_btn, split_down_btn, maximize_btn]
+                        .spacing(2)
+                        .align_y(iced::Alignment::Center)
+                        .into()
                 };
+
+                let title_bar = pane_grid::TitleBar::new(title)
+                    .controls(controls)
+                    .padding(4)
+                    .style(move |theme: &Theme| title_bar_style(theme, is_focused));
 
                 pane_grid::Content::new(content)
                     .title_bar(title_bar)
@@ -571,6 +623,37 @@ impl Altermative {
 
         Subscription::batch([tick, events])
     }
+}
+
+// ---------------------------------------------------------------------------
+// Title bar button helper
+// ---------------------------------------------------------------------------
+
+/// Build a small, styled button for the pane title bar.
+fn title_bar_button(label: &str, on_press: Message) -> Element<'_, Message> {
+    button(text(label).size(12).center())
+        .on_press(on_press)
+        .width(Length::Fixed(22.0))
+        .height(Length::Fixed(20.0))
+        .padding(0)
+        .style(|_theme: &Theme, status: button::Status| {
+            let bg = match status {
+                button::Status::Hovered => Color::from_rgb(0.25, 0.25, 0.35),
+                button::Status::Pressed => Color::from_rgb(0.30, 0.30, 0.40),
+                _ => Color::TRANSPARENT,
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: Color::from_rgb(0.70, 0.70, 0.75),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .into()
 }
 
 // ---------------------------------------------------------------------------
