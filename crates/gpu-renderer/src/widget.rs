@@ -146,6 +146,47 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
             }
         }
 
+        // Draw scrollbar if there's scrollback history
+        if self.grid.total_history > 0 {
+            let scrollbar_width = 6.0_f32;
+            let track_x = bounds.width - scrollbar_width - 2.0;
+            let track_height = bounds.height;
+
+            // Track background (subtle)
+            frame.fill_rectangle(
+                Point::new(track_x, 0.0),
+                Size::new(scrollbar_width, track_height),
+                Color::from_rgba(1.0, 1.0, 1.0, 0.05),
+            );
+
+            // Thumb: size proportional to visible rows vs total content
+            let total_content = self.grid.total_history + self.grid.rows;
+            let thumb_ratio = (self.grid.rows as f32) / (total_content as f32);
+            let thumb_height = (track_height * thumb_ratio).max(20.0);
+
+            // Position: display_offset=0 means at bottom, max offset means at top
+            let max_offset = self.grid.total_history;
+            let scroll_fraction = if max_offset > 0 {
+                self.grid.display_offset as f32 / max_offset as f32
+            } else {
+                0.0
+            };
+            // scroll_fraction=0 → thumb at bottom, =1 → thumb at top
+            let thumb_y = (1.0 - scroll_fraction) * (track_height - thumb_height);
+
+            let thumb_color = if self.grid.display_offset > 0 {
+                Color::from_rgba(1.0, 1.0, 1.0, 0.35) // brighter when scrolled
+            } else {
+                Color::from_rgba(1.0, 1.0, 1.0, 0.15) // dim when at bottom
+            };
+
+            frame.fill_rectangle(
+                Point::new(track_x, thumb_y),
+                Size::new(scrollbar_width, thumb_height),
+                thumb_color,
+            );
+        }
+
         vec![frame.into_geometry()]
     }
 }

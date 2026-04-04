@@ -2,6 +2,7 @@
 ///
 /// Converts the alacritty_terminal screen state into a flat, GPU-friendly
 /// representation that the renderer can consume directly.
+use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
@@ -41,6 +42,10 @@ pub struct RenderGrid {
     pub cells: Vec<Vec<RenderCell>>,
     pub rows: usize,
     pub cols: usize,
+    /// Current scroll offset (0 = at bottom/latest output).
+    pub display_offset: usize,
+    /// Total lines in scrollback history.
+    pub total_history: usize,
 }
 
 impl RenderGrid {
@@ -88,7 +93,11 @@ impl RenderGrid {
             cells.push(row_cells);
         }
 
-        RenderGrid { cells, rows, cols }
+        let display_offset = term.display_offset();
+        // history_size: how many lines are actually stored in scrollback
+        let total_history = term.term().grid().history_size();
+
+        RenderGrid { cells, rows, cols, display_offset, total_history }
     }
 }
 
