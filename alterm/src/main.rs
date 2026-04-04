@@ -35,6 +35,7 @@ struct Altermative {
 enum Message {
     Tick,
     KeyboardInput(Key, Modifiers),
+    WindowResized(iced::Size),
     Renderer(RendererMessage),
 }
 
@@ -100,6 +101,22 @@ impl Altermative {
                     }
                 }
             }
+            Message::WindowResized(size) => {
+                let cell_width: f32 = 14.0 * 0.6;   // 8.4
+                let cell_height: f32 = 14.0 * 1.4;   // 19.6
+                let new_cols = (size.width / cell_width).floor().max(1.0) as usize;
+                let new_rows = (size.height / cell_height).floor().max(1.0) as usize;
+
+                if new_rows != self.terminal.rows() || new_cols != self.terminal.cols() {
+                    self.terminal.resize(new_rows, new_cols);
+                    if let Some(pty) = &self.pty {
+                        if let Err(e) = pty.resize(new_rows as u16, new_cols as u16) {
+                            log::error!("PTY resize failed: {e}");
+                        }
+                    }
+                    log::debug!("Resized terminal to {new_rows}x{new_cols}");
+                }
+            }
             Message::Renderer(_msg) => {
                 // RendererMessage is currently empty; future mouse events will go here.
             }
@@ -116,7 +133,14 @@ impl Altermative {
     fn subscription(&self) -> Subscription<Message> {
         let tick = iced::time::every(Duration::from_millis(8)).map(|_| Message::Tick);
 
-        let keyboard = iced::event::listen_with(|event, status, _window: window::Id| {
+        let events = iced::event::listen_with(|event, status, _window: window::Id| {
+            match event {
+                Event::Window(window::Event::Resized(size)) => {
+                    return Some(Message::WindowResized(size));
+                }
+                _ => {}
+            }
+
             if status == Status::Captured {
                 return None;
             }
@@ -131,7 +155,7 @@ impl Altermative {
             }
         });
 
-        Subscription::batch([tick, keyboard])
+        Subscription::batch([tick, events])
     }
 }
 
