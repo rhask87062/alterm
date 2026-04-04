@@ -1271,6 +1271,7 @@ dependencies = [
 name = "gpu-renderer"
 version = "0.1.0"
 dependencies = [
+ "alacritty_terminal",
  "cosmic-text 0.18.2",
  "glyphon",
  "iced",

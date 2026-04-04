@@ -2,3 +2,4 @@
 // Provides iced widget and glyphon/cosmic-text based text rendering.
 
 pub mod colors;
+pub mod grid;

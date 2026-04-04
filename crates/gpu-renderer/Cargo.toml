@@ -9,3 +9,4 @@ cosmic-text = { workspace = true }
 glyphon = { workspace = true }
 log = { workspace = true }
 terminal = { workspace = true }
+alacritty_terminal = { workspace = true }
