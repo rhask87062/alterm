@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use alacritty_terminal::Term;
 use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::term::cell::Cell;
@@ -142,6 +142,14 @@ impl TerminalState {
     /// Current cursor position (viewport-relative).
     pub fn cursor_point(&self) -> Point {
         self.term.grid().cursor.point
+    }
+
+    /// Scroll the viewport by `lines` lines.
+    ///
+    /// Positive values scroll **up** (toward history), negative values scroll
+    /// **down** (toward recent output).
+    pub fn scroll(&mut self, lines: i32) {
+        self.term.scroll_display(Scroll::Delta(lines));
     }
 
     /// Current display (scroll) offset — 0 means the bottom (latest) output

@@ -36,6 +36,7 @@ enum Message {
     Tick,
     KeyboardInput(Key, Modifiers),
     WindowResized(iced::Size),
+    MouseScroll(f32),
     Renderer(RendererMessage),
 }
 
@@ -101,6 +102,14 @@ impl Altermative {
                     }
                 }
             }
+            Message::MouseScroll(delta_y) => {
+                // Positive delta_y = scroll up (toward history), negative = scroll down.
+                // The alacritty Scroll::Delta convention: positive = scroll up (toward history).
+                let lines = delta_y.round() as i32;
+                if lines != 0 {
+                    self.terminal.scroll(lines);
+                }
+            }
             Message::WindowResized(size) => {
                 let cell_width: f32 = 14.0 * 0.6;   // 8.4
                 let cell_height: f32 = 14.0 * 1.4;   // 19.6
@@ -134,9 +143,20 @@ impl Altermative {
         let tick = iced::time::every(Duration::from_millis(8)).map(|_| Message::Tick);
 
         let events = iced::event::listen_with(|event, status, _window: window::Id| {
-            match event {
+            match &event {
                 Event::Window(window::Event::Resized(size)) => {
-                    return Some(Message::WindowResized(size));
+                    return Some(Message::WindowResized(*size));
+                }
+                Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                    let y = match delta {
+                        iced::mouse::ScrollDelta::Lines { y, .. } => *y,
+                        iced::mouse::ScrollDelta::Pixels { y, .. } => *y / 19.6, // convert pixels to lines
+                    };
+                    if y.abs() > 0.001 {
+                        // Positive y from iced = scroll up = toward history.
+                        // alacritty Scroll::Delta: positive = scroll up toward history.
+                        return Some(Message::MouseScroll(y * 3.0)); // 3 lines per scroll notch
+                    }
                 }
                 _ => {}
             }
