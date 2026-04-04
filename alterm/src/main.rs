@@ -37,6 +37,7 @@ enum Message {
     KeyboardInput(Key, Modifiers),
     WindowResized(iced::Size),
     MouseScroll(f32),
+    ClipboardContent(Option<String>),
     Renderer(RendererMessage),
 }
 
@@ -63,7 +64,7 @@ impl Altermative {
         (app, Task::none())
     }
 
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
                 // Drain all available PTY output.
@@ -94,10 +95,46 @@ impl Altermative {
                 }
             }
             Message::KeyboardInput(key, modifiers) => {
+                // Ctrl+Shift+C: copy (TODO: selection text extraction)
+                // Ctrl+Shift+V: paste from clipboard
+                if modifiers.control() && modifiers.shift() {
+                    if let Key::Character(ref c) = key {
+                        let ch = c.as_str().to_ascii_lowercase();
+                        if ch == "v" {
+                            // Read clipboard and send contents to PTY.
+                            return iced::clipboard::read().map(Message::ClipboardContent);
+                        }
+                        if ch == "c" {
+                            // TODO: Extract selected text from terminal selection.
+                            // The alacritty_terminal Selection API requires significant
+                            // wiring (mouse tracking, selection state management).
+                            // For now, log a note; copy will be implemented in a
+                            // future iteration when mouse selection is added.
+                            log::debug!("Ctrl+Shift+C pressed — copy not yet implemented (no selection)");
+                            return Task::none();
+                        }
+                    }
+                }
                 if let Some(bytes) = key_to_bytes(&key, &modifiers) {
                     if let Some(pty) = &mut self.pty {
                         if let Err(e) = pty.write(&bytes) {
                             log::error!("Failed to write to PTY: {e}");
+                        }
+                    }
+                }
+            }
+            Message::ClipboardContent(content) => {
+                if let Some(text) = content {
+                    if let Some(pty) = &mut self.pty {
+                        // Use bracketed paste mode: wrap pasted text in
+                        // ESC[200~ ... ESC[201~ so the shell can distinguish
+                        // pasted text from typed input.
+                        let mut paste_bytes = Vec::new();
+                        paste_bytes.extend_from_slice(b"\x1b[200~");
+                        paste_bytes.extend_from_slice(text.as_bytes());
+                        paste_bytes.extend_from_slice(b"\x1b[201~");
+                        if let Err(e) = pty.write(&paste_bytes) {
+                            log::error!("Failed to paste to PTY: {e}");
                         }
                     }
                 }
@@ -130,6 +167,7 @@ impl Altermative {
                 // RendererMessage is currently empty; future mouse events will go here.
             }
         }
+        Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
