@@ -4,16 +4,16 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, opaque, pane_grid, row, scrollable, stack, text, text_input,
-    Column,
+    button, column, container, opaque, pane_grid, pick_list, row, scrollable, slider, stack, text,
+    text_input, toggler, Column,
 };
 use iced::window;
 use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Subscription, Task, Theme};
 
 use gpu_renderer::widget::TerminalView;
 use workspace::{
-    match_shortcut, sidebar_view, tab_bar_view, Action, Block, CommandPalette, SidebarAction, Tab,
-    TabBarAction, CELL_HEIGHT,
+    match_shortcut, sidebar_view, tab_bar_view, Action, Block, CommandPalette, SettingsField,
+    SettingsSection, SidebarAction, Tab, TabBarAction, CELL_HEIGHT,
 };
 
 use ai::{
@@ -95,6 +95,11 @@ enum Message {
     AIStreamDone(pane_grid::Pane),
     AIStreamError(pane_grid::Pane, String),
     ToggleAIChat,
+    // Settings panel
+    OpenSettings,
+    SettingsChanged(pane_grid::Pane, SettingsField),
+    SettingsSave(pane_grid::Pane),
+    SettingsSectionChanged(pane_grid::Pane, SettingsSection),
 }
 
 impl Altermative {
@@ -299,10 +304,7 @@ impl Altermative {
                 self.palette.toggle();
                 Task::none()
             }
-            Action::OpenSettings => {
-                log::debug!("OpenSettings — not yet implemented");
-                Task::none()
-            }
+            Action::OpenSettings => self.update(Message::OpenSettings),
             Action::ToggleAIChat => self.update(Message::ToggleAIChat),
             Action::Copy => {
                 log::debug!("Copy — not yet implemented");
@@ -518,6 +520,9 @@ impl Altermative {
                 SidebarAction::NewAiChat => {
                     return self.update(Message::ToggleAIChat);
                 }
+                SidebarAction::OpenSettings => {
+                    return self.update(Message::OpenSettings);
+                }
             },
             Message::SidebarNewTerminal => {
                 // Split the focused pane with a new terminal (right).
@@ -638,6 +643,54 @@ impl Altermative {
                 }
             }
 
+            // -- Settings panel --
+            Message::OpenSettings => {
+                // Check if a settings pane already exists — focus it instead of creating a duplicate.
+                let tab = self.active_tab_mut();
+                let existing = tab.panes.iter()
+                    .find(|(_p, b)| b.is_settings())
+                    .map(|(p, _)| *p);
+                if let Some(settings_pane) = existing {
+                    tab.focus = Some(settings_pane);
+                    return Task::none();
+                }
+                // Open a new settings pane.
+                let block = Block::new_settings(self.config.clone());
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if let Some((new_pane, _split)) =
+                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
+                    {
+                        tab.focus = Some(new_pane);
+                    }
+                }
+                self.resize_all_panes();
+            }
+            Message::SettingsChanged(pane, field) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Settings { state }) = tab.panes.get_mut(pane) {
+                    state.apply_field(field);
+                }
+            }
+            Message::SettingsSectionChanged(pane, section) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Settings { state }) = tab.panes.get_mut(pane) {
+                    state.active_section = section;
+                }
+            }
+            Message::SettingsSave(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Settings { state }) = tab.panes.get_mut(pane) {
+                    if let Err(e) = state.save() {
+                        log::error!("Failed to save settings: {e}");
+                    } else {
+                        // Apply saved config back to the app.
+                        self.config = state.config.clone();
+                        log::info!("Settings saved and applied");
+                    }
+                }
+            }
+
             // Command palette messages
             Message::PaletteQueryChanged(query) => {
                 self.palette.update_query(query);
@@ -684,13 +737,13 @@ impl Altermative {
                     return self.dispatch_action(action);
                 }
 
-                // If the focused pane is an AI chat, don't forward keyboard input
-                // to a PTY. The text_input widget handles it.
+                // If the focused pane is an AI chat or settings panel, don't
+                // forward keyboard input to a PTY. Their iced widgets handle it.
                 {
                     let tab = self.active_tab();
                     if let Some(focused) = tab.focus {
                         if let Some(block) = tab.panes.get(focused) {
-                            if block.is_ai_chat() {
+                            if block.is_ai_chat() || block.is_settings() {
                                 return Task::none();
                             }
                         }
@@ -755,6 +808,7 @@ impl Altermative {
 
         // Pane grid for the active tab
         let is_maximized = tab.panes.maximized().is_some();
+        let has_terminal_context = self.terminal_context(1).is_some();
         let pane_grid_widget =
             pane_grid::PaneGrid::new(&tab.panes, |pane, block, _maximized| {
                 let is_focused = focus == Some(pane);
@@ -767,7 +821,10 @@ impl Altermative {
                         terminal_view.view()
                     }
                     Block::AIChat { state } => {
-                        ai_chat_view(pane, state)
+                        ai_chat_view(pane, state, has_terminal_context)
+                    }
+                    Block::Settings { state } => {
+                        settings_view(pane, state)
                     }
                 };
 
@@ -969,16 +1026,31 @@ impl Altermative {
 fn ai_chat_view<'a>(
     pane: pane_grid::Pane,
     state: &'a workspace::AIChatState,
+    has_terminal_context: bool,
 ) -> Element<'a, Message> {
-    // Header: provider / model
-    let header_text = text(format!(
+    // Header: provider / model + context indicator
+    let provider_label = text(format!(
         "Provider: {} / {}",
         state.provider_name, state.model_name
     ))
     .size(11)
     .color(Color::from_rgb(0.55, 0.60, 0.70));
 
-    let header = container(header_text)
+    let context_label = if has_terminal_context {
+        text("Context: Terminal (focused)")
+            .size(10)
+            .color(Color::from_rgb(0.40, 0.70, 0.50))
+    } else {
+        text("Context: none")
+            .size(10)
+            .color(Color::from_rgb(0.40, 0.40, 0.45))
+    };
+
+    let header_row = row![provider_label, iced::widget::space().width(Fill), context_label]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+
+    let header = container(header_row)
         .width(Fill)
         .padding(Padding::from([6, 10]))
         .style(|_theme: &Theme| iced::widget::container::Style {
@@ -1163,6 +1235,353 @@ fn ai_chat_view<'a>(
             ..Default::default()
         })
         .into()
+}
+
+// ---------------------------------------------------------------------------
+// Settings view
+// ---------------------------------------------------------------------------
+
+/// Build the settings panel view for a pane.
+fn settings_view<'a>(
+    pane: pane_grid::Pane,
+    state: &'a workspace::SettingsState,
+) -> Element<'a, Message> {
+    // ── Header ──
+    let title_label = text("Settings").size(16).color(Color::from_rgb(0.90, 0.92, 0.96));
+    let dirty_indicator = if state.dirty {
+        text(" (unsaved)").size(12).color(Color::from_rgb(0.90, 0.65, 0.30))
+    } else {
+        text("").size(12)
+    };
+
+    let mut save_btn = button(text("Save").size(12).center())
+        .padding(Padding::from([6, 16]))
+        .style(|_theme: &Theme, status: button::Status| {
+            let bg = match status {
+                button::Status::Hovered => Color::from_rgb(0.25, 0.60, 0.40),
+                button::Status::Pressed => Color::from_rgb(0.20, 0.50, 0.35),
+                _ => Color::from_rgb(0.22, 0.55, 0.38),
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: Color::WHITE,
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }
+        });
+
+    if state.dirty {
+        save_btn = save_btn.on_press(Message::SettingsSave(pane));
+    }
+
+    let header = container(
+        row![title_label, dirty_indicator, iced::widget::space().width(Fill), save_btn]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+    )
+    .width(Fill)
+    .padding(Padding::from([8, 12]))
+    .style(|_theme: &Theme| iced::widget::container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
+        border: Border {
+            color: Color::from_rgb(0.15, 0.15, 0.20),
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    });
+
+    // ── Section navigation ──
+    let sections = [
+        (SettingsSection::Appearance, "App"),
+        (SettingsSection::AI, "AI"),
+        (SettingsSection::Terminal, "Term"),
+    ];
+
+    let mut nav_buttons: Vec<Element<'a, Message>> = Vec::new();
+    for (section, label) in &sections {
+        let is_active = state.active_section == *section;
+        let sec = *section;
+        let lbl = *label;
+        let bg_color = if is_active {
+            Color::from_rgb(0.18, 0.22, 0.32)
+        } else {
+            Color::from_rgb(0.10, 0.10, 0.13)
+        };
+        let text_color = if is_active {
+            Color::from_rgb(0.85, 0.90, 1.0)
+        } else {
+            Color::from_rgb(0.55, 0.55, 0.60)
+        };
+
+        let btn: Element<'a, Message> = button(text(lbl).size(12).color(text_color).center())
+            .on_press(Message::SettingsSectionChanged(pane, sec))
+            .width(Fill)
+            .padding(Padding::from([8, 4]))
+            .style(move |_theme: &Theme, _status: button::Status| button::Style {
+                background: Some(Background::Color(bg_color)),
+                text_color,
+                border: Border {
+                    color: if is_active {
+                        Color::from_rgb(0.30, 0.45, 0.75)
+                    } else {
+                        Color::TRANSPARENT
+                    },
+                    width: if is_active { 1.0 } else { 0.0 },
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            })
+            .into();
+
+        nav_buttons.push(btn);
+    }
+
+    let nav_col = Column::from_vec(nav_buttons)
+        .spacing(2)
+        .width(Length::Fixed(60.0));
+
+    let nav_panel = container(nav_col)
+        .padding(Padding::from([8, 4]))
+        .height(Fill)
+        .style(|_theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.09))),
+            border: Border {
+                color: Color::from_rgb(0.15, 0.15, 0.18),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+    // ── Section content ──
+    let section_content: Element<'a, Message> = match state.active_section {
+        SettingsSection::Appearance => settings_appearance_section(pane, state),
+        SettingsSection::AI => settings_ai_section(pane, state),
+        SettingsSection::Terminal => settings_terminal_section(pane, state),
+    };
+
+    let content_panel = container(
+        scrollable(section_content).width(Fill).height(Fill),
+    )
+    .width(Fill)
+    .height(Fill)
+    .padding(Padding::from([12, 16]));
+
+    // ── Assemble: header on top, nav + content side by side below ──
+    let body = row![nav_panel, content_panel];
+
+    container(column![header, body])
+        .width(Fill)
+        .height(Fill)
+        .style(|_theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Appearance section fields.
+fn settings_appearance_section<'a>(
+    pane: pane_grid::Pane,
+    state: &'a workspace::SettingsState,
+) -> Element<'a, Message> {
+    let label_color = Color::from_rgb(0.70, 0.72, 0.78);
+    let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
+
+    let heading = text("Appearance").size(14).color(heading_color);
+
+    // Font size
+    let font_size_label = text("Font size").size(12).color(label_color);
+    let font_size_input = text_input("14.0", &state.font_size_text)
+        .on_input(move |val| Message::SettingsChanged(pane, SettingsField::FontSize(val)))
+        .size(13)
+        .padding(6)
+        .width(Length::Fixed(120.0));
+
+    // Theme
+    let theme_label = text("Theme").size(12).color(label_color);
+    let theme_options: Vec<String> = vec!["dark".to_string(), "light".to_string()];
+    let selected_theme: Option<String> = Some(state.config.appearance.theme.clone());
+    let theme_picker = pick_list(
+        theme_options,
+        selected_theme,
+        move |val: String| Message::SettingsChanged(pane, SettingsField::Theme(val)),
+    )
+    .text_size(13)
+    .padding(6)
+    .width(Length::Fixed(120.0));
+
+    // Font family
+    let font_family_label = text("Font family").size(12).color(label_color);
+    let font_family_input = text_input("monospace", &state.font_family_text)
+        .on_input(move |val| Message::SettingsChanged(pane, SettingsField::FontFamily(val)))
+        .size(13)
+        .padding(6)
+        .width(Length::Fixed(200.0));
+
+    column![
+        heading,
+        iced::widget::space().height(Length::Fixed(12.0)),
+        font_size_label,
+        font_size_input,
+        iced::widget::space().height(Length::Fixed(8.0)),
+        theme_label,
+        theme_picker,
+        iced::widget::space().height(Length::Fixed(8.0)),
+        font_family_label,
+        font_family_input,
+    ]
+    .spacing(4)
+    .into()
+}
+
+/// AI section fields.
+fn settings_ai_section<'a>(
+    pane: pane_grid::Pane,
+    state: &'a workspace::SettingsState,
+) -> Element<'a, Message> {
+    let label_color = Color::from_rgb(0.70, 0.72, 0.78);
+    let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
+
+    let heading = text("AI Provider Settings").size(14).color(heading_color);
+
+    // Default provider
+    let provider_label = text("Default provider").size(12).color(label_color);
+    let provider_options: Vec<String> = vec![
+        "openai".to_string(),
+        "anthropic".to_string(),
+        "gemini".to_string(),
+        "grok".to_string(),
+        "lmstudio".to_string(),
+        "ollama".to_string(),
+    ];
+    let selected_provider: Option<String> = Some(state.config.ai.default_provider.clone());
+    let provider_picker = pick_list(
+        provider_options,
+        selected_provider,
+        move |val: String| Message::SettingsChanged(pane, SettingsField::DefaultProvider(val)),
+    )
+    .text_size(13)
+    .padding(6)
+    .width(Length::Fixed(160.0));
+
+    // Model
+    let model_label = text("Model").size(12).color(label_color);
+    let model_input = text_input("model name", &state.model_text)
+        .on_input(move |val| Message::SettingsChanged(pane, SettingsField::AIModel(val)))
+        .size(13)
+        .padding(6)
+        .width(Length::Fixed(200.0));
+
+    // API Key
+    let api_key_label = text("API key").size(12).color(label_color);
+    let api_key_input = text_input("sk-...", &state.api_key_text)
+        .on_input(move |val| Message::SettingsChanged(pane, SettingsField::AIApiKey(val)))
+        .secure(true)
+        .size(13)
+        .padding(6)
+        .width(Length::Fixed(280.0));
+
+    // Temperature
+    let temp_label = text(format!("Temperature: {:.2}", state.config.ai.temperature))
+        .size(12)
+        .color(label_color);
+    let temp_slider = slider(
+        0.0..=2.0,
+        state.config.ai.temperature,
+        move |val| Message::SettingsChanged(pane, SettingsField::Temperature(val)),
+    )
+    .step(0.05)
+    .width(Length::Fixed(200.0));
+
+    // Max tokens
+    let max_tokens_label = text("Max tokens").size(12).color(label_color);
+    let max_tokens_input = text_input("4096", &state.max_tokens_text)
+        .on_input(move |val| Message::SettingsChanged(pane, SettingsField::MaxTokens(val)))
+        .size(13)
+        .padding(6)
+        .width(Length::Fixed(120.0));
+
+    // System prompt
+    let sys_prompt_label = text("System prompt").size(12).color(label_color);
+    let sys_prompt_input = text_input("You are a helpful...", &state.system_prompt_text)
+        .on_input(move |val| Message::SettingsChanged(pane, SettingsField::SystemPrompt(val)))
+        .size(13)
+        .padding(6)
+        .width(Fill);
+
+    column![
+        heading,
+        iced::widget::space().height(Length::Fixed(12.0)),
+        provider_label,
+        provider_picker,
+        iced::widget::space().height(Length::Fixed(8.0)),
+        model_label,
+        model_input,
+        iced::widget::space().height(Length::Fixed(8.0)),
+        api_key_label,
+        api_key_input,
+        iced::widget::space().height(Length::Fixed(8.0)),
+        temp_label,
+        temp_slider,
+        iced::widget::space().height(Length::Fixed(8.0)),
+        max_tokens_label,
+        max_tokens_input,
+        iced::widget::space().height(Length::Fixed(8.0)),
+        sys_prompt_label,
+        sys_prompt_input,
+    ]
+    .spacing(4)
+    .into()
+}
+
+/// Terminal section fields.
+fn settings_terminal_section<'a>(
+    pane: pane_grid::Pane,
+    state: &'a workspace::SettingsState,
+) -> Element<'a, Message> {
+    let label_color = Color::from_rgb(0.70, 0.72, 0.78);
+    let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
+
+    let heading = text("Terminal Settings").size(14).color(heading_color);
+
+    // Scrollback lines
+    let scrollback_label = text("Scrollback lines").size(12).color(label_color);
+    let scrollback_input = text_input("10000", &state.scrollback_text)
+        .on_input(move |val| Message::SettingsChanged(pane, SettingsField::ScrollbackLines(val)))
+        .size(13)
+        .padding(6)
+        .width(Length::Fixed(120.0));
+
+    // Cursor blink
+    let cursor_blink_toggle = toggler(state.config.terminal.cursor_blink)
+        .on_toggle(move |val| Message::SettingsChanged(pane, SettingsField::CursorBlink(val)))
+        .label("Cursor blink")
+        .text_size(12);
+
+    // Copy on select
+    let copy_on_select_toggle = toggler(state.config.terminal.copy_on_select)
+        .on_toggle(move |val| Message::SettingsChanged(pane, SettingsField::CopyOnSelect(val)))
+        .label("Copy on select")
+        .text_size(12);
+
+    column![
+        heading,
+        iced::widget::space().height(Length::Fixed(12.0)),
+        scrollback_label,
+        scrollback_input,
+        iced::widget::space().height(Length::Fixed(12.0)),
+        cursor_blink_toggle,
+        iced::widget::space().height(Length::Fixed(8.0)),
+        copy_on_select_toggle,
+    ]
+    .spacing(4)
+    .into()
 }
 
 // ---------------------------------------------------------------------------
