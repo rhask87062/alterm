@@ -1,0 +1,92 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Altermative — default configuration
+# Location: ~/.config/altermative/config.toml
+#
+# All values shown here are the built-in defaults.
+# Remove or comment out any entry to keep the default.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── General ──────────────────────────────────────────────────────────────────
+[general]
+# Shell to launch for each terminal tab.
+# Unset (or commented out) means "use the $SHELL environment variable".
+# default_shell = "/bin/zsh"
+
+# ── AI ───────────────────────────────────────────────────────────────────────
+[ai]
+# Which provider to use when no provider is explicitly requested.
+# Must match a key under [ai.providers], e.g. "ollama", "openai", "anthropic".
+default_provider = "ollama"
+
+# Maximum number of tokens to generate in a single response.
+max_tokens = 4096
+
+# Sampling temperature (0.0 = deterministic, 1.0 = very creative).
+temperature = 0.7
+
+# System prompt sent to the AI at the start of every conversation.
+system_prompt = "You are a helpful terminal assistant. You can see the user's terminal output for context."
+
+# ── AI Providers ─────────────────────────────────────────────────────────────
+# Each provider block is optional. Uncomment and fill in the fields you need.
+# `base_url` can be omitted to use the provider's canonical endpoint.
+# `api_key` can be omitted for local providers (Ollama, LM Studio).
+
+# Local Ollama instance (no API key required).
+[ai.providers.ollama]
+model     = "llama3.2"
+base_url  = "http://localhost:11434/v1"
+# api_key = ""   # not needed for Ollama
+
+# OpenAI — https://platform.openai.com
+# [ai.providers.openai]
+# api_key  = "sk-..."
+# model    = "gpt-4o"
+# base_url = "https://api.openai.com/v1"
+
+# Anthropic — https://console.anthropic.com
+# [ai.providers.anthropic]
+# api_key  = "sk-ant-..."
+# model    = "claude-opus-4-5"
+# base_url = "https://api.anthropic.com/v1"
+
+# Google Gemini — https://aistudio.google.com
+# [ai.providers.gemini]
+# api_key  = "AIza..."
+# model    = "gemini-2.0-flash"
+# base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+# xAI Grok — https://console.x.ai
+# [ai.providers.grok]
+# api_key  = "xai-..."
+# model    = "grok-3"
+# base_url = "https://api.x.ai/v1"
+
+# LM Studio (local OpenAI-compatible server)
+# [ai.providers.lmstudio]
+# model    = "lmstudio-community/Meta-Llama-3-8B-Instruct-GGUF"
+# base_url = "http://localhost:1234/v1"
+# api_key  = ""   # not needed for LM Studio
+
+# ── Appearance ───────────────────────────────────────────────────────────────
+[appearance]
+# Font size in points.
+font_size = 14.0
+
+# Font family. Use "monospace" for the system monospace font, or specify
+# an installed font by name, e.g. "JetBrains Mono", "Fira Code".
+font_family = "monospace"
+
+# Color theme. Built-in options: "dark", "light".
+theme = "dark"
+
+# ── Terminal ─────────────────────────────────────────────────────────────────
+[terminal]
+# Number of lines to keep in the scrollback buffer.
+scrollback_lines = 10000
+
+# Whether the terminal cursor should blink.
+cursor_blink = true
+
+# Automatically copy selected text to the system clipboard.
+copy_on_select = false
