@@ -10,7 +10,7 @@ use iced::{Background, Border, Color, Element, Event, Fill, Length, Subscription
 use gpu_renderer::widget::TerminalView;
 use workspace::{
     match_shortcut, sidebar_view, tab_bar_view, Action, Block, CommandPalette, SidebarAction, Tab,
-    TabBarAction,
+    TabBarAction, CELL_HEIGHT, CELL_WIDTH,
 };
 
 fn main() -> iced::Result {
@@ -24,10 +24,22 @@ fn main() -> iced::Result {
         .run()
 }
 
+/// Estimated height consumed by the tab bar (padding + button + padding).
+const TAB_BAR_HEIGHT: f32 = 33.0;
+/// Estimated height consumed by each pane's title bar.
+const PANE_TITLE_BAR_HEIGHT: f32 = 28.0;
+/// Width of the sidebar.
+const SIDEBAR_WIDTH: f32 = 44.0;
+/// Extra pixels consumed by borders and pane_grid spacing.
+const CHROME_PADDING: f32 = 6.0;
+
 struct Altermative {
     tabs: Vec<Tab>,
     active_tab: usize,
     palette: CommandPalette,
+    /// Current window dimensions in logical pixels.
+    window_width: f32,
+    window_height: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -59,16 +71,24 @@ enum Message {
     // Command palette
     PaletteQueryChanged(String),
     PaletteSubmit,
+    // Window resize
+    WindowResized(f32, f32),
 }
 
 impl Altermative {
     fn new() -> (Self, Task<Message>) {
-        let first_tab = Tab::new().expect("Failed to create initial tab");
+        let window_width = 900.0_f32;
+        let window_height = 600.0_f32;
+        let (pane_w, pane_h) = Self::pane_content_area(window_width, window_height, 1, 1);
+        let first_tab = Tab::new_with_size(pane_w, pane_h)
+            .expect("Failed to create initial tab");
 
         let app = Altermative {
             tabs: vec![first_tab],
             active_tab: 0,
             palette: CommandPalette::new(),
+            window_width,
+            window_height,
         };
 
         (app, Task::none())
@@ -90,6 +110,51 @@ impl Altermative {
         if let Some(focused) = tab.focus {
             if let Some(adjacent) = tab.panes.adjacent(focused, direction) {
                 tab.focus = Some(adjacent);
+            }
+        }
+    }
+
+    /// Calculate the pixel area available for a single pane's terminal content,
+    /// given the window size and how many pane columns/rows exist.
+    ///
+    /// This is an estimate — the pane_grid distributes space proportionally but
+    /// we assume equal distribution for simplicity.
+    fn pane_content_area(
+        window_width: f32,
+        window_height: f32,
+        pane_cols: u16,
+        pane_rows: u16,
+    ) -> (f32, f32) {
+        let usable_w = (window_width - SIDEBAR_WIDTH - CHROME_PADDING).max(80.0);
+        let usable_h = (window_height - TAB_BAR_HEIGHT - CHROME_PADDING).max(40.0);
+        let per_pane_w = usable_w / pane_cols.max(1) as f32;
+        let per_pane_h = usable_h / pane_rows.max(1) as f32 - PANE_TITLE_BAR_HEIGHT;
+        (per_pane_w.max(CELL_WIDTH * 10.0), per_pane_h.max(CELL_HEIGHT * 2.0))
+    }
+
+    /// Resize every terminal in the active tab to match the current window size.
+    ///
+    /// For simplicity we give every pane the same size estimate (equal division
+    /// of the available area).  This is correct for a single-pane tab and a
+    /// reasonable approximation for splits; more accurate per-pane sizing would
+    /// require querying the pane_grid's layout, which isn't exposed.
+    fn resize_all_panes(&mut self) {
+        let n = self.active_tab().panes.len() as u16;
+        // Heuristic: estimate grid arrangement as roughly sqrt(n) x sqrt(n).
+        let pane_cols = (n as f32).sqrt().ceil() as u16;
+        let pane_rows = ((n as f32) / pane_cols as f32).ceil() as u16;
+        let (pw, ph) = Self::pane_content_area(
+            self.window_width,
+            self.window_height,
+            pane_cols,
+            pane_rows,
+        );
+        let (rows, cols) = Block::size_from_pixels(pw, ph);
+        let tab = self.active_tab_mut();
+        for (_pane, block) in tab.panes.iter_mut() {
+            let (cur_rows, cur_cols) = block.dimensions();
+            if cur_rows != rows || cur_cols != cols {
+                block.resize(rows, cols);
             }
         }
     }
@@ -187,12 +252,19 @@ impl Altermative {
             }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
                 self.active_tab_mut().panes.drop(pane, target);
+                self.resize_all_panes();
             }
             Message::PaneDragged(_) => {
                 // Picked / Canceled — nothing to do.
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
                 self.active_tab_mut().panes.resize(split, ratio);
+                self.resize_all_panes();
+            }
+            Message::WindowResized(width, height) => {
+                self.window_width = width;
+                self.window_height = height;
+                self.resize_all_panes();
             }
             Message::SplitHorizontal => {
                 let tab = self.active_tab_mut();
@@ -213,6 +285,7 @@ impl Altermative {
                         }
                     }
                 }
+                self.resize_all_panes();
             }
             Message::SplitVertical => {
                 let tab = self.active_tab_mut();
@@ -232,6 +305,7 @@ impl Altermative {
                         }
                     }
                 }
+                self.resize_all_panes();
             }
             Message::ClosePane => {
                 let tab = self.active_tab_mut();
@@ -242,6 +316,7 @@ impl Altermative {
                         }
                     }
                 }
+                self.resize_all_panes();
             }
             Message::MaximizeToggle => {
                 let tab = self.active_tab_mut();
@@ -270,6 +345,7 @@ impl Altermative {
                         tab.focus = Some(new_pane);
                     }
                 }
+                self.resize_all_panes();
             }
             Message::SplitPaneDown(pane) => {
                 let tab = self.active_tab_mut();
@@ -286,6 +362,7 @@ impl Altermative {
                         tab.focus = Some(new_pane);
                     }
                 }
+                self.resize_all_panes();
             }
             Message::ClosePaneId(pane) => {
                 let tab = self.active_tab_mut();
@@ -294,6 +371,7 @@ impl Altermative {
                         tab.focus = Some(sibling);
                     }
                 }
+                self.resize_all_panes();
             }
             Message::MaximizeTogglePane(pane) => {
                 let tab = self.active_tab_mut();
@@ -302,6 +380,7 @@ impl Altermative {
                 } else {
                     tab.panes.maximize(pane);
                 }
+                self.resize_all_panes();
             }
 
             // -- Tab management --
@@ -325,6 +404,7 @@ impl Altermative {
             Message::SelectTab(index) => {
                 if index < self.tabs.len() {
                     self.active_tab = index;
+                    self.resize_all_panes();
                 }
             }
             Message::TabBarAction(action) => match action {
@@ -492,6 +572,7 @@ impl Altermative {
             .on_drag(Message::PaneDragged)
             .on_resize(10, Message::PaneResized)
             .spacing(2)
+            .min_size(120)
             .width(Fill)
             .height(Fill);
 
@@ -621,6 +702,9 @@ impl Altermative {
                         if y.abs() > 0.001 {
                             return Some(Message::MouseScroll(y * 3.0));
                         }
+                    }
+                    Event::Window(iced::window::Event::Resized(size)) => {
+                        return Some(Message::WindowResized(size.width, size.height));
                     }
                     _ => {}
                 }

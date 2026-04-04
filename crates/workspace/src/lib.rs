@@ -8,7 +8,7 @@ pub mod sidebar;
 pub mod tab;
 pub mod tab_bar;
 
-pub use block::Block;
+pub use block::{Block, CELL_HEIGHT, CELL_WIDTH};
 pub use command_palette::CommandPalette;
 pub use keybindings::{match_shortcut, Action};
 pub use sidebar::{sidebar_view, SidebarAction};

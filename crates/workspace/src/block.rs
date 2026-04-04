@@ -12,6 +12,13 @@ use terminal::{PtyHandle, TerminalEvent, TerminalState};
 /// How many ticks before the cursor blink state toggles.
 const BLINK_TICKS: u32 = 30;
 
+/// Font size used for terminal rendering (logical pixels).
+pub const FONT_SIZE: f32 = 14.0;
+/// Cell width = font_size * 0.6 (monospace approximation).
+pub const CELL_WIDTH: f32 = FONT_SIZE * 0.6;
+/// Cell height = font_size * 1.4.
+pub const CELL_HEIGHT: f32 = FONT_SIZE * 1.4;
+
 /// A pane's content unit.
 pub enum Block {
     Terminal {
@@ -25,6 +32,13 @@ pub enum Block {
 }
 
 impl Block {
+    /// Calculate terminal grid dimensions (rows, cols) from pixel dimensions.
+    pub fn size_from_pixels(pixel_width: f32, pixel_height: f32) -> (u16, u16) {
+        let cols = (pixel_width / CELL_WIDTH).floor().max(10.0) as u16;
+        let rows = (pixel_height / CELL_HEIGHT).floor().max(2.0) as u16;
+        (rows, cols)
+    }
+
     /// Create a new terminal block, spawning a PTY with the given dimensions.
     pub fn new_terminal(rows: u16, cols: u16) -> Result<Self, String> {
         let (pty, events) = PtyHandle::spawn(rows, cols)?;
