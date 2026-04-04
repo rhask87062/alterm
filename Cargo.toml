@@ -4,8 +4,13 @@ members = [
     "crates/terminal",
     "crates/gpu-renderer",
     "crates/workspace",
+    "crates/ai",
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
 
 [workspace.dependencies]
 iced = { version = "0.14", features = ["wgpu", "tokio", "canvas"] }
@@ -16,7 +21,13 @@ glyphon = "0.10"
 tokio = { version = "1", features = ["full"] }
 log = "0.4"
 env_logger = "0.11"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"
+eventsource-stream = "0.2"
 
 terminal = { path = "crates/terminal" }
 gpu-renderer = { path = "crates/gpu-renderer" }
 workspace = { path = "crates/workspace" }
+ai = { path = "crates/ai" }
