@@ -75,6 +75,7 @@ dependencies = [
  "log",
  "terminal",
  "tokio",
+ "workspace",
 ]
 
 [[package]]
@@ -4694,6 +4695,16 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "workspace"
+version = "0.1.0"
+dependencies = [
+ "gpu-renderer",
+ "log",
+ "terminal",
+ "tokio",
 ]
 
 [[package]]

@@ -1,0 +1,10 @@
+[package]
+name = "workspace"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+terminal = { workspace = true }
+gpu-renderer = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
