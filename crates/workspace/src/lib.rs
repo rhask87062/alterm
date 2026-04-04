@@ -2,9 +2,11 @@
 // Phase 2: introduces the Block abstraction, Tab system, and Tab bar UI.
 
 pub mod block;
+pub mod sidebar;
 pub mod tab;
 pub mod tab_bar;
 
 pub use block::Block;
+pub use sidebar::{sidebar_view, SidebarAction};
 pub use tab::Tab;
 pub use tab_bar::{tab_bar_view, TabBarAction};

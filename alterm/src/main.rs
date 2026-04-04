@@ -3,12 +3,12 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
-use iced::widget::{button, column, container, pane_grid, text};
+use iced::widget::{button, column, container, pane_grid, row, text};
 use iced::window;
 use iced::{Element, Event, Fill, Subscription, Task, Theme};
 
 use gpu_renderer::widget::TerminalView;
-use workspace::{tab_bar_view, Block, Tab, TabBarAction};
+use workspace::{sidebar_view, tab_bar_view, Block, SidebarAction, Tab, TabBarAction};
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -44,6 +44,9 @@ enum Message {
     CloseTab(usize),
     SelectTab(usize),
     TabBarAction(TabBarAction),
+    // Sidebar
+    SidebarAction(SidebarAction),
+    SidebarNewTerminal,
 }
 
 impl Altermative {
@@ -163,6 +166,24 @@ impl Altermative {
                 TabBarAction::Close(i) => return self.update(Message::CloseTab(i)),
                 TabBarAction::New => return self.update(Message::NewTab),
             },
+            Message::SidebarAction(action) => match action {
+                SidebarAction::NewTerminal => {
+                    return self.update(Message::SidebarNewTerminal);
+                }
+            },
+            Message::SidebarNewTerminal => {
+                // Split the focused pane horizontally with a new terminal.
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if let Ok(block) = Block::new_terminal(24, 80) {
+                        if let Some((new_pane, _split)) =
+                            tab.panes.split(pane_grid::Axis::Vertical, focused, block)
+                        {
+                            tab.focus = Some(new_pane);
+                        }
+                    }
+                }
+            }
 
             Message::KeyboardInput(key, modifiers) => {
                 // Tab management shortcuts: Ctrl+Shift+T/W, Ctrl+Shift+Tab
@@ -348,8 +369,12 @@ impl Altermative {
             .width(Fill)
             .height(Fill);
 
-        // Layout: tab bar on top, pane grid fills the rest
-        let layout = column![tab_bar, pane_grid_widget];
+        // Sidebar
+        let sidebar = sidebar_view(Message::SidebarAction);
+
+        // Layout: tab bar on top, then [pane_grid | sidebar] below
+        let content_row = row![pane_grid_widget, sidebar];
+        let layout = column![tab_bar, content_row];
 
         container(layout)
             .width(Fill)
