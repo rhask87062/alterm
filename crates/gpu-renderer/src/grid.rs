@@ -63,11 +63,11 @@ impl RenderGrid {
         let rows = term.rows();
         let cols = term.cols();
 
-        let cursor: Point = if cursor_visible {
+        // cursor_point() returns None when the terminal is scrolled (cursor off-viewport)
+        let cursor: Option<Point> = if cursor_visible {
             term.cursor_point()
         } else {
-            // Place cursor off-screen so no cell gets marked as cursor.
-            Point::new(Line(-1), Column(0))
+            None
         };
 
         let mut cells: Vec<Vec<RenderCell>> = Vec::with_capacity(rows);
@@ -101,7 +101,7 @@ fn cell_to_render(
     cell: &Cell,
     row: usize,
     col: usize,
-    cursor: Point,
+    cursor: Option<Point>,
     palette: &AnsiPalette,
 ) -> RenderCell {
     let bold = cell.flags.contains(Flags::BOLD);
@@ -118,7 +118,9 @@ fn cell_to_render(
     let fg = resolve_color(raw_fg, palette, true);
     let bg = resolve_color(raw_bg, palette, false);
 
-    let is_cursor = cursor.line == Line(row as i32) && cursor.column == Column(col);
+    let is_cursor = cursor.map_or(false, |c| {
+        c.line == Line(row as i32) && c.column == Column(col)
+    });
 
     RenderCell { c: cell.c, fg, bg, bold, italic, underline, is_cursor }
 }

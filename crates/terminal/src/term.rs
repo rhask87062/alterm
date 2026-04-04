@@ -128,22 +128,30 @@ impl TerminalState {
 
     /// Access a cell at the given viewport-relative row and column.
     ///
-    /// Row 0 is the top of the visible viewport.  Returns `None` if the
-    /// coordinates are out of bounds.
+    /// Row 0 is the top of the visible viewport. When the terminal is scrolled
+    /// (display_offset > 0), this returns cells from the scrollback history.
     pub fn cell(&self, row: usize, col: usize) -> Option<&Cell> {
         if row >= self.rows() || col >= self.cols() {
             return None;
         }
-        // `Term::grid` exposes a `Grid<Cell>` indexed by `Point<Line, Column>`.
-        // Lines in the grid are stored relative to the viewport: line 0 is the
-        // topmost visible line.
-        let point = Point::new(Line(row as i32), Column(col));
+        let display_offset = self.term.grid().display_offset();
+        // Line(0) = top of the active screen. Negative lines = scrollback.
+        // When scrolled up by `display_offset`, the viewport top is at
+        // Line(-(display_offset as i32)).
+        let line = Line(row as i32 - display_offset as i32);
+        let point = Point::new(line, Column(col));
         Some(&self.term.grid()[point])
     }
 
     /// Current cursor position (viewport-relative).
-    pub fn cursor_point(&self) -> Point {
-        self.term.grid().cursor.point
+    ///
+    /// Returns `None` if the terminal is scrolled (cursor is off-viewport).
+    pub fn cursor_point(&self) -> Option<Point> {
+        if self.term.grid().display_offset() == 0 {
+            Some(self.term.grid().cursor.point)
+        } else {
+            None // cursor is below the viewport when scrolled up
+        }
     }
 
     /// Scroll the viewport by `lines` lines.
