@@ -39,9 +39,12 @@ impl TerminalView {
     }
 
     /// Returns an iced `Element` backed by a full-size canvas.
-    pub fn view(&self) -> Element<'_, RendererMessage> {
+    ///
+    /// Consumes `self` so that the grid data is moved into the canvas program
+    /// and lives as long as the returned element.
+    pub fn view(self) -> Element<'static, RendererMessage> {
         let program = TerminalCanvas {
-            grid: &self.grid,
+            grid: self.grid,
             font_size: self.font_size,
             cell_width: self.cell_width,
             cell_height: self.cell_height,
@@ -58,15 +61,15 @@ impl TerminalView {
 // TerminalCanvas — canvas::Program implementation
 // ---------------------------------------------------------------------------
 
-/// Internal canvas program that holds references to grid data and font metrics.
-struct TerminalCanvas<'a> {
-    grid: &'a RenderGrid,
+/// Internal canvas program that owns grid data and font metrics.
+struct TerminalCanvas {
+    grid: RenderGrid,
     font_size: f32,
     cell_width: f32,
     cell_height: f32,
 }
 
-impl<'a> canvas::Program<RendererMessage> for TerminalCanvas<'a> {
+impl canvas::Program<RendererMessage> for TerminalCanvas {
     type State = ();
 
     fn draw(
