@@ -97,6 +97,8 @@ enum Message {
     AIStreamError(pane_grid::Pane, String),
     AIProviderChanged(pane_grid::Pane, String),
     AIModelChanged(pane_grid::Pane, String),
+    AIFetchModels(pane_grid::Pane),
+    AIModelsFetched(pane_grid::Pane, Vec<String>),
     ToggleAIChat,
     // Settings panel
     OpenSettings,
@@ -569,11 +571,13 @@ impl Altermative {
                         tab.panes.split(pane_grid::Axis::Vertical, focused, block)
                     {
                         tab.focus = Some(new_pane);
-                        // Auto-focus the text_input so the user can type immediately.
+                        // Auto-focus the text_input and fetch models.
                         self.resize_all_panes();
-                        return widget_focus(WidgetId::from(
+                        let focus_task = widget_focus(WidgetId::from(
                             format!("ai-chat-input-{:?}", new_pane),
                         ));
+                        let fetch_task = self.update(Message::AIFetchModels(new_pane));
+                        return Task::batch([focus_task, fetch_task]);
                     }
                 }
                 self.resize_all_panes();
@@ -665,12 +669,65 @@ impl Altermative {
                 if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
                     state.provider_name = provider;
                     state.model_name = new_model;
+                    state.available_models.clear();
                 }
+                // Trigger a model list fetch for the new provider.
+                return self.update(Message::AIFetchModels(pane));
             }
             Message::AIModelChanged(pane, model) => {
                 let tab = self.active_tab_mut();
                 if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
                     state.model_name = model;
+                }
+            }
+            Message::AIFetchModels(pane) => {
+                // Look up provider info for the AI chat pane.
+                let (provider_name, base_url, api_key) = {
+                    let tab = self.active_tab();
+                    if let Some(Block::AIChat { state }) = tab.panes.get(pane) {
+                        let pname = state.provider_name.clone();
+                        let entry = self.config.ai.providers.get(&pname);
+                        let base_url = entry
+                            .map(|e| e.resolved_base_url(&pname))
+                            .unwrap_or_else(|| {
+                                altermative_config::default_base_url(&pname)
+                                    .unwrap_or("")
+                                    .to_string()
+                            });
+                        let api_key = entry.and_then(|e| e.api_key.clone());
+                        (pname, base_url, api_key)
+                    } else {
+                        return Task::none();
+                    }
+                };
+
+                // Mark as loading.
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    state.models_loading = true;
+                }
+
+                // Spawn async fetch.
+                let ptype = provider_name.clone();
+                return Task::perform(
+                    async move {
+                        ai::fetch_models(
+                            &base_url,
+                            api_key.as_deref(),
+                            &ptype,
+                        )
+                        .await
+                    },
+                    move |models| Message::AIModelsFetched(pane, models),
+                );
+            }
+            Message::AIModelsFetched(pane, models) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                    state.models_loading = false;
+                    state.available_models = models;
+                    // If the current model is not in the list, and we have models, keep it
+                    // (the user may have typed a custom model).
                 }
             }
 
@@ -1082,11 +1139,32 @@ fn ai_chat_view<'a>(
     .text_size(11)
     .padding(Padding::from([2, 6]));
 
-    let model_input = text_input("model", &state.model_name)
-        .on_input(move |val| Message::AIModelChanged(pane, val))
-        .size(11)
+    // Model selector: pick_list when models are fetched, text_input as fallback.
+    let model_selector: Element<'a, Message> = if !state.available_models.is_empty() {
+        pick_list(
+            state.available_models.clone(),
+            Some(state.model_name.clone()),
+            move |selected| Message::AIModelChanged(pane, selected),
+        )
+        .text_size(11)
         .padding(Padding::from([2, 6]))
-        .width(Length::Fixed(180.0));
+        .width(Length::Fixed(220.0))
+        .into()
+    } else if state.models_loading {
+        container(
+            text("Loading models...").size(11).color(Color::from_rgb(0.50, 0.50, 0.55))
+        )
+        .padding(Padding::from([2, 6]))
+        .width(Length::Fixed(180.0))
+        .into()
+    } else {
+        text_input("model", &state.model_name)
+            .on_input(move |val| Message::AIModelChanged(pane, val))
+            .size(11)
+            .padding(Padding::from([2, 6]))
+            .width(Length::Fixed(180.0))
+            .into()
+    };
 
     let context_label = if has_terminal_context {
         text("Context: Terminal (focused)")
@@ -1098,7 +1176,7 @@ fn ai_chat_view<'a>(
             .color(Color::from_rgb(0.40, 0.40, 0.45))
     };
 
-    let header_row = row![provider_picker, model_input, iced::widget::space().width(Fill), context_label]
+    let header_row = row![provider_picker, model_selector, iced::widget::space().width(Fill), context_label]
         .spacing(6)
         .align_y(iced::Alignment::Center);
 

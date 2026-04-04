@@ -32,6 +32,10 @@ pub struct AIChatState {
     pub error: Option<String>,
     /// Scroll offset for the chat history (auto-scroll to bottom).
     pub scroll_to_bottom: bool,
+    /// Available models fetched from the provider API (for the dropdown).
+    pub available_models: Vec<String>,
+    /// Whether we are currently fetching the model list.
+    pub models_loading: bool,
 }
 
 impl AIChatState {
@@ -46,6 +50,8 @@ impl AIChatState {
             model_name,
             error: None,
             scroll_to_bottom: true,
+            available_models: Vec::new(),
+            models_loading: false,
         }
     }
 
