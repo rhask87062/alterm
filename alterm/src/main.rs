@@ -5,8 +5,9 @@ use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
     button, column, container, opaque, pane_grid, pick_list, row, scrollable, slider, stack, text,
-    text_input, toggler, Column,
+    text_input, toggler, Column, Id as WidgetId,
 };
+use iced::widget::operation::focus as widget_focus;
 use iced::window;
 use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Subscription, Task, Theme};
 
@@ -352,6 +353,15 @@ impl Altermative {
             }
             Message::PaneClicked(pane) => {
                 self.active_tab_mut().focus = Some(pane);
+                // If the clicked pane is an AI chat, focus its text_input widget
+                // so keyboard events are captured by it (not routed to the PTY).
+                if let Some(block) = self.active_tab().panes.get(pane) {
+                    if block.is_ai_chat() {
+                        return widget_focus(WidgetId::from(
+                            format!("ai-chat-input-{:?}", pane),
+                        ));
+                    }
+                }
             }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
                 self.active_tab_mut().panes.drop(pane, target);
@@ -559,6 +569,11 @@ impl Altermative {
                         tab.panes.split(pane_grid::Axis::Vertical, focused, block)
                     {
                         tab.focus = Some(new_pane);
+                        // Auto-focus the text_input so the user can type immediately.
+                        self.resize_all_panes();
+                        return widget_focus(WidgetId::from(
+                            format!("ai-chat-input-{:?}", new_pane),
+                        ));
                     }
                 }
                 self.resize_all_panes();
@@ -1216,7 +1231,8 @@ fn ai_chat_view<'a>(
         .on_input(move |val| Message::AIInputChanged(pane, val))
         .on_submit(Message::AISendMessage(pane))
         .size(13)
-        .padding(Padding::from([8, 10]));
+        .padding(Padding::from([8, 10]))
+        .id(WidgetId::from(format!("ai-chat-input-{:?}", pane)));
 
     let send_enabled = !state.input.trim().is_empty() && !state.streaming;
 
