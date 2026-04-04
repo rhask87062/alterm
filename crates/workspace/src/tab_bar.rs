@@ -78,9 +78,9 @@ pub fn tab_bar_view<'a, M: Clone + 'a>(
 
 fn tab_bar_container_style() -> iced::widget::container::Style {
     iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.10))),
+        background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
         border: Border {
-            color: Color::from_rgb(0.15, 0.15, 0.18),
+            color: Color::from_rgb(0.12, 0.12, 0.15),
             width: 0.0,
             radius: 0.0.into(),
         },
@@ -90,23 +90,23 @@ fn tab_bar_container_style() -> iced::widget::container::Style {
 
 fn tab_button_style(
     _theme: &Theme,
-    _status: button::Status,
+    status: button::Status,
     is_active: bool,
 ) -> button::Style {
-    let bg = if is_active {
-        Color::from_rgb(0.18, 0.18, 0.24)
-    } else {
-        Color::from_rgb(0.10, 0.10, 0.12)
+    let bg = match (is_active, status) {
+        (true, _) => Color::from_rgb(0.16, 0.18, 0.26),
+        (false, button::Status::Hovered) => Color::from_rgb(0.13, 0.13, 0.17),
+        _ => Color::from_rgb(0.08, 0.08, 0.10),
     };
 
     let text_color = if is_active {
-        Color::from_rgb(0.95, 0.95, 0.95)
+        Color::from_rgb(0.95, 0.96, 1.0)
     } else {
-        Color::from_rgb(0.55, 0.55, 0.55)
+        Color::from_rgb(0.45, 0.45, 0.48)
     };
 
-    let border_color = if is_active {
-        Color::from_rgb(0.35, 0.55, 0.85)
+    let border_bottom = if is_active {
+        Color::from_rgb(0.40, 0.60, 0.95)
     } else {
         Color::TRANSPARENT
     };
@@ -115,7 +115,7 @@ fn tab_button_style(
         background: Some(Background::Color(bg)),
         text_color,
         border: Border {
-            color: border_color,
+            color: border_bottom,
             width: if is_active { 1.0 } else { 0.0 },
             radius: 4.0.into(),
         },
@@ -125,11 +125,15 @@ fn tab_button_style(
 
 fn close_button_style(
     _theme: &Theme,
-    _status: button::Status,
+    status: button::Status,
 ) -> button::Style {
+    let text_color = match status {
+        button::Status::Hovered => Color::from_rgb(0.9, 0.3, 0.3),
+        _ => Color::from_rgb(0.4, 0.4, 0.4),
+    };
     button::Style {
         background: Some(Background::Color(Color::TRANSPARENT)),
-        text_color: Color::from_rgb(0.5, 0.5, 0.5),
+        text_color,
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
@@ -141,11 +145,15 @@ fn close_button_style(
 
 fn new_tab_button_style(
     _theme: &Theme,
-    _status: button::Status,
+    status: button::Status,
 ) -> button::Style {
+    let bg = match status {
+        button::Status::Hovered => Color::from_rgb(0.16, 0.16, 0.20),
+        _ => Color::from_rgb(0.10, 0.10, 0.12),
+    };
     button::Style {
-        background: Some(Background::Color(Color::from_rgb(0.12, 0.12, 0.14))),
-        text_color: Color::from_rgb(0.6, 0.6, 0.6),
+        background: Some(Background::Color(bg)),
+        text_color: Color::from_rgb(0.55, 0.55, 0.58),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,

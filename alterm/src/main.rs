@@ -197,10 +197,18 @@ impl Altermative {
             Message::SplitHorizontal => {
                 let tab = self.active_tab_mut();
                 if let Some(focused) = tab.focus {
-                    if let Ok(block) = Block::new_terminal(24, 80) {
+                    // Halve cols for a vertical-axis split (left|right).
+                    let (rows, cols) = tab.panes.get(focused)
+                        .map(|b| b.dimensions()).unwrap_or((24, 80));
+                    let half_cols = (cols / 2).max(20);
+                    if let Ok(block) = Block::new_terminal(rows, half_cols) {
                         if let Some((new_pane, _split)) =
                             tab.panes.split(pane_grid::Axis::Vertical, focused, block)
                         {
+                            // Resize the original pane too.
+                            if let Some(old_block) = tab.panes.get_mut(focused) {
+                                old_block.resize(rows, half_cols);
+                            }
                             tab.focus = Some(new_pane);
                         }
                     }
@@ -209,10 +217,17 @@ impl Altermative {
             Message::SplitVertical => {
                 let tab = self.active_tab_mut();
                 if let Some(focused) = tab.focus {
-                    if let Ok(block) = Block::new_terminal(24, 80) {
+                    // Halve rows for a horizontal-axis split (top/bottom).
+                    let (rows, cols) = tab.panes.get(focused)
+                        .map(|b| b.dimensions()).unwrap_or((24, 80));
+                    let half_rows = (rows / 2).max(4);
+                    if let Ok(block) = Block::new_terminal(half_rows, cols) {
                         if let Some((new_pane, _split)) =
                             tab.panes.split(pane_grid::Axis::Horizontal, focused, block)
                         {
+                            if let Some(old_block) = tab.panes.get_mut(focused) {
+                                old_block.resize(half_rows, cols);
+                            }
                             tab.focus = Some(new_pane);
                         }
                     }
@@ -242,20 +257,32 @@ impl Altermative {
             // Per-pane title bar controls (operate on a specific pane)
             Message::SplitPaneRight(pane) => {
                 let tab = self.active_tab_mut();
-                if let Ok(block) = Block::new_terminal(24, 80) {
+                let (rows, cols) = tab.panes.get(pane)
+                    .map(|b| b.dimensions()).unwrap_or((24, 80));
+                let half_cols = (cols / 2).max(20);
+                if let Ok(block) = Block::new_terminal(rows, half_cols) {
                     if let Some((new_pane, _split)) =
                         tab.panes.split(pane_grid::Axis::Vertical, pane, block)
                     {
+                        if let Some(old_block) = tab.panes.get_mut(pane) {
+                            old_block.resize(rows, half_cols);
+                        }
                         tab.focus = Some(new_pane);
                     }
                 }
             }
             Message::SplitPaneDown(pane) => {
                 let tab = self.active_tab_mut();
-                if let Ok(block) = Block::new_terminal(24, 80) {
+                let (rows, cols) = tab.panes.get(pane)
+                    .map(|b| b.dimensions()).unwrap_or((24, 80));
+                let half_rows = (rows / 2).max(4);
+                if let Ok(block) = Block::new_terminal(half_rows, cols) {
                     if let Some((new_pane, _split)) =
                         tab.panes.split(pane_grid::Axis::Horizontal, pane, block)
                     {
+                        if let Some(old_block) = tab.panes.get_mut(pane) {
+                            old_block.resize(half_rows, cols);
+                        }
                         tab.focus = Some(new_pane);
                     }
                 }
@@ -311,17 +338,8 @@ impl Altermative {
                 }
             },
             Message::SidebarNewTerminal => {
-                // Split the focused pane horizontally with a new terminal.
-                let tab = self.active_tab_mut();
-                if let Some(focused) = tab.focus {
-                    if let Ok(block) = Block::new_terminal(24, 80) {
-                        if let Some((new_pane, _split)) =
-                            tab.panes.split(pane_grid::Axis::Vertical, focused, block)
-                        {
-                            tab.focus = Some(new_pane);
-                        }
-                    }
-                }
+                // Split the focused pane with a new terminal (right).
+                return self.update(Message::SplitHorizontal);
             }
 
             // Command palette messages
@@ -664,22 +682,26 @@ fn title_bar_style(
     _theme: &Theme,
     is_focused: bool,
 ) -> iced::widget::container::Style {
-    use iced::{Background, Border, Color};
-
     let bg = if is_focused {
-        Color::from_rgb(0.15, 0.15, 0.20)
+        Color::from_rgb(0.14, 0.16, 0.24)
     } else {
-        Color::from_rgb(0.10, 0.10, 0.12)
+        Color::from_rgb(0.08, 0.08, 0.10)
+    };
+
+    let text_color = if is_focused {
+        Color::from_rgb(0.90, 0.92, 0.96)
+    } else {
+        Color::from_rgb(0.50, 0.50, 0.52)
     };
 
     iced::widget::container::Style {
         background: Some(Background::Color(bg)),
-        text_color: Some(Color::from_rgb(0.8, 0.8, 0.8)),
+        text_color: Some(text_color),
         border: Border {
             color: if is_focused {
-                Color::from_rgb(0.3, 0.5, 0.8)
+                Color::from_rgb(0.35, 0.55, 0.90)
             } else {
-                Color::TRANSPARENT
+                Color::from_rgb(0.12, 0.12, 0.14)
             },
             width: if is_focused { 1.0 } else { 0.0 },
             radius: 0.0.into(),
@@ -692,17 +714,15 @@ fn pane_content_style(
     _theme: &Theme,
     is_focused: bool,
 ) -> iced::widget::container::Style {
-    use iced::{Background, Border, Color};
-
     iced::widget::container::Style {
         background: Some(Background::Color(Color::from_rgb(0.05, 0.05, 0.05))),
         border: Border {
             color: if is_focused {
-                Color::from_rgb(0.3, 0.5, 0.8)
+                Color::from_rgb(0.35, 0.55, 0.90)
             } else {
-                Color::from_rgb(0.15, 0.15, 0.15)
+                Color::from_rgb(0.12, 0.12, 0.14)
             },
-            width: 1.0,
+            width: if is_focused { 2.0 } else { 1.0 },
             radius: 0.0.into(),
         },
         ..Default::default()

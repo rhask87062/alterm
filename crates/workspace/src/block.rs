@@ -98,6 +98,15 @@ impl Block {
         }
     }
 
+    /// Return the current terminal dimensions (rows, cols).
+    pub fn dimensions(&self) -> (u16, u16) {
+        match self {
+            Block::Terminal { state, .. } => {
+                (state.rows() as u16, state.cols() as u16)
+            }
+        }
+    }
+
     /// Human-readable title for the pane tab / title bar.
     pub fn title(&self) -> String {
         match self {
