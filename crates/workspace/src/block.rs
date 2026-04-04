@@ -28,6 +28,10 @@ pub enum Block {
         palette: AnsiPalette,
         cursor_visible: bool,
         blink_count: u32,
+        /// Whether the terminal content has changed since the last render.
+        dirty: bool,
+        /// Cached render grid to avoid rebuilding when nothing changed.
+        cached_grid: Option<RenderGrid>,
     },
 }
 
@@ -51,6 +55,8 @@ impl Block {
             palette,
             cursor_visible: true,
             blink_count: 0,
+            dirty: true,
+            cached_grid: None,
         })
     }
 
@@ -64,13 +70,16 @@ impl Block {
                 events,
                 cursor_visible,
                 blink_count,
+                dirty,
                 ..
             } => {
                 // Drain all pending PTY events without blocking.
+                let mut received_output = false;
                 loop {
                     match events.try_recv() {
                         Ok(TerminalEvent::PtyOutput(data)) => {
                             state.process_output(&data);
+                            received_output = true;
                         }
                         Ok(TerminalEvent::PtyExited(_)) | Ok(TerminalEvent::PtyError(_)) => {
                             break;
@@ -79,14 +88,22 @@ impl Block {
                     }
                 }
 
+                if received_output {
+                    *dirty = true;
+                }
+
                 // Cursor blink.
                 *blink_count += 1;
                 if *blink_count >= BLINK_TICKS {
                     *blink_count = 0;
                     *cursor_visible = !*cursor_visible;
+                    *dirty = true;
                 }
             }
         }
+
+        // Rebuild the cached grid only when something changed.
+        self.refresh_cache();
     }
 
     /// Send raw input bytes to the PTY.
@@ -103,13 +120,16 @@ impl Block {
     /// Resize both the terminal grid and the PTY.
     pub fn resize(&mut self, rows: u16, cols: u16) {
         match self {
-            Block::Terminal { state, pty, .. } => {
+            Block::Terminal { state, pty, dirty, cached_grid, .. } => {
                 state.resize(rows as usize, cols as usize);
                 if let Err(e) = pty.resize(rows, cols) {
                     log::warn!("Block::resize PTY failed: {e}");
                 }
+                *dirty = true;
+                *cached_grid = None;
             }
         }
+        self.refresh_cache();
     }
 
     /// Return the current terminal dimensions (rows, cols).
@@ -129,10 +149,30 @@ impl Block {
     }
 
     /// Build a render-ready grid from the block's current terminal state.
+    ///
+    /// Returns a cached grid when nothing has changed since the last render.
     pub fn render_grid(&self) -> RenderGrid {
         match self {
-            Block::Terminal { state, palette, cursor_visible, .. } => {
-                RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
+            Block::Terminal { cached_grid, .. } => {
+                // Return the cached grid — always populated by tick().
+                cached_grid.clone().expect("render_grid called before tick; cache is empty")
+            }
+        }
+    }
+
+    /// Rebuild the cached render grid if the terminal is dirty.
+    ///
+    /// Call this at the end of `tick()` so the immutable `render_grid()`
+    /// used by `view()` always has a ready snapshot.
+    fn refresh_cache(&mut self) {
+        match self {
+            Block::Terminal { state, palette, cursor_visible, dirty, cached_grid, .. } => {
+                if *dirty || cached_grid.is_none() {
+                    *cached_grid = Some(
+                        RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible),
+                    );
+                    *dirty = false;
+                }
             }
         }
     }
@@ -152,9 +192,11 @@ impl Block {
     /// Positive = scroll up (toward history), negative = scroll down.
     pub fn scroll(&mut self, lines: i32) {
         match self {
-            Block::Terminal { state, .. } => {
+            Block::Terminal { state, dirty, .. } => {
                 state.scroll(lines);
+                *dirty = true;
             }
         }
+        self.refresh_cache();
     }
 }

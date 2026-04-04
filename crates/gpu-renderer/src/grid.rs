@@ -35,6 +35,7 @@ pub struct RenderCell {
 // ---------------------------------------------------------------------------
 
 /// The complete visible terminal grid converted to render-ready cells.
+#[derive(Clone)]
 pub struct RenderGrid {
     /// Row-major 2-D grid: `cells[row][col]`.
     pub cells: Vec<Vec<RenderCell>>,

@@ -31,11 +31,12 @@ impl TermSize {
     }
 }
 
+/// Default scrollback history in lines.
+const SCROLLBACK_LINES: usize = 10_000;
+
 impl Dimensions for TermSize {
     fn total_lines(&self) -> usize {
-        // For a freshly-created terminal with no scrollback yet, total_lines
-        // equals screen_lines.  The grid will grow as scrollback accumulates.
-        self.rows
+        self.rows + SCROLLBACK_LINES
     }
 
     fn screen_lines(&self) -> usize {
@@ -95,7 +96,8 @@ pub struct TerminalState {
 impl TerminalState {
     /// Create a new terminal with the given grid dimensions.
     pub fn new(rows: usize, cols: usize) -> Self {
-        let config = Config::default();
+        let mut config = Config::default();
+        config.scrolling_history = SCROLLBACK_LINES;
         let size = TermSize::new(rows, cols);
         let event_proxy = EventProxy::new();
         let term = Term::new(config, &size, event_proxy.clone());
