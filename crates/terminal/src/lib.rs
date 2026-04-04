@@ -3,6 +3,8 @@
 
 pub mod event;
 pub mod pty;
+pub mod term;
 
 pub use event::TerminalEvent;
 pub use pty::PtyHandle;
+pub use term::TerminalState;
