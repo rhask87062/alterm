@@ -3,12 +3,12 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
-use iced::widget::{button, container, pane_grid, text};
+use iced::widget::{button, column, container, pane_grid, text};
 use iced::window;
 use iced::{Element, Event, Fill, Subscription, Task, Theme};
 
 use gpu_renderer::widget::TerminalView;
-use workspace::Block;
+use workspace::{tab_bar_view, Block, Tab, TabBarAction};
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -22,8 +22,8 @@ fn main() -> iced::Result {
 }
 
 struct Altermative {
-    panes: pane_grid::State<Block>,
-    focus: Option<pane_grid::Pane>,
+    tabs: Vec<Tab>,
+    active_tab: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -39,89 +39,143 @@ enum Message {
     SplitVertical,
     ClosePane,
     MaximizeToggle,
+    // Tab management
+    NewTab,
+    CloseTab(usize),
+    SelectTab(usize),
+    TabBarAction(TabBarAction),
 }
 
 impl Altermative {
     fn new() -> (Self, Task<Message>) {
-        let first_block = Block::new_terminal(24, 80)
-            .expect("Failed to spawn initial terminal");
-
-        let (panes, first_pane) = pane_grid::State::new(first_block);
+        let first_tab = Tab::new().expect("Failed to create initial tab");
 
         let app = Altermative {
-            panes,
-            focus: Some(first_pane),
+            tabs: vec![first_tab],
+            active_tab: 0,
         };
 
         (app, Task::none())
     }
 
+    /// Get a reference to the active tab.
+    fn active_tab(&self) -> &Tab {
+        &self.tabs[self.active_tab]
+    }
+
+    /// Get a mutable reference to the active tab.
+    fn active_tab_mut(&mut self) -> &mut Tab {
+        &mut self.tabs[self.active_tab]
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
-                // Tick all panes.
-                for (_pane, block) in self.panes.iter_mut() {
-                    block.tick();
+                // Tick all panes in all tabs.
+                for tab in &mut self.tabs {
+                    for (_pane, block) in tab.panes.iter_mut() {
+                        block.tick();
+                    }
                 }
             }
             Message::PaneClicked(pane) => {
-                self.focus = Some(pane);
+                self.active_tab_mut().focus = Some(pane);
             }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
-                self.panes.drop(pane, target);
+                self.active_tab_mut().panes.drop(pane, target);
             }
             Message::PaneDragged(_) => {
                 // Picked / Canceled — nothing to do.
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
-                self.panes.resize(split, ratio);
+                self.active_tab_mut().panes.resize(split, ratio);
             }
             Message::SplitHorizontal => {
-                if let Some(focused) = self.focus {
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
                     if let Ok(block) = Block::new_terminal(24, 80) {
                         if let Some((new_pane, _split)) =
-                            self.panes.split(pane_grid::Axis::Vertical, focused, block)
+                            tab.panes.split(pane_grid::Axis::Vertical, focused, block)
                         {
-                            self.focus = Some(new_pane);
+                            tab.focus = Some(new_pane);
                         }
                     }
                 }
             }
             Message::SplitVertical => {
-                if let Some(focused) = self.focus {
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
                     if let Ok(block) = Block::new_terminal(24, 80) {
                         if let Some((new_pane, _split)) =
-                            self.panes.split(pane_grid::Axis::Horizontal, focused, block)
+                            tab.panes.split(pane_grid::Axis::Horizontal, focused, block)
                         {
-                            self.focus = Some(new_pane);
+                            tab.focus = Some(new_pane);
                         }
                     }
                 }
             }
             Message::ClosePane => {
-                if let Some(focused) = self.focus {
-                    if self.panes.len() > 1 {
-                        if let Some((_closed_block, sibling)) = self.panes.close(focused) {
-                            self.focus = Some(sibling);
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if tab.panes.len() > 1 {
+                        if let Some((_closed_block, sibling)) = tab.panes.close(focused) {
+                            tab.focus = Some(sibling);
                         }
                     }
                 }
             }
             Message::MaximizeToggle => {
-                if let Some(focused) = self.focus {
-                    if self.panes.maximized().is_some() {
-                        self.panes.restore();
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if tab.panes.maximized().is_some() {
+                        tab.panes.restore();
                     } else {
-                        self.panes.maximize(focused);
+                        tab.panes.maximize(focused);
                     }
                 }
             }
+
+            // -- Tab management --
+            Message::NewTab => {
+                if let Ok(new_tab) = Tab::new() {
+                    self.tabs.push(new_tab);
+                    self.active_tab = self.tabs.len() - 1;
+                }
+            }
+            Message::CloseTab(index) => {
+                if self.tabs.len() > 1 && index < self.tabs.len() {
+                    self.tabs.remove(index);
+                    // Adjust active_tab index after removal.
+                    if self.active_tab >= self.tabs.len() {
+                        self.active_tab = self.tabs.len() - 1;
+                    } else if self.active_tab > index {
+                        self.active_tab -= 1;
+                    }
+                }
+            }
+            Message::SelectTab(index) => {
+                if index < self.tabs.len() {
+                    self.active_tab = index;
+                }
+            }
+            Message::TabBarAction(action) => match action {
+                TabBarAction::Select(i) => return self.update(Message::SelectTab(i)),
+                TabBarAction::Close(i) => return self.update(Message::CloseTab(i)),
+                TabBarAction::New => return self.update(Message::NewTab),
+            },
+
             Message::KeyboardInput(key, modifiers) => {
-                // Pane management shortcuts: Ctrl+Shift+...
+                // Tab management shortcuts: Ctrl+Shift+T/W, Ctrl+Shift+Tab
                 if modifiers.control() && modifiers.shift() {
                     if let Key::Character(ref c) = key {
                         let ch = c.as_str().to_ascii_lowercase();
                         match ch.as_str() {
+                            "t" => return self.update(Message::NewTab),
+                            "w" => {
+                                let idx = self.active_tab;
+                                return self.update(Message::CloseTab(idx));
+                            }
+                            // Pane management shortcuts
                             "d" => return self.update(Message::SplitHorizontal),
                             "e" => return self.update(Message::SplitVertical),
                             "x" => return self.update(Message::ClosePane),
@@ -148,9 +202,47 @@ impl Altermative {
                             _ => None,
                         };
                         if let Some(dir) = direction {
-                            if let Some(focused) = self.focus {
-                                if let Some(adjacent) = self.panes.adjacent(focused, dir) {
-                                    self.focus = Some(adjacent);
+                            let tab = self.active_tab_mut();
+                            if let Some(focused) = tab.focus {
+                                if let Some(adjacent) = tab.panes.adjacent(focused, dir) {
+                                    tab.focus = Some(adjacent);
+                                }
+                            }
+                            return Task::none();
+                        }
+                    }
+
+                    // Ctrl+Shift+Tab — previous tab
+                    if let Key::Named(Named::Tab) = key {
+                        if self.tabs.len() > 1 {
+                            let prev = if self.active_tab == 0 {
+                                self.tabs.len() - 1
+                            } else {
+                                self.active_tab - 1
+                            };
+                            return self.update(Message::SelectTab(prev));
+                        }
+                        return Task::none();
+                    }
+                }
+
+                // Ctrl+Tab — next tab (without Shift)
+                if modifiers.control() && !modifiers.shift() {
+                    if let Key::Named(Named::Tab) = key {
+                        if self.tabs.len() > 1 {
+                            let next = (self.active_tab + 1) % self.tabs.len();
+                            return self.update(Message::SelectTab(next));
+                        }
+                        return Task::none();
+                    }
+
+                    // Ctrl+1-9 — jump to tab by number
+                    if let Key::Character(ref c) = key {
+                        if let Ok(n) = c.as_str().parse::<usize>() {
+                            if n >= 1 && n <= 9 {
+                                let idx = n - 1;
+                                if idx < self.tabs.len() {
+                                    return self.update(Message::SelectTab(idx));
                                 }
                             }
                             return Task::none();
@@ -159,16 +251,20 @@ impl Altermative {
                 }
 
                 // Reset cursor blink on keypress.
-                if let Some(focused) = self.focus {
-                    if let Some(block) = self.panes.get_mut(focused) {
-                        block.reset_cursor_blink();
+                {
+                    let tab = self.active_tab_mut();
+                    if let Some(focused) = tab.focus {
+                        if let Some(block) = tab.panes.get_mut(focused) {
+                            block.reset_cursor_blink();
+                        }
                     }
                 }
 
                 // Forward to focused terminal.
                 if let Some(bytes) = key_to_bytes(&key, &modifiers) {
-                    if let Some(focused) = self.focus {
-                        if let Some(block) = self.panes.get_mut(focused) {
+                    let tab = self.active_tab_mut();
+                    if let Some(focused) = tab.focus {
+                        if let Some(block) = tab.panes.get_mut(focused) {
                             block.write_input(&bytes);
                         }
                     }
@@ -176,8 +272,9 @@ impl Altermative {
             }
             Message::ClipboardContent(content) => {
                 if let Some(text) = content {
-                    if let Some(focused) = self.focus {
-                        if let Some(block) = self.panes.get_mut(focused) {
+                    let tab = self.active_tab_mut();
+                    if let Some(focused) = tab.focus {
+                        if let Some(block) = tab.panes.get_mut(focused) {
                             let mut paste_bytes = Vec::new();
                             paste_bytes.extend_from_slice(b"\x1b[200~");
                             paste_bytes.extend_from_slice(text.as_bytes());
@@ -188,12 +285,11 @@ impl Altermative {
                 }
             }
             Message::MouseScroll(delta_y) => {
-                // TODO: route scroll to the pane under the mouse cursor.
-                // For now, scroll the focused pane.
                 let lines = delta_y.round() as i32;
                 if lines != 0 {
-                    if let Some(focused) = self.focus {
-                        if let Some(block) = self.panes.get_mut(focused) {
+                    let tab = self.active_tab_mut();
+                    if let Some(focused) = tab.focus {
+                        if let Some(block) = tab.panes.get_mut(focused) {
                             block.scroll(lines);
                         }
                     }
@@ -204,54 +300,58 @@ impl Altermative {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let focus = self.focus;
-        let total_panes = self.panes.len();
+        let tab = self.active_tab();
+        let focus = tab.focus;
+        let total_panes = tab.panes.len();
 
-        let pane_grid_widget = pane_grid::PaneGrid::new(&self.panes, |pane, block, _is_maximized| {
-            let is_focused = focus == Some(pane);
+        // Tab bar
+        let titles: Vec<String> = self.tabs.iter().map(|t| t.title.clone()).collect();
+        let tab_bar = tab_bar_view(&titles, self.active_tab, Message::TabBarAction);
 
-            // Build the terminal canvas.
-            let grid = block.render_grid();
-            let terminal_view = TerminalView::new(grid);
-            let content: Element<'_, Message> = terminal_view.view();
+        // Pane grid for the active tab
+        let pane_grid_widget =
+            pane_grid::PaneGrid::new(&tab.panes, |pane, block, _is_maximized| {
+                let is_focused = focus == Some(pane);
 
-            // Title bar.
-            let title = text(block.title()).size(12);
+                // Build the terminal canvas.
+                let grid = block.render_grid();
+                let terminal_view = TerminalView::new(grid);
+                let content: Element<'_, Message> = terminal_view.view();
 
-            let title_bar = if total_panes > 1 {
-                let close_btn: Element<'_, Message> = button(text("X").size(12))
-                    .on_press(Message::ClosePane)
-                    .padding(2)
-                    .into();
+                // Title bar.
+                let title = text(block.title()).size(12);
 
-                pane_grid::TitleBar::new(title)
-                    .controls(close_btn)
-                    .padding(4)
-                    .style(move |theme: &Theme| {
-                        title_bar_style(theme, is_focused)
-                    })
-            } else {
-                pane_grid::TitleBar::new(title)
-                    .padding(4)
-                    .style(move |theme: &Theme| {
-                        title_bar_style(theme, is_focused)
-                    })
-            };
+                let title_bar = if total_panes > 1 {
+                    let close_btn: Element<'_, Message> = button(text("X").size(12))
+                        .on_press(Message::ClosePane)
+                        .padding(2)
+                        .into();
 
-            pane_grid::Content::new(content)
-                .title_bar(title_bar)
-                .style(move |theme: &Theme| {
-                    pane_content_style(theme, is_focused)
-                })
-        })
-        .on_click(Message::PaneClicked)
-        .on_drag(Message::PaneDragged)
-        .on_resize(10, Message::PaneResized)
-        .spacing(2)
-        .width(Fill)
-        .height(Fill);
+                    pane_grid::TitleBar::new(title)
+                        .controls(close_btn)
+                        .padding(4)
+                        .style(move |theme: &Theme| title_bar_style(theme, is_focused))
+                } else {
+                    pane_grid::TitleBar::new(title)
+                        .padding(4)
+                        .style(move |theme: &Theme| title_bar_style(theme, is_focused))
+                };
 
-        container(pane_grid_widget)
+                pane_grid::Content::new(content)
+                    .title_bar(title_bar)
+                    .style(move |theme: &Theme| pane_content_style(theme, is_focused))
+            })
+            .on_click(Message::PaneClicked)
+            .on_drag(Message::PaneDragged)
+            .on_resize(10, Message::PaneResized)
+            .spacing(2)
+            .width(Fill)
+            .height(Fill);
+
+        // Layout: tab bar on top, pane grid fills the rest
+        let layout = column![tab_bar, pane_grid_widget];
+
+        container(layout)
             .width(Fill)
             .height(Fill)
             .into()

@@ -4702,6 +4702,7 @@ name = "workspace"
 version = "0.1.0"
 dependencies = [
  "gpu-renderer",
+ "iced",
  "log",
  "terminal",
  "tokio",
