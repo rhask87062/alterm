@@ -29,6 +29,10 @@ pub enum Action {
     OpenSettings,
     Copy,
     Paste,
+    ScrollUp,
+    ScrollDown,
+    ScrollPageUp,
+    ScrollPageDown,
 }
 
 impl Action {
@@ -53,6 +57,10 @@ impl Action {
             Action::OpenSettings => "Open Settings",
             Action::Copy => "Copy",
             Action::Paste => "Paste",
+            Action::ScrollUp => "Scroll Up",
+            Action::ScrollDown => "Scroll Down",
+            Action::ScrollPageUp => "Scroll Page Up",
+            Action::ScrollPageDown => "Scroll Page Down",
         }
     }
 
@@ -77,6 +85,10 @@ impl Action {
             Action::OpenSettings => "Ctrl+Shift+,",
             Action::Copy => "Ctrl+Shift+C",
             Action::Paste => "Ctrl+Shift+V",
+            Action::ScrollUp => "Shift+Up",
+            Action::ScrollDown => "Shift+Down",
+            Action::ScrollPageUp => "Shift+PageUp",
+            Action::ScrollPageDown => "Shift+PageDown",
         }
     }
 }
@@ -88,6 +100,19 @@ pub fn match_shortcut(key: &Key, mods: &Modifiers) -> Option<Action> {
     // ── F-keys (no modifiers required) ──────────────────────────────
     if let Key::Named(Named::F2) = key {
         return Some(Action::RenameTab);
+    }
+
+    // ── Shift+PageUp/Down and Shift+Arrow for scrolling ─────────────
+    if mods.shift() && !mods.control() {
+        if let Key::Named(ref named) = key {
+            match named {
+                Named::PageUp => return Some(Action::ScrollPageUp),
+                Named::PageDown => return Some(Action::ScrollPageDown),
+                Named::ArrowUp => return Some(Action::ScrollUp),
+                Named::ArrowDown => return Some(Action::ScrollDown),
+                _ => {}
+            }
+        }
     }
 
     // ── Ctrl+Tab / Ctrl+Shift+Tab ───────────────────────────────────
@@ -170,5 +195,7 @@ pub fn all_palette_actions() -> Vec<Action> {
         Action::OpenSettings,
         Action::Copy,
         Action::Paste,
+        Action::ScrollPageUp,
+        Action::ScrollPageDown,
     ]
 }

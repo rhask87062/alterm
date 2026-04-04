@@ -39,6 +39,8 @@ struct Altermative {
     tabs: Vec<Tab>,
     active_tab: usize,
     palette: CommandPalette,
+    /// Accumulated touchpad scroll pixels (touchpads send many tiny deltas)
+    scroll_accumulator: f32,
     /// Current window dimensions in logical pixels.
     window_width: f32,
     window_height: f32,
@@ -95,6 +97,7 @@ impl Altermative {
             tabs: vec![first_tab],
             active_tab: 0,
             palette: CommandPalette::new(),
+            scroll_accumulator: 0.0,
             window_width,
             window_height,
         };
@@ -152,6 +155,17 @@ impl Altermative {
                 if cur_rows != rows || cur_cols != cols {
                     block.resize(rows, cols);
                 }
+            }
+        }
+    }
+
+    /// Scroll the focused pane by the given number of lines.
+    /// Positive = up (toward history), negative = down (toward recent).
+    fn scroll_focused(&mut self, lines: i32) {
+        let tab = self.active_tab_mut();
+        if let Some(focused) = tab.focus {
+            if let Some(block) = tab.panes.get_mut(focused) {
+                block.scroll(lines);
             }
         }
     }
@@ -230,6 +244,29 @@ impl Altermative {
             }
             Action::Paste => {
                 iced::clipboard::read().map(Message::ClipboardContent)
+            }
+            Action::ScrollUp => {
+                self.scroll_focused(3);
+                Task::none()
+            }
+            Action::ScrollDown => {
+                self.scroll_focused(-3);
+                Task::none()
+            }
+            Action::ScrollPageUp => {
+                // Scroll by roughly half a screen
+                let rows = self.active_tab().panes.iter().next()
+                    .map(|(_, b)| b.dimensions().0 as i32 / 2)
+                    .unwrap_or(12);
+                self.scroll_focused(rows);
+                Task::none()
+            }
+            Action::ScrollPageDown => {
+                let rows = self.active_tab().panes.iter().next()
+                    .map(|(_, b)| b.dimensions().0 as i32 / 2)
+                    .unwrap_or(12);
+                self.scroll_focused(-rows);
+                Task::none()
             }
         }
     }
@@ -500,14 +537,12 @@ impl Altermative {
                 }
             }
             Message::MouseScroll(delta_y) => {
-                let lines = delta_y.round() as i32;
+                // Accumulate small touchpad deltas until they reach a full line
+                self.scroll_accumulator += delta_y;
+                let lines = self.scroll_accumulator as i32;
                 if lines != 0 {
-                    let tab = self.active_tab_mut();
-                    if let Some(focused) = tab.focus {
-                        if let Some(block) = tab.panes.get_mut(focused) {
-                            block.scroll(lines);
-                        }
-                    }
+                    self.scroll_accumulator -= lines as f32;
+                    self.scroll_focused(lines);
                 }
             }
         }
@@ -693,11 +728,11 @@ impl Altermative {
                 match &event {
                     Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                         let y = match delta {
-                            iced::mouse::ScrollDelta::Lines { y, .. } => *y,
-                            iced::mouse::ScrollDelta::Pixels { y, .. } => *y / 19.6,
+                            iced::mouse::ScrollDelta::Lines { y, .. } => *y * 3.0,
+                            iced::mouse::ScrollDelta::Pixels { y, .. } => *y / 6.0, // touchpad: ~6px per line
                         };
-                        if y.abs() > 0.001 {
-                            return Some(Message::MouseScroll(y * 3.0));
+                        if y.abs() > 0.01 {
+                            return Some(Message::MouseScroll(y));
                         }
                     }
                     Event::Window(iced::window::Event::Resized(size)) => {

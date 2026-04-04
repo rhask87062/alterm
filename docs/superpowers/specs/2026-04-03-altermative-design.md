@@ -69,17 +69,17 @@ Altermative is a GPU-accelerated, cross-platform terminal workspace built in Rus
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    GUI Layer (iced + wgpu)                   │
-│  Tab Bar │ Tiling Layout │ Widget Sidebar │ Settings Panel   │
+│                    GUI Layer (iced + wgpu)                  │
+│  Tab Bar │ Tiling Layout │ Widget Sidebar │ Settings Panel  │
 ├─────────────────────────────────────────────────────────────┤
-│                    Block Types (iced widgets)                │
-│  Terminal │ AI Chat │ Browser (wry) │ File Preview           │
+│                    Block Types (iced widgets)               │
+│  Terminal │ AI Chat │ Browser (wry) │ File Preview          │
 ├─────────────────────────────────────────────────────────────┤
-│                    Core Services                             │
+│                    Core Services                            │
 │  Mux │ PTY Manager │ VT Parser │ Config │ AI Service        │
-│  Font System │ Keybindings │ Theme Engine                    │
+│  Font System │ Keybindings │ Theme Engine                   │
 ├─────────────────────────────────────────────────────────────┤
-│                    Platform Layer                            │
+│                    Platform Layer                           │
 │  Linux (X11/Wayland) │ macOS (Cocoa) │ Windows (Win32)      │
 └─────────────────────────────────────────────────────────────┘
 ```
