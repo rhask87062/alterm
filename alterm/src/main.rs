@@ -3,12 +3,15 @@ use std::time::Duration;
 use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
-use iced::widget::{button, column, container, pane_grid, row, text};
+use iced::widget::{button, column, container, opaque, pane_grid, row, stack, text, text_input, Column};
 use iced::window;
-use iced::{Element, Event, Fill, Subscription, Task, Theme};
+use iced::{Background, Border, Color, Element, Event, Fill, Length, Subscription, Task, Theme};
 
 use gpu_renderer::widget::TerminalView;
-use workspace::{match_shortcut, sidebar_view, tab_bar_view, Action, Block, SidebarAction, Tab, TabBarAction};
+use workspace::{
+    match_shortcut, sidebar_view, tab_bar_view, Action, Block, CommandPalette, SidebarAction, Tab,
+    TabBarAction,
+};
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -24,6 +27,7 @@ fn main() -> iced::Result {
 struct Altermative {
     tabs: Vec<Tab>,
     active_tab: usize,
+    palette: CommandPalette,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +51,9 @@ enum Message {
     // Sidebar
     SidebarAction(SidebarAction),
     SidebarNewTerminal,
+    // Command palette
+    PaletteQueryChanged(String),
+    PaletteSubmit,
 }
 
 impl Altermative {
@@ -56,6 +63,7 @@ impl Altermative {
         let app = Altermative {
             tabs: vec![first_tab],
             active_tab: 0,
+            palette: CommandPalette::new(),
         };
 
         (app, Task::none())
@@ -77,6 +85,84 @@ impl Altermative {
         if let Some(focused) = tab.focus {
             if let Some(adjacent) = tab.panes.adjacent(focused, direction) {
                 tab.focus = Some(adjacent);
+            }
+        }
+    }
+
+    /// Dispatch a keybinding [`Action`] into the appropriate [`Message`].
+    fn dispatch_action(&mut self, action: Action) -> Task<Message> {
+        match action {
+            Action::NewTab => self.update(Message::NewTab),
+            Action::CloseTab => {
+                let idx = self.active_tab;
+                self.update(Message::CloseTab(idx))
+            }
+            Action::NextTab => {
+                if self.tabs.len() > 1 {
+                    let next = (self.active_tab + 1) % self.tabs.len();
+                    self.update(Message::SelectTab(next))
+                } else {
+                    Task::none()
+                }
+            }
+            Action::PrevTab => {
+                if self.tabs.len() > 1 {
+                    let prev = if self.active_tab == 0 {
+                        self.tabs.len() - 1
+                    } else {
+                        self.active_tab - 1
+                    };
+                    self.update(Message::SelectTab(prev))
+                } else {
+                    Task::none()
+                }
+            }
+            Action::JumpToTab(n) => {
+                let idx = n - 1;
+                if idx < self.tabs.len() {
+                    self.update(Message::SelectTab(idx))
+                } else {
+                    Task::none()
+                }
+            }
+            Action::RenameTab => {
+                log::debug!("RenameTab — not yet implemented");
+                Task::none()
+            }
+            Action::SplitRight => self.update(Message::SplitHorizontal),
+            Action::SplitDown => self.update(Message::SplitVertical),
+            Action::ClosePane => self.update(Message::ClosePane),
+            Action::MaximizeToggle => self.update(Message::MaximizeToggle),
+            Action::FocusUp => {
+                self.focus_adjacent(pane_grid::Direction::Up);
+                Task::none()
+            }
+            Action::FocusDown => {
+                self.focus_adjacent(pane_grid::Direction::Down);
+                Task::none()
+            }
+            Action::FocusLeft => {
+                self.focus_adjacent(pane_grid::Direction::Left);
+                Task::none()
+            }
+            Action::FocusRight => {
+                self.focus_adjacent(pane_grid::Direction::Right);
+                Task::none()
+            }
+            Action::CommandPalette => {
+                self.palette.toggle();
+                Task::none()
+            }
+            Action::OpenSettings => {
+                log::debug!("OpenSettings — not yet implemented");
+                Task::none()
+            }
+            Action::Copy => {
+                log::debug!("Copy — not yet implemented");
+                Task::none()
+            }
+            Action::Paste => {
+                iced::clipboard::read().map(Message::ClipboardContent)
             }
         }
     }
@@ -195,83 +281,50 @@ impl Altermative {
                 }
             }
 
+            // Command palette messages
+            Message::PaletteQueryChanged(query) => {
+                self.palette.update_query(query);
+            }
+            Message::PaletteSubmit => {
+                if let Some(action) = self.palette.execute() {
+                    return self.dispatch_action(action);
+                }
+            }
+
             Message::KeyboardInput(key, modifiers) => {
-                // Route through the keybinding registry first.
-                if let Some(action) = match_shortcut(&key, &modifiers) {
-                    match action {
-                        Action::NewTab => return self.update(Message::NewTab),
-                        Action::CloseTab => {
-                            let idx = self.active_tab;
-                            return self.update(Message::CloseTab(idx));
+                // When the palette is open, intercept navigation keys.
+                if self.palette.visible {
+                    match &key {
+                        Key::Named(Named::Escape) => {
+                            self.palette.close();
+                            return Task::none();
                         }
-                        Action::NextTab => {
-                            if self.tabs.len() > 1 {
-                                let next = (self.active_tab + 1) % self.tabs.len();
-                                return self.update(Message::SelectTab(next));
+                        Key::Named(Named::ArrowUp) => {
+                            self.palette.select_prev();
+                            return Task::none();
+                        }
+                        Key::Named(Named::ArrowDown) => {
+                            self.palette.select_next();
+                            return Task::none();
+                        }
+                        Key::Named(Named::Enter) => {
+                            return self.update(Message::PaletteSubmit);
+                        }
+                        _ => {
+                            // Let Ctrl+Shift+P toggle the palette off.
+                            if let Some(Action::CommandPalette) = match_shortcut(&key, &modifiers) {
+                                self.palette.close();
+                                return Task::none();
                             }
+                            // All other keys are handled by the text_input widget.
                             return Task::none();
-                        }
-                        Action::PrevTab => {
-                            if self.tabs.len() > 1 {
-                                let prev = if self.active_tab == 0 {
-                                    self.tabs.len() - 1
-                                } else {
-                                    self.active_tab - 1
-                                };
-                                return self.update(Message::SelectTab(prev));
-                            }
-                            return Task::none();
-                        }
-                        Action::JumpToTab(n) => {
-                            let idx = n - 1;
-                            if idx < self.tabs.len() {
-                                return self.update(Message::SelectTab(idx));
-                            }
-                            return Task::none();
-                        }
-                        Action::RenameTab => {
-                            // TODO: implement rename UI
-                            log::debug!("RenameTab — not yet implemented");
-                            return Task::none();
-                        }
-                        Action::SplitRight => return self.update(Message::SplitHorizontal),
-                        Action::SplitDown => return self.update(Message::SplitVertical),
-                        Action::ClosePane => return self.update(Message::ClosePane),
-                        Action::MaximizeToggle => return self.update(Message::MaximizeToggle),
-                        Action::FocusUp => {
-                            self.focus_adjacent(pane_grid::Direction::Up);
-                            return Task::none();
-                        }
-                        Action::FocusDown => {
-                            self.focus_adjacent(pane_grid::Direction::Down);
-                            return Task::none();
-                        }
-                        Action::FocusLeft => {
-                            self.focus_adjacent(pane_grid::Direction::Left);
-                            return Task::none();
-                        }
-                        Action::FocusRight => {
-                            self.focus_adjacent(pane_grid::Direction::Right);
-                            return Task::none();
-                        }
-                        Action::CommandPalette => {
-                            // TODO: implement command palette (Task 6)
-                            log::debug!("CommandPalette — not yet implemented");
-                            return Task::none();
-                        }
-                        Action::OpenSettings => {
-                            log::debug!("OpenSettings — not yet implemented");
-                            return Task::none();
-                        }
-                        Action::Copy => {
-                            log::debug!("Copy — not yet implemented");
-                            return Task::none();
-                        }
-                        Action::Paste => {
-                            return iced::clipboard::read()
-                                .map(Message::ClipboardContent);
                         }
                     }
+                }
+
+                // Route through the keybinding registry.
+                if let Some(action) = match_shortcut(&key, &modifiers) {
+                    return self.dispatch_action(action);
                 }
 
                 // Reset cursor blink on keypress.
@@ -379,10 +432,109 @@ impl Altermative {
         let content_row = row![pane_grid_widget, sidebar];
         let layout = column![tab_bar, content_row];
 
-        container(layout)
+        let base: Element<'_, Message> = container(layout)
             .width(Fill)
             .height(Fill)
-            .into()
+            .into();
+
+        // Command palette overlay
+        if self.palette.visible {
+            let overlay = self.palette_overlay();
+            stack![base, opaque(overlay)].into()
+        } else {
+            base
+        }
+    }
+
+    /// Build the command palette overlay widget.
+    fn palette_overlay(&self) -> Element<'_, Message> {
+        // Search input
+        let input = text_input("Type a command...", &self.palette.query)
+            .on_input(Message::PaletteQueryChanged)
+            .on_submit(Message::PaletteSubmit)
+            .size(14)
+            .padding(8);
+
+        // Command list
+        let commands = self.palette.visible_commands();
+        let selected = self.palette.selected;
+
+        let mut items: Vec<Element<'_, Message>> = Vec::new();
+        for (i, cmd) in commands.iter().enumerate() {
+            let is_selected = i == selected;
+            let bg_color = if is_selected {
+                Color::from_rgb(0.20, 0.30, 0.50)
+            } else {
+                Color::from_rgb(0.12, 0.12, 0.15)
+            };
+            let text_color = if is_selected {
+                Color::from_rgb(1.0, 1.0, 1.0)
+            } else {
+                Color::from_rgb(0.75, 0.75, 0.75)
+            };
+
+            let label = text(&cmd.label).size(13).color(text_color);
+            let shortcut = text(&cmd.shortcut).size(11).color(
+                if is_selected {
+                    Color::from_rgb(0.7, 0.8, 1.0)
+                } else {
+                    Color::from_rgb(0.45, 0.45, 0.50)
+                },
+            );
+
+            let item_row = row![label, iced::widget::space().width(Fill), shortcut]
+                .spacing(8)
+                .align_y(iced::Alignment::Center);
+
+            let item_container: Element<'_, Message> = container(item_row)
+                .width(Fill)
+                .padding(6)
+                .style(move |_theme: &Theme| iced::widget::container::Style {
+                    background: Some(Background::Color(bg_color)),
+                    ..Default::default()
+                })
+                .into();
+
+            items.push(item_container);
+        }
+
+        let list = Column::from_vec(items).spacing(1);
+
+        // Wrap the list in a scrollable-like container (limited height).
+        let list_container = container(list)
+            .max_height(300)
+            .width(Fill);
+
+        // The palette box
+        let palette_box = column![input, list_container]
+            .spacing(2)
+            .width(Length::Fixed(450.0));
+
+        let palette_styled = container(palette_box)
+            .padding(4)
+            .style(|_theme: &Theme| iced::widget::container::Style {
+                background: Some(Background::Color(Color::from_rgb(0.10, 0.10, 0.13))),
+                border: Border {
+                    color: Color::from_rgb(0.30, 0.45, 0.75),
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            });
+
+        // Center horizontally, place near top
+        container(
+            container(palette_styled)
+                .center_x(Fill)
+                .padding(iced::Padding { top: 60.0, right: 0.0, bottom: 0.0, left: 0.0 }),
+        )
+        .width(Fill)
+        .height(Fill)
+        .style(|_theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.5))),
+            ..Default::default()
+        })
+        .into()
     }
 
     fn subscription(&self) -> Subscription<Message> {

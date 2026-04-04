@@ -2,12 +2,14 @@
 // Phase 2: introduces the Block abstraction, Tab system, and Tab bar UI.
 
 pub mod block;
+pub mod command_palette;
 pub mod keybindings;
 pub mod sidebar;
 pub mod tab;
 pub mod tab_bar;
 
 pub use block::Block;
+pub use command_palette::CommandPalette;
 pub use keybindings::{match_shortcut, Action};
 pub use sidebar::{sidebar_view, SidebarAction};
 pub use tab::Tab;
