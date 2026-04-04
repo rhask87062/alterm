@@ -1,0 +1,16 @@
+[package]
+name = "alterm"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "alterm"
+path = "src/main.rs"
+
+[dependencies]
+iced = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+terminal = { workspace = true }
+gpu-renderer = { workspace = true }

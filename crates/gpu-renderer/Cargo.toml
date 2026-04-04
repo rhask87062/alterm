@@ -1,0 +1,11 @@
+[package]
+name = "gpu-renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+iced = { workspace = true }
+cosmic-text = { workspace = true }
+glyphon = { workspace = true }
+log = { workspace = true }
+terminal = { workspace = true }

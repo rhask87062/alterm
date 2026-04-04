@@ -1,0 +1,20 @@
+[workspace]
+members = [
+    "alterm",
+    "crates/terminal",
+    "crates/gpu-renderer",
+]
+resolver = "2"
+
+[workspace.dependencies]
+iced = { version = "0.14", features = ["wgpu", "tokio"] }
+alacritty_terminal = "0.26.0-rc1"
+portable-pty = "0.9"
+cosmic-text = "0.18"
+glyphon = "0.10"
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.11"
+
+terminal = { path = "crates/terminal" }
+gpu-renderer = { path = "crates/gpu-renderer" }
