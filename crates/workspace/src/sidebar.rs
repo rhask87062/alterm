@@ -2,7 +2,7 @@
 ///
 /// Positioned on the right side of the workspace, provides quick access to
 /// split the focused pane with different block types.
-use iced::widget::{button, column, container, text, tooltip};
+use iced::widget::{button, column, container, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 /// Actions the sidebar can produce.
@@ -23,67 +23,18 @@ pub enum SidebarAction {
 }
 
 /// Render the sidebar as a vertical column of square icon buttons.
-///
-/// - `map`: closure that converts a `SidebarAction` into the app's message type
 pub fn sidebar_view<'a, M: Clone + 'a>(
     map: impl Fn(SidebarAction) -> M + 'a,
 ) -> Element<'a, M> {
     let btn_size = 36.0;
     let btn_padding = Padding::from([6, 0]);
 
-    // Terminal button — active
-    let terminal_btn = sidebar_button(
-        "T",
-        "New terminal (split)",
-        Some(map(SidebarAction::NewTerminal)),
-        btn_size,
-        true,
-    );
-
-    // AI button — active
-    let ai_btn = sidebar_button(
-        "AI",
-        "AI chat (split)",
-        Some(map(SidebarAction::NewAiChat)),
-        btn_size,
-        true,
-    );
-
-    // Web button — active
-    let web_btn = sidebar_button(
-        "W",
-        "Web browser (split)",
-        Some(map(SidebarAction::NewBrowser)),
-        btn_size,
-        true,
-    );
-
-    // File preview button — active
-    let preview_btn = sidebar_button(
-        "F",
-        "File preview (split)",
-        Some(map(SidebarAction::NewPreview)),
-        btn_size,
-        true,
-    );
-
-    // Settings button — active
-    let settings_btn = sidebar_button(
-        "\u{2699}",
-        "Settings (Ctrl+Shift+,)",
-        Some(map(SidebarAction::OpenSettings)),
-        btn_size,
-        true,
-    );
-
-    // Hotkey info button — placed at the bottom of the sidebar
-    let info_btn = sidebar_button(
-        "?",
-        "Keyboard shortcuts",
-        Some(map(SidebarAction::ShowHotkeyInfo)),
-        btn_size,
-        true,
-    );
+    let terminal_btn = sidebar_button("T", Some(map(SidebarAction::NewTerminal)), btn_size);
+    let ai_btn = sidebar_button("AI", Some(map(SidebarAction::NewAiChat)), btn_size);
+    let web_btn = sidebar_button("W", Some(map(SidebarAction::NewBrowser)), btn_size);
+    let preview_btn = sidebar_button("F", Some(map(SidebarAction::NewPreview)), btn_size);
+    let settings_btn = sidebar_button("\u{2699}", Some(map(SidebarAction::OpenSettings)), btn_size);
+    let info_btn = sidebar_button("?", Some(map(SidebarAction::ShowHotkeyInfo)), btn_size);
 
     let top_buttons = column![terminal_btn, ai_btn, web_btn, preview_btn, settings_btn]
         .spacing(4)
@@ -108,17 +59,13 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         .into()
 }
 
-/// Build a single sidebar button with a tooltip.
+/// Build a single sidebar button (no tooltip).
 fn sidebar_button<'a, M: Clone + 'a>(
     label: &'a str,
-    tip: &'a str,
     on_press: Option<M>,
     size: f32,
-    enabled: bool,
 ) -> Element<'a, M> {
-    let label_widget = text(label)
-        .size(14)
-        .center();
+    let label_widget = text(label).size(14).center();
 
     let mut btn = button(label_widget)
         .width(Length::Fixed(size))
@@ -128,21 +75,12 @@ fn sidebar_button<'a, M: Clone + 'a>(
     if let Some(msg) = on_press {
         btn = btn
             .on_press(msg)
-            .style(move |theme: &Theme, status| sidebar_button_style(theme, status, true));
+            .style(move |_: &Theme, status| sidebar_button_style(status, true));
     } else {
-        btn = btn
-            .style(move |theme: &Theme, status| sidebar_button_style(theme, status, false));
+        btn = btn.style(move |_: &Theme, status| sidebar_button_style(status, false));
     }
 
-    let tip_content = container(text(tip).size(12))
-        .padding(Padding::from([4, 8]))
-        .style(|_theme: &Theme| tooltip_style());
-
-    let _ = enabled; // used via on_press being Some/None
-
-    tooltip(btn, tip_content, tooltip::Position::Left)
-        .gap(6)
-        .into()
+    btn.into()
 }
 
 // ---------------------------------------------------------------------------
@@ -161,21 +99,27 @@ fn sidebar_container_style() -> iced::widget::container::Style {
     }
 }
 
-fn sidebar_button_style(
-    _theme: &Theme,
-    _status: button::Status,
-    enabled: bool,
-) -> button::Style {
-    let (bg, text_color) = if enabled {
-        (
-            Color::from_rgb(0.14, 0.14, 0.18),
-            Color::from_rgb(0.85, 0.85, 0.85),
-        )
-    } else {
+fn sidebar_button_style(status: button::Status, enabled: bool) -> button::Style {
+    let (bg, text_color) = if !enabled {
         (
             Color::from_rgb(0.09, 0.09, 0.11),
             Color::from_rgb(0.35, 0.35, 0.35),
         )
+    } else {
+        match status {
+            button::Status::Hovered => (
+                Color::from_rgb(0.20, 0.20, 0.26),
+                Color::from_rgb(0.95, 0.95, 0.95),
+            ),
+            button::Status::Pressed => (
+                Color::from_rgb(0.24, 0.24, 0.30),
+                Color::WHITE,
+            ),
+            _ => (
+                Color::from_rgb(0.14, 0.14, 0.18),
+                Color::from_rgb(0.85, 0.85, 0.85),
+            ),
+        }
     };
 
     button::Style {
@@ -183,19 +127,6 @@ fn sidebar_button_style(
         text_color,
         border: Border {
             color: Color::from_rgb(0.20, 0.20, 0.25),
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-fn tooltip_style() -> iced::widget::container::Style {
-    iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.15, 0.15, 0.20))),
-        text_color: Some(Color::from_rgb(0.9, 0.9, 0.9)),
-        border: Border {
-            color: Color::from_rgb(0.25, 0.25, 0.30),
             width: 1.0,
             radius: 4.0.into(),
         },

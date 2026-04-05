@@ -28,10 +28,13 @@ pub fn init_gtk() {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
 
+            // Force dark theme BEFORE GTK init so WebKit picks it up immediately.
+            // This makes prefers-color-scheme: dark work on the first page load.
+            std::env::set_var("GTK_THEME", "Adwaita:dark");
+
             gtk::init().expect("Failed to init GTK");
 
-            // Tell GTK to prefer dark theme so WebKit reports
-            // prefers-color-scheme: dark to websites.
+            // Also set the GTK property for any runtime checks
             if let Some(settings) = gtk::Settings::default() {
                 settings.set_property("gtk-application-prefer-dark-theme", true);
             }
