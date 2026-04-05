@@ -60,7 +60,7 @@ Tab bar, split panes, drag-to-split, widget sidebar, keyboard shortcuts, command
 AI chat panel, multi-provider support (OpenAI, Anthropic, Gemini, Grok, LM Studio, Ollama), terminal context awareness, settings GUI, themes.
 
 ### Phase 4: Extras
-Embedded browser (wry), file preview, Lua hooks, desktop integration, packaging (deb, rpm, homebrew, winget).
+Embedded browser (wry), file preview with syntax highlighting, Lua hooks, desktop integration, packaging (deb, rpm, homebrew, winget), custom ASCII art branding, hotkey breakdown info pane (accessible from sidebar).
 
 ### Phase 5: AI Harness
 Native agentic AI coding assistant built into the terminal. Self-improving harness techniques. Pluggable AI provider interface (plugin system).
