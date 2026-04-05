@@ -9,6 +9,8 @@ use gpu_renderer::colors::AnsiPalette;
 use gpu_renderer::grid::RenderGrid;
 use terminal::{PtyHandle, TerminalEvent, TerminalState};
 
+use browser::BrowserState;
+
 use crate::ai_chat::AIChatState;
 use crate::settings_panel::SettingsState;
 
@@ -41,6 +43,9 @@ pub enum Block {
     },
     Settings {
         state: SettingsState,
+    },
+    Browser {
+        state: BrowserState,
     },
 }
 
@@ -80,6 +85,13 @@ impl Block {
     pub fn new_settings(config: altermative_config::AppConfig) -> Self {
         Block::Settings {
             state: SettingsState::new(config),
+        }
+    }
+
+    /// Create a new browser block navigated to `url`.
+    pub fn new_browser(url: &str) -> Self {
+        Block::Browser {
+            state: BrowserState::new(url),
         }
     }
 
@@ -129,6 +141,9 @@ impl Block {
             Block::Settings { .. } => {
                 // Settings is a pure UI panel — nothing to tick.
             }
+            Block::Browser { .. } => {
+                // Browser state is driven by user navigation messages.
+            }
         }
 
         // Rebuild the cached grid only when something changed.
@@ -145,6 +160,7 @@ impl Block {
             }
             Block::AIChat { .. } => {}
             Block::Settings { .. } => {}
+            Block::Browser { .. } => {}
         }
     }
 
@@ -161,6 +177,7 @@ impl Block {
             }
             Block::AIChat { .. } => {}
             Block::Settings { .. } => {}
+            Block::Browser { .. } => {}
         }
         self.refresh_cache();
     }
@@ -174,6 +191,7 @@ impl Block {
             }
             Block::AIChat { .. } => (0, 0),
             Block::Settings { .. } => (0, 0),
+            Block::Browser { .. } => (0, 0),
         }
     }
 
@@ -186,6 +204,9 @@ impl Block {
             }
             Block::Settings { state } => {
                 if state.dirty { "Settings *".to_string() } else { "Settings".to_string() }
+            }
+            Block::Browser { state } => {
+                format!("Browser — {}", state.display_title())
             }
         }
     }
@@ -205,6 +226,11 @@ impl Block {
         matches!(self, Block::Settings { .. })
     }
 
+    /// Whether this block is a browser.
+    pub fn is_browser(&self) -> bool {
+        matches!(self, Block::Browser { .. })
+    }
+
     /// Build a render-ready grid from the block's current terminal state.
     ///
     /// Returns a cached grid when nothing has changed since the last render.
@@ -218,7 +244,7 @@ impl Block {
                     RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
                 })
             }
-            Block::AIChat { .. } | Block::Settings { .. } => {
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => {
                 // Non-terminal blocks don't use the terminal canvas.
                 RenderGrid {
                     cells: Vec::new(),
@@ -245,7 +271,7 @@ impl Block {
                     *dirty = false;
                 }
             }
-            Block::AIChat { .. } | Block::Settings { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => {}
         }
     }
 
@@ -256,7 +282,7 @@ impl Block {
                 *cursor_visible = true;
                 *blink_count = 0;
             }
-            Block::AIChat { .. } | Block::Settings { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => {}
         }
     }
 
@@ -270,7 +296,7 @@ impl Block {
                 state.scroll(lines);
                 *dirty = true;
             }
-            Block::AIChat { .. } | Block::Settings { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => {}
         }
         self.refresh_cache();
     }
@@ -308,7 +334,7 @@ impl Block {
                     Some(output.join("\n"))
                 }
             }
-            Block::AIChat { .. } | Block::Settings { .. } => None,
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => None,
         }
     }
 }

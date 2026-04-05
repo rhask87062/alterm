@@ -13,6 +13,7 @@ pub mod tab_bar;
 
 pub use ai_chat::AIChatState;
 pub use block::{Block, CELL_HEIGHT, CELL_WIDTH};
+pub use browser::BrowserState;
 pub use command_palette::CommandPalette;
 pub use keybindings::{match_shortcut, Action};
 pub use settings_panel::{SettingsField, SettingsSection, SettingsState};

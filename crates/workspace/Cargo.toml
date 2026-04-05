@@ -11,3 +11,4 @@ altermative-config = { workspace = true }
 iced = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
+browser = { workspace = true }

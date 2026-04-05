@@ -13,8 +13,8 @@ use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Sub
 
 use gpu_renderer::widget::TerminalView;
 use workspace::{
-    match_shortcut, sidebar_view, tab_bar_view, Action, Block, CommandPalette, SettingsField,
-    SettingsSection, SidebarAction, Tab, TabBarAction, CELL_HEIGHT,
+    match_shortcut, sidebar_view, tab_bar_view, Action, Block, BrowserState, CommandPalette,
+    SettingsField, SettingsSection, SidebarAction, Tab, TabBarAction, CELL_HEIGHT,
 };
 
 use ai::{
@@ -106,6 +106,13 @@ enum Message {
     SettingsChanged(pane_grid::Pane, SettingsField),
     SettingsSave(pane_grid::Pane),
     SettingsSectionChanged(pane_grid::Pane, SettingsSection),
+    // Browser
+    OpenBrowser,
+    BrowserNavigate(pane_grid::Pane, String),
+    BrowserBack(pane_grid::Pane),
+    BrowserForward(pane_grid::Pane),
+    BrowserReload(pane_grid::Pane),
+    BrowserUrlChanged(pane_grid::Pane, String),
 }
 
 impl Altermative {
@@ -356,12 +363,17 @@ impl Altermative {
             }
             Message::PaneClicked(pane) => {
                 self.active_tab_mut().focus = Some(pane);
-                // If the clicked pane is an AI chat, focus its text_input widget
+                // If the clicked pane is an AI chat or browser, focus its text_input
                 // so keyboard events are captured by it (not routed to the PTY).
                 if let Some(block) = self.active_tab().panes.get(pane) {
                     if block.is_ai_chat() {
                         return widget_focus(WidgetId::from(
                             format!("ai-chat-input-{:?}", pane),
+                        ));
+                    }
+                    if block.is_browser() {
+                        return widget_focus(WidgetId::from(
+                            format!("browser-url-input-{:?}", pane),
                         ));
                     }
                 }
@@ -534,6 +546,9 @@ impl Altermative {
                 }
                 SidebarAction::NewAiChat => {
                     return self.update(Message::ToggleAIChat);
+                }
+                SidebarAction::NewBrowser => {
+                    return self.update(Message::OpenBrowser);
                 }
                 SidebarAction::OpenSettings => {
                     return self.update(Message::OpenSettings);
@@ -793,6 +808,54 @@ impl Altermative {
                 }
             }
 
+            // -- Browser --
+            Message::OpenBrowser => {
+                let block = Block::new_browser("https://www.google.com");
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if let Some((new_pane, _split)) =
+                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
+                    {
+                        tab.focus = Some(new_pane);
+                        self.resize_all_panes();
+                        return widget_focus(WidgetId::from(
+                            format!("browser-url-input-{:?}", new_pane),
+                        ));
+                    }
+                }
+                self.resize_all_panes();
+            }
+            Message::BrowserNavigate(pane, url) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    state.navigate(&url);
+                }
+            }
+            Message::BrowserBack(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    state.go_back();
+                }
+            }
+            Message::BrowserForward(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    state.go_forward();
+                }
+            }
+            Message::BrowserReload(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    state.reload();
+                }
+            }
+            Message::BrowserUrlChanged(pane, url) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    state.input_url = url;
+                }
+            }
+
             // Command palette messages
             Message::PaletteQueryChanged(query) => {
                 self.palette.update_query(query);
@@ -845,7 +908,7 @@ impl Altermative {
                     let tab = self.active_tab();
                     if let Some(focused) = tab.focus {
                         if let Some(block) = tab.panes.get(focused) {
-                            if block.is_ai_chat() || block.is_settings() {
+                            if block.is_ai_chat() || block.is_settings() || block.is_browser() {
                                 return Task::none();
                             }
                         }
@@ -927,6 +990,9 @@ impl Altermative {
                     }
                     Block::Settings { state } => {
                         settings_view(pane, state)
+                    }
+                    Block::Browser { state } => {
+                        browser_view(pane, state)
                     }
                 };
 
@@ -1667,6 +1733,122 @@ fn settings_terminal_section<'a>(
     ]
     .spacing(4)
     .into()
+}
+
+// ---------------------------------------------------------------------------
+// Browser view
+// ---------------------------------------------------------------------------
+
+/// Build the browser view for a pane.
+fn browser_view<'a>(
+    pane: pane_grid::Pane,
+    state: &'a BrowserState,
+) -> Element<'a, Message> {
+    // ── Navigation bar ──
+    let back_label = text("\u{25C0}").size(14).center();
+    let mut back_btn = button(back_label)
+        .padding(Padding::from([4, 8]))
+        .style(|_: &Theme, status: button::Status| nav_button_style(status));
+    if state.can_go_back {
+        back_btn = back_btn.on_press(Message::BrowserBack(pane));
+    }
+
+    let fwd_label = text("\u{25B6}").size(14).center();
+    let mut fwd_btn = button(fwd_label)
+        .padding(Padding::from([4, 8]))
+        .style(|_: &Theme, status: button::Status| nav_button_style(status));
+    if state.can_go_forward {
+        fwd_btn = fwd_btn.on_press(Message::BrowserForward(pane));
+    }
+
+    let reload_label = text("\u{21BB}").size(14).center();
+    let reload_btn = button(reload_label)
+        .on_press(Message::BrowserReload(pane))
+        .padding(Padding::from([4, 8]))
+        .style(|_: &Theme, status: button::Status| nav_button_style(status));
+
+    let url_input = text_input("Enter URL...", &state.input_url)
+        .on_input(move |v| Message::BrowserUrlChanged(pane, v))
+        .on_submit(Message::BrowserNavigate(pane, state.input_url.clone()))
+        .size(13)
+        .padding(Padding::from([6, 10]))
+        .id(WidgetId::from(format!("browser-url-input-{:?}", pane)));
+
+    let nav_bar: Element<'a, Message> = container(
+        row![back_btn, fwd_btn, reload_btn, url_input]
+            .spacing(4)
+            .align_y(iced::Alignment::Center),
+    )
+    .width(Fill)
+    .padding(Padding::from([4, 8]))
+    .style(|_: &Theme| iced::widget::container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
+        border: Border {
+            color: Color::from_rgb(0.15, 0.15, 0.20),
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    })
+    .into();
+
+    // ── Content area (placeholder) ──
+    let placeholder: Element<'a, Message> = container(
+        column![
+            text("Web content will render here")
+                .size(14)
+                .color(Color::from_rgb(0.45, 0.45, 0.50)),
+            iced::widget::space().height(Length::Fixed(12.0)),
+            text(format!("URL: {}", state.url))
+                .size(12)
+                .color(Color::from_rgb(0.35, 0.55, 0.80)),
+        ]
+        .spacing(4)
+        .align_x(iced::Alignment::Center),
+    )
+    .width(Fill)
+    .height(Fill)
+    .center_x(Fill)
+    .center_y(Fill)
+    .style(|_: &Theme| iced::widget::container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.04, 0.04, 0.06))),
+        ..Default::default()
+    })
+    .into();
+
+    // ── Layout: nav bar on top, content fills the rest ──
+    container(column![nav_bar, placeholder])
+        .width(Fill)
+        .height(Fill)
+        .style(|_: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Style for browser navigation buttons (back, forward, reload).
+fn nav_button_style(status: button::Status) -> button::Style {
+    let bg = match status {
+        button::Status::Hovered => Color::from_rgb(0.20, 0.20, 0.28),
+        button::Status::Pressed => Color::from_rgb(0.25, 0.25, 0.32),
+        button::Status::Disabled => Color::from_rgb(0.08, 0.08, 0.10),
+        _ => Color::from_rgb(0.12, 0.12, 0.16),
+    };
+    let text_color = match status {
+        button::Status::Disabled => Color::from_rgb(0.30, 0.30, 0.35),
+        _ => Color::from_rgb(0.80, 0.80, 0.85),
+    };
+    button::Style {
+        background: Some(Background::Color(bg)),
+        text_color,
+        border: Border {
+            color: Color::from_rgb(0.18, 0.18, 0.22),
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    }
 }
 
 // ---------------------------------------------------------------------------

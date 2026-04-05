@@ -12,6 +12,8 @@ pub enum SidebarAction {
     NewTerminal,
     /// Split the focused pane with a new AI chat.
     NewAiChat,
+    /// Split the focused pane with a new browser.
+    NewBrowser,
     /// Open the settings panel in a pane.
     OpenSettings,
 }
@@ -43,13 +45,13 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         true,
     );
 
-    // Web button — disabled placeholder
-    let web_btn = sidebar_button::<M>(
+    // Web button — active
+    let web_btn = sidebar_button(
         "W",
-        "Web view (coming soon)",
-        None,
+        "Web browser (split)",
+        Some(map(SidebarAction::NewBrowser)),
         btn_size,
-        false,
+        true,
     );
 
     // Settings button — active
