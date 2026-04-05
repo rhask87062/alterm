@@ -12,7 +12,6 @@ use raw_window_handle::{
 };
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{Rect, WebView, WebViewBuilder};
-use wry::WebViewExtUnix;
 
 thread_local! {
     static WEBVIEWS: RefCell<HashMap<u64, WebView>> = RefCell::new(HashMap::new());
@@ -85,33 +84,6 @@ pub fn create_webview(
         })
         .build_as_child(&wrapper)
         .map_err(|e| format!("Failed to create webview: {e}"))?;
-
-    // Force dark mode via webkit2gtk settings.
-    // WebViewExtUnix::webview() gives us the underlying webkit2gtk::WebView.
-    let wk_webview = webview.webview();
-    // The webkit2gtk WebView has a "settings" property with
-    // "enable-developer-extras" and we can set color scheme via
-    // the WebKitWebView's settings or via the page directly.
-    // Use evaluate_script to inject a color-scheme meta tag early.
-    let _ = webview.evaluate_script(
-        r#"
-        document.addEventListener('DOMContentLoaded', function() {
-            var meta = document.querySelector('meta[name="color-scheme"]');
-            if (!meta) {
-                meta = document.createElement('meta');
-                meta.name = 'color-scheme';
-                meta.content = 'dark';
-                document.head.appendChild(meta);
-            }
-        });
-        // Also set it on documentElement immediately
-        document.documentElement.style.colorScheme = 'dark';
-        "#,
-    );
-
-    // Set the WebKitSettings "enable-write-console-messages-to-stdout" so we can debug
-    // Try to set hardware acceleration policy to force software rendering for dark mode compat
-    wk_webview.set_property("is-controlled-by-automation", false);
 
     WEBVIEWS.with(|wvs| {
         wvs.borrow_mut().insert(pane_id, webview);
