@@ -1,0 +1,8 @@
+[package]
+name = "preview"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+log.workspace = true

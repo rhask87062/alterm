@@ -6,6 +6,8 @@ members = [
     "crates/workspace",
     "crates/ai",
     "crates/config",
+    "crates/preview",
+    "crates/browser",
 ]
 resolver = "2"
 
@@ -30,9 +32,11 @@ futures-util = "0.3"
 eventsource-stream = "0.2"
 toml = "0.8"
 dirs = "6"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 
 terminal = { path = "crates/terminal" }
 gpu-renderer = { path = "crates/gpu-renderer" }
 workspace = { path = "crates/workspace" }
 ai = { path = "crates/ai" }
 altermative-config = { path = "crates/config" }
+browser = { path = "crates/browser" }
