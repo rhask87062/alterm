@@ -249,15 +249,15 @@ impl Altermative {
                 }
 
                 // Reposition browser webviews to match the pane region.
+                // The pane_grid starts at x=0 (sidebar is on the RIGHT).
+                // y offset: tab bar + pane's y + title bar + browser nav bar.
                 if block.is_browser() {
                     let pane_id = pane_to_id(*pane);
                     if webview_manager::exists(pane_id) {
-                        // Webview position is relative to the iced window.
-                        // Offset: sidebar width + pane region x, tab bar height + pane region y + title bar + nav bar.
-                        let wv_x = (SIDEBAR_WIDTH + rect.x) as f64;
+                        let wv_x = rect.x as f64;
                         let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
-                        let wv_w = content_width as f64;
-                        let wv_h = (content_height - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
+                        let wv_w = rect.width as f64;
+                        let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
                         webview_manager::set_bounds(pane_id, wv_x, wv_y, wv_w, wv_h);
                     }
                 }
@@ -288,14 +288,14 @@ impl Altermative {
         );
 
         let (x, y, w, h) = if let Some(rect) = regions.get(&pane) {
-            let wv_x = (SIDEBAR_WIDTH + rect.x) as f64;
+            let wv_x = rect.x as f64;
             let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
             let wv_w = rect.width as f64;
-            let content_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0);
-            (wv_x, wv_y, wv_w, content_h as f64)
+            let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
+            (wv_x, wv_y, wv_w, wv_h)
         } else {
             // Fallback: reasonable defaults.
-            (SIDEBAR_WIDTH as f64, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 400.0, 300.0)
+            (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0)
         };
 
         if let Err(e) = webview_manager::create_webview(pane_id, xid, url, (x, y, w, h)) {
@@ -1204,7 +1204,7 @@ impl Altermative {
 
             // -- Window handle --
             Message::WindowHandleReady(xid) => {
-                log::info!("Got X11 window ID (XID): {xid}");
+                eprintln!("[WINDOW] Got raw window ID: {xid} (hex: {xid:#x})");
                 self.parent_xid = Some(xid);
             }
         }

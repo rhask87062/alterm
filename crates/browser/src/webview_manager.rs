@@ -21,6 +21,11 @@ thread_local! {
 pub fn init_gtk() {
     GTK_INITIALIZED.with(|init| {
         if !*init.borrow() {
+            // Force WebKit to use software rendering — avoids GBM/DRM permission
+            // errors on systems where GPU buffer allocation is restricted (common
+            // with NVIDIA proprietary drivers).
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
             gtk::init().expect("Failed to init GTK");
             *init.borrow_mut() = true;
         }
@@ -58,14 +63,22 @@ pub fn create_webview(
 
     let wrapper = X11Parent(parent_xid);
 
+    eprintln!("[WEBVIEW] Creating: pane_id={pane_id} parent_xid={parent_xid:#x} url={url} bounds=({:.0},{:.0},{:.0},{:.0})", bounds.0, bounds.1, bounds.2, bounds.3);
+
     let webview = WebViewBuilder::new()
         .with_url(url)
+        .with_visible(true)
         .with_bounds(Rect {
             position: LogicalPosition::new(bounds.0, bounds.1).into(),
             size: LogicalSize::new(bounds.2, bounds.3).into(),
         })
         .build_as_child(&wrapper)
-        .map_err(|e| format!("Failed to create webview: {e}"))?;
+        .map_err(|e| {
+            eprintln!("[WEBVIEW] FAILED: {e}");
+            format!("Failed to create webview: {e}")
+        })?;
+
+    eprintln!("[WEBVIEW] Success!");
 
     WEBVIEWS.with(|wvs| {
         wvs.borrow_mut().insert(pane_id, webview);
