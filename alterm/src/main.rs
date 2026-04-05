@@ -1194,12 +1194,15 @@ fn ai_chat_view<'a>(
     // ── Messages ──
     let mut msg_widgets: Vec<Element<'a, Message>> = Vec::new();
 
+    // Build a friendly model display name (e.g. "claude-sonnet-4-20250514" → "Claude Sonnet 4")
+    let model_display = friendly_model_name(&state.model_name);
+
     for msg in &state.messages {
         let (label, color) = match msg.role.as_str() {
-            "user" => ("You:", Color::from_rgb(0.40, 0.70, 1.0)),
-            "assistant" => ("AI:", Color::from_rgb(0.40, 0.85, 0.55)),
-            "error" => ("Error:", Color::from_rgb(0.95, 0.40, 0.35)),
-            _ => ("System:", Color::from_rgb(0.60, 0.60, 0.65)),
+            "user" => ("You:".to_string(), Color::from_rgb(0.40, 0.70, 1.0)),
+            "assistant" => (format!("{}:", model_display), Color::from_rgb(0.40, 0.85, 0.55)),
+            "error" => ("Error:".to_string(), Color::from_rgb(0.95, 0.40, 0.35)),
+            _ => ("System:".to_string(), Color::from_rgb(0.60, 0.60, 0.65)),
         };
         let copy_btn = button(text("Copy").size(9))
             .on_press(Message::AICopyMessage(msg.content.clone()))
@@ -1236,7 +1239,7 @@ fn ai_chat_view<'a>(
     if state.streaming && !state.current_response.is_empty() {
         msg_widgets.push(
             column![
-                text("AI:").size(11).color(Color::from_rgb(0.40, 0.85, 0.55)),
+                text(format!("{}:", model_display)).size(11).color(Color::from_rgb(0.40, 0.85, 0.55)),
                 text(format!("{}\u{2588}", state.current_response))
                     .size(13).color(Color::from_rgb(0.85, 0.85, 0.88)),
             ]
@@ -1804,6 +1807,100 @@ fn pane_content_style(
 // ---------------------------------------------------------------------------
 
 /// Convert an iced keyboard key press into the bytes that should be sent to the PTY.
+/// Convert a raw model ID into a friendly display name.
+/// e.g. "claude-sonnet-4-20250514" → "Claude Sonnet 4"
+///      "gpt-5.4" → "GPT 5.4"
+///      "grok-3" → "Grok 3"
+///      "gemini-2.0-flash" → "Gemini 2.0 Flash"
+///      "llama3.2" → "Llama3.2"
+fn friendly_model_name(model_id: &str) -> String {
+    if model_id.is_empty() {
+        return "AI".to_string();
+    }
+
+    // Known model family mappings
+    let id = model_id.to_lowercase();
+
+    // Claude models: "claude-opus-4-5-20250414" → "Claude Opus 4.5"
+    if id.starts_with("claude-") {
+        let without_prefix = &model_id[7..]; // skip "claude-"
+        // Strip date suffix (e.g. "-20250514")
+        let base = if let Some(pos) = without_prefix.rfind("-20") {
+            &without_prefix[..pos]
+        } else {
+            without_prefix
+        };
+        // Capitalize parts and join
+        let parts: Vec<String> = base.split('-')
+            .map(|p| {
+                let mut c = p.chars();
+                match c.next() {
+                    Some(first) => format!("{}{}", first.to_uppercase(), c.as_str()),
+                    None => String::new(),
+                }
+            })
+            .collect();
+        return format!("Claude {}", parts.join(" "));
+    }
+
+    // GPT models: "gpt-5.4" → "GPT 5.4", "gpt-5.4-mini" → "GPT 5.4 Mini"
+    if id.starts_with("gpt-") {
+        let version = &model_id[4..];
+        let parts: Vec<String> = version.split('-')
+            .map(|p| {
+                let mut c = p.chars();
+                match c.next() {
+                    Some(first) => format!("{}{}", first.to_uppercase(), c.as_str()),
+                    None => String::new(),
+                }
+            })
+            .collect();
+        return format!("GPT {}", parts.join(" "));
+    }
+
+    // Grok models: "grok-3" → "Grok 3"
+    if id.starts_with("grok-") {
+        let version = &model_id[5..];
+        return format!("Grok {}", version);
+    }
+
+    // Gemini models: "gemini-2.0-flash" → "Gemini 2.0 Flash"
+    if id.starts_with("gemini-") {
+        let rest = &model_id[7..];
+        let parts: Vec<String> = rest.split('-')
+            .map(|p| {
+                let mut c = p.chars();
+                match c.next() {
+                    Some(first) => format!("{}{}", first.to_uppercase(), c.as_str()),
+                    None => String::new(),
+                }
+            })
+            .collect();
+        return format!("Gemini {}", parts.join(" "));
+    }
+
+    // O-series: "o1" → "O1", "o3-mini" → "O3 Mini"
+    if id.starts_with("o1") || id.starts_with("o3") || id.starts_with("o4") {
+        let parts: Vec<String> = model_id.split('-')
+            .map(|p| {
+                let mut c = p.chars();
+                match c.next() {
+                    Some(first) => format!("{}{}", first.to_uppercase(), c.as_str()),
+                    None => String::new(),
+                }
+            })
+            .collect();
+        return parts.join(" ");
+    }
+
+    // Fallback: capitalize first letter
+    let mut c = model_id.chars();
+    match c.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), c.as_str()),
+        None => "AI".to_string(),
+    }
+}
+
 fn key_to_bytes(key: &Key, modifiers: &Modifiers) -> Option<Vec<u8>> {
     match key {
         Key::Character(c) => {
