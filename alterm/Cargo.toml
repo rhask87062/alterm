@@ -19,5 +19,6 @@ ai = { workspace = true }
 altermative-config = { workspace = true }
 preview = { workspace = true }
 dirs = { workspace = true }
+browser = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }

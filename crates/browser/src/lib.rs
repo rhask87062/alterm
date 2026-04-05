@@ -1,8 +1,10 @@
-/// Browser state management for the embedded web view block.
+/// Browser state management and embedded web view (wry/webkit2gtk).
 ///
-/// This crate provides `BrowserState` which tracks URL, navigation history,
-/// and loading status. The actual webview rendering (via wry or similar) will
-/// be added in a follow-up phase — for now this is pure state + placeholder UI.
+/// This crate provides:
+/// - `BrowserState`: tracks URL, navigation history, and loading status.
+/// - `webview_manager`: manages real wry `WebView` instances on the main thread.
+
+pub mod webview_manager;
 
 /// Manages the state for a single browser pane.
 pub struct BrowserState {

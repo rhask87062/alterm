@@ -23,6 +23,7 @@ use ai::{
     ProviderConfig, StreamEvent,
 };
 use altermative_config::{hooks::LuaHooks, AppConfig};
+use browser::webview_manager;
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -45,6 +46,20 @@ const SIDEBAR_WIDTH: f32 = 44.0;
 const PANE_GRID_SPACING: f32 = 2.0;
 /// Minimum pane size — must match `.min_size(120)` on the PaneGrid widget.
 const PANE_GRID_MIN_SIZE: f32 = 120.0;
+/// Height of the browser nav bar (URL input + padding) in logical pixels.
+const BROWSER_NAV_BAR_HEIGHT: f32 = 40.0;
+
+/// Extract a numeric ID from a `pane_grid::Pane` for use as a webview key.
+///
+/// `Pane` wraps a `usize` but the field is `pub(super)`. We parse it
+/// from the Debug output (`Pane(N)`).
+fn pane_to_id(pane: pane_grid::Pane) -> u64 {
+    let dbg = format!("{pane:?}");
+    dbg.trim_start_matches("Pane(")
+        .trim_end_matches(')')
+        .parse::<u64>()
+        .unwrap_or(0)
+}
 
 struct Altermative {
     tabs: Vec<Tab>,
@@ -59,6 +74,8 @@ struct Altermative {
     config: AppConfig,
     /// Optional Lua hooks (loaded from hooks.lua if present).
     hooks: LuaHooks,
+    /// X11 window ID of the iced window (set once WindowHandleReady fires).
+    parent_xid: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,12 +139,17 @@ enum Message {
     PreviewParent(pane_grid::Pane),
     // Hotkey info
     ShowHotkeyInfo,
+    // Window handle (X11 XID) ready
+    WindowHandleReady(u64),
 }
 
 impl Altermative {
     fn new() -> (Self, Task<Message>) {
         let window_width = 900.0_f32;
         let window_height = 600.0_f32;
+
+        // Initialize GTK early (required by webkit2gtk before any webview creation).
+        webview_manager::init_gtk();
 
         // Load config from default path.
         let config = AppConfig::load(&AppConfig::config_path()).unwrap_or_else(|e| {
@@ -161,9 +183,20 @@ impl Altermative {
             window_height,
             config,
             hooks,
+            parent_xid: None,
         };
 
-        (app, Task::none())
+        // Request the raw X11 window ID from iced — fires WindowHandleReady.
+        // First get the Id of the oldest (main) window, then query its raw ID.
+        let fetch_xid = window::oldest().then(|opt_id| {
+            if let Some(id) = opt_id {
+                window::raw_id::<Message>(id).map(Message::WindowHandleReady)
+            } else {
+                Task::none()
+            }
+        });
+
+        (app, fetch_xid)
     }
 
     /// Get a reference to the active tab.
@@ -187,6 +220,7 @@ impl Altermative {
     }
 
     /// Resize every terminal in the active tab to its exact pixel dimensions.
+    /// Also repositions any browser webviews to match their pane regions.
     fn resize_all_panes(&mut self) {
         use iced::Size;
 
@@ -204,11 +238,78 @@ impl Altermative {
         for (pane, rect) in &regions {
             let content_width = rect.width;
             let content_height = (rect.height - PANE_TITLE_BAR_HEIGHT).max(CELL_HEIGHT * 2.0);
-            let (rows, cols) = Block::size_from_pixels(content_width, content_height);
+
             if let Some(block) = tab.panes.get_mut(*pane) {
-                let (cur_rows, cur_cols) = block.dimensions();
-                if cur_rows != rows || cur_cols != cols {
-                    block.resize(rows, cols);
+                if block.is_terminal() {
+                    let (rows, cols) = Block::size_from_pixels(content_width, content_height);
+                    let (cur_rows, cur_cols) = block.dimensions();
+                    if cur_rows != rows || cur_cols != cols {
+                        block.resize(rows, cols);
+                    }
+                }
+
+                // Reposition browser webviews to match the pane region.
+                if block.is_browser() {
+                    let pane_id = pane_to_id(*pane);
+                    if webview_manager::exists(pane_id) {
+                        // Webview position is relative to the iced window.
+                        // Offset: sidebar width + pane region x, tab bar height + pane region y + title bar + nav bar.
+                        let wv_x = (SIDEBAR_WIDTH + rect.x) as f64;
+                        let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+                        let wv_w = content_width as f64;
+                        let wv_h = (content_height - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
+                        webview_manager::set_bounds(pane_id, wv_x, wv_y, wv_w, wv_h);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Create a real wry webview for a browser pane.
+    fn create_browser_webview(&self, pane: pane_grid::Pane, url: &str) {
+        let Some(xid) = self.parent_xid else {
+            log::warn!("Cannot create webview: parent XID not yet available");
+            return;
+        };
+
+        let pane_id = pane_to_id(pane);
+
+        // Calculate initial bounds for this pane.
+        use iced::Size;
+        let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
+        let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
+        let bounds = Size::new(grid_width, grid_height);
+
+        let tab = self.active_tab();
+        let regions = tab.panes.layout().pane_regions(
+            PANE_GRID_SPACING,
+            PANE_GRID_MIN_SIZE,
+            bounds,
+        );
+
+        let (x, y, w, h) = if let Some(rect) = regions.get(&pane) {
+            let wv_x = (SIDEBAR_WIDTH + rect.x) as f64;
+            let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+            let wv_w = rect.width as f64;
+            let content_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0);
+            (wv_x, wv_y, wv_w, content_h as f64)
+        } else {
+            // Fallback: reasonable defaults.
+            (SIDEBAR_WIDTH as f64, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 400.0, 300.0)
+        };
+
+        if let Err(e) = webview_manager::create_webview(pane_id, xid, url, (x, y, w, h)) {
+            log::error!("Failed to create webview for pane {pane_id}: {e}");
+        }
+    }
+
+    /// Show webviews in the active tab, hide webviews in all other tabs.
+    fn update_webview_visibility(&self) {
+        for (tab_idx, tab) in self.tabs.iter().enumerate() {
+            let is_active = tab_idx == self.active_tab;
+            for (pane, block) in tab.panes.iter() {
+                if block.is_browser() {
+                    webview_manager::set_visible(pane_to_id(*pane), is_active);
                 }
             }
         }
@@ -372,6 +473,9 @@ impl Altermative {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
+                // Pump GTK events so webkit2gtk can process network/rendering.
+                webview_manager::pump_gtk_events();
+
                 // Tick all panes in all tabs.
                 for tab in &mut self.tabs {
                     for (_pane, block) in tab.panes.iter_mut() {
@@ -456,6 +560,9 @@ impl Altermative {
             Message::ClosePane => {
                 let tab = self.active_tab_mut();
                 if let Some(focused) = tab.focus {
+                    // Destroy any webview associated with this pane.
+                    webview_manager::destroy(pane_to_id(focused));
+
                     if tab.panes.len() > 1 {
                         if let Some((_closed_block, sibling)) = tab.panes.close(focused) {
                             tab.focus = Some(sibling);
@@ -469,10 +576,23 @@ impl Altermative {
                 if let Some(focused) = tab.focus {
                     if tab.panes.maximized().is_some() {
                         tab.panes.restore();
+                        // Show all browser webviews in this tab.
+                        for (pane, block) in tab.panes.iter() {
+                            if block.is_browser() {
+                                webview_manager::set_visible(pane_to_id(*pane), true);
+                            }
+                        }
                     } else {
+                        // Hide all non-focused browser webviews before maximizing.
+                        for (pane, block) in tab.panes.iter() {
+                            if block.is_browser() && *pane != focused {
+                                webview_manager::set_visible(pane_to_id(*pane), false);
+                            }
+                        }
                         tab.panes.maximize(focused);
                     }
                 }
+                self.resize_all_panes();
             }
 
             // Per-pane title bar controls (operate on a specific pane)
@@ -511,6 +631,9 @@ impl Altermative {
                 self.resize_all_panes();
             }
             Message::ClosePaneId(pane) => {
+                // Destroy any webview associated with this pane before removing it.
+                webview_manager::destroy(pane_to_id(pane));
+
                 let tab = self.active_tab_mut();
                 if tab.panes.len() > 1 {
                     if let Some((_closed_block, sibling)) = tab.panes.close(pane) {
@@ -523,7 +646,19 @@ impl Altermative {
                 let tab = self.active_tab_mut();
                 if tab.panes.maximized().is_some() {
                     tab.panes.restore();
+                    // Show all browser webviews in this tab.
+                    for (p, block) in tab.panes.iter() {
+                        if block.is_browser() {
+                            webview_manager::set_visible(pane_to_id(*p), true);
+                        }
+                    }
                 } else {
+                    // Hide non-target browser webviews.
+                    for (p, block) in tab.panes.iter() {
+                        if block.is_browser() && *p != pane {
+                            webview_manager::set_visible(pane_to_id(*p), false);
+                        }
+                    }
                     tab.panes.maximize(pane);
                 }
                 self.resize_all_panes();
@@ -538,6 +673,13 @@ impl Altermative {
             }
             Message::CloseTab(index) => {
                 if self.tabs.len() > 1 && index < self.tabs.len() {
+                    // Destroy all webviews in the tab being closed.
+                    for (pane, block) in self.tabs[index].panes.iter() {
+                        if block.is_browser() {
+                            webview_manager::destroy(pane_to_id(*pane));
+                        }
+                    }
+
                     self.tabs.remove(index);
                     // Adjust active_tab index after removal.
                     if self.active_tab >= self.tabs.len() {
@@ -545,12 +687,16 @@ impl Altermative {
                     } else if self.active_tab > index {
                         self.active_tab -= 1;
                     }
+
+                    // Update webview visibility for the newly active tab.
+                    self.update_webview_visibility();
                 }
             }
             Message::SelectTab(index) => {
                 if index < self.tabs.len() {
                     self.active_tab = index;
                     self.resize_all_panes();
+                    self.update_webview_visibility();
                 }
             }
             Message::TabBarAction(action) => match action {
@@ -834,7 +980,8 @@ impl Altermative {
 
             // -- Browser --
             Message::OpenBrowser => {
-                let block = Block::new_browser("https://www.google.com");
+                let url = "https://www.google.com";
+                let block = Block::new_browser(url);
                 let tab = self.active_tab_mut();
                 if let Some(focused) = tab.focus {
                     if let Some((new_pane, _split)) =
@@ -842,6 +989,10 @@ impl Altermative {
                     {
                         tab.focus = Some(new_pane);
                         self.resize_all_panes();
+
+                        // Create a real webview for this pane.
+                        self.create_browser_webview(new_pane, url);
+
                         return widget_focus(WidgetId::from(
                             format!("browser-url-input-{:?}", new_pane),
                         ));
@@ -853,24 +1004,29 @@ impl Altermative {
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.navigate(&url);
+                    // Also navigate the real webview.
+                    webview_manager::navigate(pane_to_id(pane), &state.url);
                 }
             }
             Message::BrowserBack(pane) => {
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.go_back();
+                    webview_manager::navigate(pane_to_id(pane), &state.url);
                 }
             }
             Message::BrowserForward(pane) => {
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.go_forward();
+                    webview_manager::navigate(pane_to_id(pane), &state.url);
                 }
             }
             Message::BrowserReload(pane) => {
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.reload();
+                    webview_manager::reload(pane_to_id(pane));
                 }
             }
             Message::BrowserUrlChanged(pane, url) => {
@@ -1044,6 +1200,12 @@ impl Altermative {
                     self.scroll_accumulator -= lines as f32;
                     self.scroll_focused(lines);
                 }
+            }
+
+            // -- Window handle --
+            Message::WindowHandleReady(xid) => {
+                log::info!("Got X11 window ID (XID): {xid}");
+                self.parent_xid = Some(xid);
             }
         }
         Task::none()
@@ -1885,32 +2047,23 @@ fn browser_view<'a>(
     })
     .into();
 
-    // ── Content area (placeholder) ──
-    let placeholder: Element<'a, Message> = container(
-        column![
-            text("Web content will render here")
-                .size(14)
-                .color(Color::from_rgb(0.45, 0.45, 0.50)),
-            iced::widget::space().height(Length::Fixed(12.0)),
-            text(format!("URL: {}", state.url))
-                .size(12)
-                .color(Color::from_rgb(0.35, 0.55, 0.80)),
-        ]
-        .spacing(4)
-        .align_x(iced::Alignment::Center),
+    // ── Content area ──
+    // The real wry webview is rendered as an X11 child window that overlays this area.
+    // We render a transparent placeholder so iced reserves the space.
+    let webview_area: Element<'a, Message> = container(
+        iced::widget::space().width(Fill).height(Fill),
     )
     .width(Fill)
     .height(Fill)
-    .center_x(Fill)
-    .center_y(Fill)
     .style(|_: &Theme| iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.04, 0.04, 0.06))),
+        // Transparent so the native webview shows through.
+        background: Some(Background::Color(Color::TRANSPARENT)),
         ..Default::default()
     })
     .into();
 
-    // ── Layout: nav bar on top, content fills the rest ──
-    container(column![nav_bar, placeholder])
+    // ── Layout: nav bar on top, webview area fills the rest ──
+    container(column![nav_bar, webview_area])
         .width(Fill)
         .height(Fill)
         .style(|_: &Theme| iced::widget::container::Style {
