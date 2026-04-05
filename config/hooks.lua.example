@@ -1,0 +1,22 @@
+-- Altermative hooks file
+-- Place this at ~/.config/altermative/hooks.lua
+
+-- Called when a new terminal is created
+function on_terminal_created()
+    -- Return a custom shell command, or nil for default
+    return nil
+end
+
+-- Called to determine the terminal title
+function on_title_change(title)
+    -- Modify the title, or return nil to use default
+    return title
+end
+
+-- Conditional configuration based on hostname
+local hostname = io.popen("hostname"):read("*l")
+if hostname == "work-machine" then
+    default_provider = "anthropic"
+else
+    default_provider = "ollama"
+end

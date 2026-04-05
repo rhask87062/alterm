@@ -21,7 +21,7 @@ use ai::{
     anthropic::AnthropicProvider, gemini::GeminiProvider, openai::OpenAIProvider, Provider,
     ProviderConfig, StreamEvent,
 };
-use altermative_config::AppConfig;
+use altermative_config::{hooks::LuaHooks, AppConfig};
 
 fn main() -> iced::Result {
     env_logger::init();
@@ -56,6 +56,8 @@ struct Altermative {
     window_height: f32,
     /// Application configuration (loaded from disk at startup).
     config: AppConfig,
+    /// Optional Lua hooks (loaded from hooks.lua if present).
+    hooks: LuaHooks,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +132,14 @@ impl Altermative {
             AppConfig::default()
         });
 
+        // Load optional Lua hooks from ~/.config/altermative/hooks.lua.
+        let mut hooks = LuaHooks::new();
+        match hooks.load_file(&AppConfig::hooks_path()) {
+            Ok(true) => log::info!("Lua hooks loaded from {:?}", AppConfig::hooks_path()),
+            Ok(false) => log::debug!("No hooks.lua found; Lua hooks disabled"),
+            Err(e) => log::warn!("Failed to load hooks.lua: {e}"),
+        }
+
         // Initial size estimate for a single-pane tab at launch.
         // resize_all_panes() will correct this once the window opens.
         let grid_width = (window_width - SIDEBAR_WIDTH).max(80.0);
@@ -147,6 +157,7 @@ impl Altermative {
             window_width,
             window_height,
             config,
+            hooks,
         };
 
         (app, Task::none())

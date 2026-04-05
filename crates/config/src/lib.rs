@@ -1,3 +1,4 @@
+pub mod hooks;
 pub mod theme;
 
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,11 @@ impl AppConfig {
     /// Returns the default config file path: `config_dir()/config.toml`.
     pub fn config_path() -> PathBuf {
         Self::config_dir().join("config.toml")
+    }
+
+    /// Returns the Lua hooks file path: `config_dir()/hooks.lua`.
+    pub fn hooks_path() -> PathBuf {
+        Self::config_dir().join("hooks.lua")
     }
 }
 
