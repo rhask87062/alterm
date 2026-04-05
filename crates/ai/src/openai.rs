@@ -58,13 +58,28 @@ impl Provider for OpenAIProvider {
             }));
         }
 
-        let body = json!({
-            "model": &config.model,
-            "messages": msgs,
-            "max_tokens": config.max_tokens,
-            "temperature": config.temperature,
-            "stream": true
-        });
+        // Newer OpenAI models (gpt-4o, o1, etc.) use max_completion_tokens
+        // instead of max_tokens. Use max_completion_tokens for OpenAI, fall
+        // back to max_tokens for other OpenAI-compatible APIs (Ollama, LM Studio).
+        let is_openai = config.base_url.contains("api.openai.com")
+            || config.base_url.contains("api.x.ai");
+        let body = if is_openai {
+            json!({
+                "model": &config.model,
+                "messages": msgs,
+                "max_completion_tokens": config.max_tokens,
+                "temperature": config.temperature,
+                "stream": true
+            })
+        } else {
+            json!({
+                "model": &config.model,
+                "messages": msgs,
+                "max_tokens": config.max_tokens,
+                "temperature": config.temperature,
+                "stream": true
+            })
+        };
 
         let mut request = self.client.post(&url).json(&body);
 
