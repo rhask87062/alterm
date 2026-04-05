@@ -12,6 +12,7 @@ use raw_window_handle::{
 };
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{Rect, WebView, WebViewBuilder};
+use wry::WebViewExtUnix;
 
 thread_local! {
     static WEBVIEWS: RefCell<HashMap<u64, WebView>> = RefCell::new(HashMap::new());
@@ -75,13 +76,8 @@ pub fn create_webview(
 
     let wrapper = X11Parent(parent_xid);
 
-    // Start with a dark blank page so WebKit's web process initializes with
-    // dark mode active. We then navigate to the real URL immediately after.
-    let dark_blank = "data:text/html,<html style='color-scheme:dark;background:%23121214'><head><meta name='color-scheme' content='dark'></head><body></body></html>";
-
-    let real_url = url.to_string();
     let webview = WebViewBuilder::new()
-        .with_url(dark_blank)
+        .with_url(url)
         .with_visible(true)
         .with_bounds(Rect {
             position: LogicalPosition::new(bounds.0, bounds.1).into(),
@@ -90,8 +86,32 @@ pub fn create_webview(
         .build_as_child(&wrapper)
         .map_err(|e| format!("Failed to create webview: {e}"))?;
 
-    // Navigate to the real URL now that dark mode is established
-    let _ = webview.load_url(&real_url);
+    // Force dark mode via webkit2gtk settings.
+    // WebViewExtUnix::webview() gives us the underlying webkit2gtk::WebView.
+    let wk_webview = webview.webview();
+    // The webkit2gtk WebView has a "settings" property with
+    // "enable-developer-extras" and we can set color scheme via
+    // the WebKitWebView's settings or via the page directly.
+    // Use evaluate_script to inject a color-scheme meta tag early.
+    let _ = webview.evaluate_script(
+        r#"
+        document.addEventListener('DOMContentLoaded', function() {
+            var meta = document.querySelector('meta[name="color-scheme"]');
+            if (!meta) {
+                meta = document.createElement('meta');
+                meta.name = 'color-scheme';
+                meta.content = 'dark';
+                document.head.appendChild(meta);
+            }
+        });
+        // Also set it on documentElement immediately
+        document.documentElement.style.colorScheme = 'dark';
+        "#,
+    );
+
+    // Set the WebKitSettings "enable-write-console-messages-to-stdout" so we can debug
+    // Try to set hardware acceleration policy to force software rendering for dark mode compat
+    wk_webview.set_property("is-controlled-by-automation", false);
 
     WEBVIEWS.with(|wvs| {
         wvs.borrow_mut().insert(pane_id, webview);

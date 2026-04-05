@@ -2,7 +2,7 @@
 ///
 /// Positioned on the right side of the workspace, provides quick access to
 /// split the focused pane with different block types.
-use iced::widget::{button, column, container, text};
+use iced::widget::{button, column, container, svg, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 /// Actions the sidebar can produce.
@@ -29,10 +29,22 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
     let btn_size = 36.0;
     let btn_padding = Padding::from([6, 0]);
 
-    let terminal_btn = sidebar_button("T", Some(map(SidebarAction::NewTerminal)), btn_size);
+    let terminal_btn = sidebar_svg_button(
+        include_bytes!("../../../assets/icons/sidebar/terminal.svg"),
+        Some(map(SidebarAction::NewTerminal)),
+        btn_size,
+    );
     let ai_btn = sidebar_button("AI", Some(map(SidebarAction::NewAiChat)), btn_size);
-    let web_btn = sidebar_button("W", Some(map(SidebarAction::NewBrowser)), btn_size);
-    let preview_btn = sidebar_button("F", Some(map(SidebarAction::NewPreview)), btn_size);
+    let web_btn = sidebar_svg_button(
+        include_bytes!("../../../assets/icons/sidebar/browser.svg"),
+        Some(map(SidebarAction::NewBrowser)),
+        btn_size,
+    );
+    let preview_btn = sidebar_svg_button(
+        include_bytes!("../../../assets/icons/sidebar/folder.svg"),
+        Some(map(SidebarAction::NewPreview)),
+        btn_size,
+    );
     let settings_btn = sidebar_button("\u{2699}", Some(map(SidebarAction::OpenSettings)), btn_size);
     let info_btn = sidebar_button("?", Some(map(SidebarAction::ShowHotkeyInfo)), btn_size);
 
@@ -59,7 +71,39 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         .into()
 }
 
-/// Build a single sidebar button (no tooltip).
+/// Build a sidebar button with an SVG icon.
+fn sidebar_svg_button<'a, M: Clone + 'a>(
+    svg_bytes: &[u8],
+    on_press: Option<M>,
+    size: f32,
+) -> Element<'a, M> {
+    let icon = svg(svg::Handle::from_memory(svg_bytes.to_vec()))
+        .width(Length::Fixed(20.0))
+        .height(Length::Fixed(20.0));
+
+    let icon_container = container(icon)
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .center_x(Length::Fixed(size))
+        .center_y(Length::Fixed(size));
+
+    let mut btn = button(icon_container)
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .padding(0);
+
+    if let Some(msg) = on_press {
+        btn = btn
+            .on_press(msg)
+            .style(move |_: &Theme, status| sidebar_button_style(status, true));
+    } else {
+        btn = btn.style(move |_: &Theme, status| sidebar_button_style(status, false));
+    }
+
+    btn.into()
+}
+
+/// Build a single sidebar button with text label (no tooltip).
 fn sidebar_button<'a, M: Clone + 'a>(
     label: &'a str,
     on_press: Option<M>,
