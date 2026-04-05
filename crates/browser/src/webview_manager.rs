@@ -6,6 +6,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use gtk::prelude::ObjectExt;
 use raw_window_handle::{
     HandleError, HasWindowHandle, RawWindowHandle, WindowHandle, XlibWindowHandle,
 };
@@ -26,7 +27,15 @@ pub fn init_gtk() {
             // with NVIDIA proprietary drivers).
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+
             gtk::init().expect("Failed to init GTK");
+
+            // Tell GTK to prefer dark theme so WebKit reports
+            // prefers-color-scheme: dark to websites.
+            if let Some(settings) = gtk::Settings::default() {
+                settings.set_property("gtk-application-prefer-dark-theme", true);
+            }
+
             *init.borrow_mut() = true;
         }
     });
