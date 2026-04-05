@@ -58,28 +58,28 @@ impl Provider for OpenAIProvider {
             }));
         }
 
-        // Newer OpenAI models (gpt-4o, o1, etc.) use max_completion_tokens
-        // instead of max_tokens. Use max_completion_tokens for OpenAI, fall
-        // back to max_tokens for other OpenAI-compatible APIs (Ollama, LM Studio).
-        let is_openai = config.base_url.contains("api.openai.com")
+        // OpenAI/xAI: newer models (GPT-5.x, o-series) reject "max_tokens"
+        // and require "max_completion_tokens". Local APIs (Ollama, LM Studio)
+        // still expect "max_tokens".
+        let is_cloud_openai = config.base_url.contains("api.openai.com")
             || config.base_url.contains("api.x.ai");
-        let body = if is_openai {
-            json!({
-                "model": &config.model,
-                "messages": msgs,
-                "max_completion_tokens": config.max_tokens,
-                "temperature": config.temperature,
-                "stream": true
-            })
+
+        let mut body = json!({
+            "model": &config.model,
+            "messages": msgs,
+            "stream": true
+        });
+
+        if is_cloud_openai {
+            body["max_completion_tokens"] = json!(config.max_tokens);
         } else {
-            json!({
-                "model": &config.model,
-                "messages": msgs,
-                "max_tokens": config.max_tokens,
-                "temperature": config.temperature,
-                "stream": true
-            })
-        };
+            body["max_tokens"] = json!(config.max_tokens);
+        }
+
+        // Temperature is rejected by reasoning models (o1/o3) — only set if non-zero
+        if config.temperature > 0.0 {
+            body["temperature"] = json!(config.temperature);
+        }
 
         let mut request = self.client.post(&url).json(&body);
 

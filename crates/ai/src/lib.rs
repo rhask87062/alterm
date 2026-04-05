@@ -71,7 +71,7 @@ pub async fn fetch_models(
 ) -> Vec<String> {
     match provider_type {
         "anthropic" => anthropic_hardcoded_models(),
-        "gemini" => fetch_gemini_models(base_url, api_key).await,
+        "google" => fetch_gemini_models(base_url, api_key).await,
         // openai, grok, lmstudio, ollama — all OpenAI-compatible
         _ => fetch_openai_compatible_models(base_url, api_key).await,
     }

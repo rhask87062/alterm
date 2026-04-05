@@ -99,6 +99,7 @@ enum Message {
     AIModelChanged(pane_grid::Pane, String),
     AIFetchModels(pane_grid::Pane),
     AIModelsFetched(pane_grid::Pane, Vec<String>),
+    AICopyMessage(String),
     ToggleAIChat,
     // Settings panel
     OpenSettings,
@@ -228,7 +229,7 @@ impl Altermative {
         let entry = match provider_name {
             "openai" => ai_cfg.providers.openai.as_ref(),
             "anthropic" => ai_cfg.providers.anthropic.as_ref(),
-            "gemini" => ai_cfg.providers.gemini.as_ref(),
+            "google" => ai_cfg.providers.google.as_ref(),
             "xai" => ai_cfg.providers.xai.as_ref(),
             "lmstudio" => ai_cfg.providers.lmstudio.as_ref(),
             "ollama" => ai_cfg.providers.ollama.as_ref(),
@@ -553,7 +554,7 @@ impl Altermative {
                         .map(|e| e.model.clone()).unwrap_or_else(|| "gpt-4o".to_string()),
                     "anthropic" => self.config.ai.providers.anthropic.as_ref()
                         .map(|e| e.model.clone()).unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
-                    "gemini" => self.config.ai.providers.gemini.as_ref()
+                    "google" => self.config.ai.providers.google.as_ref()
                         .map(|e| e.model.clone()).unwrap_or_else(|| "gemini-2.0-flash".to_string()),
                     "xai" => self.config.ai.providers.xai.as_ref()
                         .map(|e| e.model.clone()).unwrap_or_else(|| "grok-2".to_string()),
@@ -720,6 +721,9 @@ impl Altermative {
                     },
                     move |models| Message::AIModelsFetched(pane, models),
                 );
+            }
+            Message::AICopyMessage(content) => {
+                return iced::clipboard::write(content);
             }
             Message::AIModelsFetched(pane, models) => {
                 let tab = self.active_tab_mut();
@@ -1128,7 +1132,7 @@ fn ai_chat_view<'a>(
 ) -> Element<'a, Message> {
     // ── Header: provider + model selectors ──
     let providers: Vec<String> = vec![
-        "openai".into(), "anthropic".into(), "gemini".into(),
+        "openai".into(), "anthropic".into(), "google".into(),
         "xai".into(), "lmstudio".into(), "ollama".into(),
     ];
     let provider_picker = pick_list(
@@ -1197,9 +1201,30 @@ fn ai_chat_view<'a>(
             "error" => ("Error:", Color::from_rgb(0.95, 0.40, 0.35)),
             _ => ("System:", Color::from_rgb(0.60, 0.60, 0.65)),
         };
+        let copy_btn = button(text("Copy").size(9))
+            .on_press(Message::AICopyMessage(msg.content.clone()))
+            .padding(Padding::from([2, 6]))
+            .style(|_: &Theme, status: button::Status| {
+                let bg = match status {
+                    button::Status::Hovered => Color::from_rgb(0.20, 0.20, 0.25),
+                    _ => Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(Background::Color(bg)),
+                    text_color: Color::from_rgb(0.45, 0.45, 0.50),
+                    border: Border { color: Color::TRANSPARENT, width: 0.0, radius: 3.0.into() },
+                    ..Default::default()
+                }
+            });
+        let header_row = row![
+            text(label).size(11).color(color),
+            iced::widget::space().width(Fill),
+            copy_btn
+        ].align_y(iced::Alignment::Center);
+
         msg_widgets.push(
             column![
-                text(label).size(11).color(color),
+                header_row,
                 text(&msg.content).size(13).color(Color::from_rgb(0.85, 0.85, 0.88)),
             ]
             .spacing(2)
@@ -1510,7 +1535,7 @@ fn settings_ai_section<'a>(
     let provider_options: Vec<String> = vec![
         "openai".to_string(),
         "anthropic".to_string(),
-        "gemini".to_string(),
+        "google".to_string(),
         "xai".to_string(),
         "lmstudio".to_string(),
         "ollama".to_string(),
@@ -1662,7 +1687,7 @@ fn async_stream(
                     let p = AnthropicProvider::new();
                     p.stream_chat(&cfg, &msgs, tx).await;
                 }
-                "gemini" => {
+                "google" => {
                     let p = GeminiProvider::new();
                     p.stream_chat(&cfg, &msgs, tx).await;
                 }

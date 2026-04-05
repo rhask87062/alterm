@@ -172,7 +172,7 @@ impl SettingsState {
         let entry = match provider {
             "openai" => config.ai.providers.openai.as_ref(),
             "anthropic" => config.ai.providers.anthropic.as_ref(),
-            "gemini" => config.ai.providers.gemini.as_ref(),
+            "google" => config.ai.providers.google.as_ref(),
             "xai" => config.ai.providers.xai.as_ref(),
             "lmstudio" => config.ai.providers.lmstudio.as_ref(),
             "ollama" => config.ai.providers.ollama.as_ref(),
@@ -187,7 +187,7 @@ impl SettingsState {
         let entry = match provider {
             "openai" => config.ai.providers.openai.as_ref(),
             "anthropic" => config.ai.providers.anthropic.as_ref(),
-            "gemini" => config.ai.providers.gemini.as_ref(),
+            "google" => config.ai.providers.google.as_ref(),
             "xai" => config.ai.providers.xai.as_ref(),
             "lmstudio" => config.ai.providers.lmstudio.as_ref(),
             "ollama" => config.ai.providers.ollama.as_ref(),
@@ -206,7 +206,7 @@ impl SettingsState {
         let slot = match provider {
             "openai" => &mut config.ai.providers.openai,
             "anthropic" => &mut config.ai.providers.anthropic,
-            "gemini" => &mut config.ai.providers.gemini,
+            "google" => &mut config.ai.providers.google,
             "xai" => &mut config.ai.providers.xai,
             "lmstudio" => &mut config.ai.providers.lmstudio,
             "ollama" => &mut config.ai.providers.ollama,

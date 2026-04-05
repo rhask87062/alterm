@@ -167,7 +167,7 @@ impl Provider for GeminiProvider {
     }
 
     fn name(&self) -> &'static str {
-        "gemini"
+        "google"
     }
 }
 

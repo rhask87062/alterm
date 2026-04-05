@@ -110,7 +110,7 @@ impl AIConfig {
             .unwrap_or_else(|| match provider {
                 "openai" => "gpt-4o".to_string(),
                 "anthropic" => "claude-sonnet-4-20250514".to_string(),
-                "gemini" => "gemini-2.0-flash".to_string(),
+                "google" => "gemini-2.0-flash".to_string(),
                 "xai" => "grok-3".to_string(),
                 "lmstudio" => "default".to_string(),
                 "ollama" => "llama3.2".to_string(),
@@ -140,7 +140,7 @@ impl Default for AIConfig {
 pub struct AIProviders {
     pub openai: Option<ProviderEntry>,
     pub anthropic: Option<ProviderEntry>,
-    pub gemini: Option<ProviderEntry>,
+    pub google: Option<ProviderEntry>,
     pub xai: Option<ProviderEntry>,
     pub lmstudio: Option<ProviderEntry>,
     pub ollama: Option<ProviderEntry>,
@@ -152,7 +152,7 @@ impl AIProviders {
         match name {
             "openai" => self.openai.as_ref(),
             "anthropic" => self.anthropic.as_ref(),
-            "gemini" => self.gemini.as_ref(),
+            "google" => self.google.as_ref(),
             "xai" => self.xai.as_ref(),
             "lmstudio" => self.lmstudio.as_ref(),
             "ollama" => self.ollama.as_ref(),
@@ -166,7 +166,7 @@ impl Default for AIProviders {
         Self {
             openai: None,
             anthropic: None,
-            gemini: None,
+            google: None,
             xai: None,
             lmstudio: None,
             // Ship a default Ollama entry so users can start immediately.
@@ -226,7 +226,7 @@ pub fn default_base_url(provider: &str) -> Option<&'static str> {
     match provider {
         "openai" => Some("https://api.openai.com/v1"),
         "anthropic" => Some("https://api.anthropic.com/v1"),
-        "gemini" => Some("https://generativelanguage.googleapis.com/v1beta"),
+        "google" => Some("https://generativelanguage.googleapis.com/v1beta"),
         "xai" => Some("https://api.x.ai/v1"),
         "lmstudio" => Some("http://localhost:1234/v1"),
         "ollama" => Some("http://localhost:11434/v1"),
