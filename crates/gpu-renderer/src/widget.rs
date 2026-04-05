@@ -4,6 +4,7 @@
 /// `TerminalCanvas` implements `canvas::Program` and does the actual drawing.
 use iced::widget::canvas::{self, Frame, Geometry};
 use iced::{Color, Element, Fill, Font, Pixels, Point, Rectangle, Size, Theme};
+use iced::font::Family;
 use iced::mouse;
 use iced::widget::Canvas;
 
@@ -23,6 +24,8 @@ pub struct TerminalView {
     pub cell_width: f32,
     /// Cell height — `font_size * 1.4`.
     pub cell_height: f32,
+    /// The font to use for rendering terminal text.
+    pub font: Font,
 }
 
 impl TerminalView {
@@ -34,7 +37,24 @@ impl TerminalView {
             font_size,
             cell_width: font_size * 0.6,
             cell_height: font_size * 1.4,
+            font: Font::MONOSPACE,
         }
+    }
+
+    /// Set the font family for terminal text rendering.
+    ///
+    /// Accepts a `&'static str` font name. If the name is empty or
+    /// "monospace", falls back to `Font::MONOSPACE`.
+    pub fn with_font_family(mut self, family: &'static str) -> Self {
+        if family.is_empty() || family.eq_ignore_ascii_case("monospace") {
+            self.font = Font::MONOSPACE;
+        } else {
+            self.font = Font {
+                family: Family::Name(family),
+                ..Font::MONOSPACE
+            };
+        }
+        self
     }
 
     /// Returns an iced `Element` backed by a full-size canvas.
@@ -47,6 +67,7 @@ impl TerminalView {
             font_size: self.font_size,
             cell_width: self.cell_width,
             cell_height: self.cell_height,
+            font: self.font,
             _msg: std::marker::PhantomData,
         };
 
@@ -67,6 +88,7 @@ struct TerminalCanvas<M> {
     font_size: f32,
     cell_width: f32,
     cell_height: f32,
+    font: Font,
     _msg: std::marker::PhantomData<M>,
 }
 
@@ -128,7 +150,7 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
                         position: top_left,
                         color: fg_color,
                         size: Pixels(self.font_size),
-                        font: Font::MONOSPACE,
+                        font: self.font,
                         ..canvas::Text::default()
                     });
                 }
