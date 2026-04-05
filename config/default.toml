@@ -57,7 +57,7 @@ base_url  = "http://localhost:11434/v1"
 # base_url = "https://generativelanguage.googleapis.com/v1beta"
 
 # xAI Grok — https://console.x.ai
-# [ai.providers.grok]
+# [ai.providers.xai]
 # api_key  = "xai-..."
 # model    = "grok-3"
 # base_url = "https://api.x.ai/v1"

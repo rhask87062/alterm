@@ -42,7 +42,13 @@ impl AIChatState {
     /// Create a new chat state for the given provider and model.
     pub fn new(provider_name: String, model_name: String) -> Self {
         Self {
-            messages: Vec::new(),
+            messages: vec![DisplayMessage {
+                role: "assistant".to_string(),
+                content: format!(
+                    "Welcome to AI Chat! Provider: {}, Model: {}. Type a message below.",
+                    provider_name, model_name
+                ),
+            }],
             input: String::new(),
             streaming: false,
             current_response: String::new(),

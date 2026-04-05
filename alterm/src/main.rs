@@ -229,7 +229,7 @@ impl Altermative {
             "openai" => ai_cfg.providers.openai.as_ref(),
             "anthropic" => ai_cfg.providers.anthropic.as_ref(),
             "gemini" => ai_cfg.providers.gemini.as_ref(),
-            "grok" => ai_cfg.providers.grok.as_ref(),
+            "xai" => ai_cfg.providers.xai.as_ref(),
             "lmstudio" => ai_cfg.providers.lmstudio.as_ref(),
             "ollama" => ai_cfg.providers.ollama.as_ref(),
             _ => None,
@@ -555,7 +555,7 @@ impl Altermative {
                         .map(|e| e.model.clone()).unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
                     "gemini" => self.config.ai.providers.gemini.as_ref()
                         .map(|e| e.model.clone()).unwrap_or_else(|| "gemini-2.0-flash".to_string()),
-                    "grok" => self.config.ai.providers.grok.as_ref()
+                    "xai" => self.config.ai.providers.xai.as_ref()
                         .map(|e| e.model.clone()).unwrap_or_else(|| "grok-2".to_string()),
                     "lmstudio" => self.config.ai.providers.lmstudio.as_ref()
                         .map(|e| e.model.clone()).unwrap_or_else(|| "local-model".to_string()),
@@ -1126,197 +1126,105 @@ fn ai_chat_view<'a>(
     state: &'a workspace::AIChatState,
     has_terminal_context: bool,
 ) -> Element<'a, Message> {
-    // Header: provider/model dropdowns + context indicator
+    // ── Header: provider + model selectors ──
     let providers: Vec<String> = vec![
         "openai".into(), "anthropic".into(), "gemini".into(),
-        "grok".into(), "lmstudio".into(), "ollama".into(),
+        "xai".into(), "lmstudio".into(), "ollama".into(),
     ];
     let provider_picker = pick_list(
         providers,
         Some(state.provider_name.clone()),
-        move |selected| Message::AIProviderChanged(pane, selected),
+        move |s| Message::AIProviderChanged(pane, s),
+    ).text_size(11).padding(Padding::from([2, 6]));
+
+    let model_input = text_input("model", &state.model_name)
+        .on_input(move |v| Message::AIModelChanged(pane, v))
+        .size(11)
+        .padding(Padding::from([2, 6]))
+        .width(Length::Fixed(180.0));
+
+    let context_text = if has_terminal_context {
+        text("Context: Terminal").size(10).color(Color::from_rgb(0.40, 0.70, 0.50))
+    } else {
+        text("Context: none").size(10).color(Color::from_rgb(0.40, 0.40, 0.45))
+    };
+
+    let header: Element<'a, Message> = container(
+        row![provider_picker, model_input, iced::widget::space().width(Fill), context_text]
+            .spacing(6).align_y(iced::Alignment::Center)
     )
-    .text_size(11)
-    .padding(Padding::from([2, 6]));
+    .width(Fill)
+    .padding(Padding::from([4, 8]))
+    .style(|_: &Theme| iced::widget::container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
+        ..Default::default()
+    })
+    .into();
 
-    // Model selector: pick_list when models are fetched, text_input as fallback.
-    let model_selector: Element<'a, Message> = if !state.available_models.is_empty() {
-        pick_list(
-            state.available_models.clone(),
-            Some(state.model_name.clone()),
-            move |selected| Message::AIModelChanged(pane, selected),
-        )
-        .text_size(11)
-        .padding(Padding::from([2, 6]))
-        .width(Length::Fixed(220.0))
-        .into()
-    } else if state.models_loading {
-        container(
-            text("Loading models...").size(11).color(Color::from_rgb(0.50, 0.50, 0.55))
-        )
-        .padding(Padding::from([2, 6]))
-        .width(Length::Fixed(180.0))
-        .into()
-    } else {
-        text_input("model", &state.model_name)
-            .on_input(move |val| Message::AIModelChanged(pane, val))
-            .size(11)
-            .padding(Padding::from([2, 6]))
-            .width(Length::Fixed(180.0))
-            .into()
-    };
-
-    let context_label = if has_terminal_context {
-        text("Context: Terminal (focused)")
-            .size(10)
-            .color(Color::from_rgb(0.40, 0.70, 0.50))
-    } else {
-        text("Context: none")
-            .size(10)
-            .color(Color::from_rgb(0.40, 0.40, 0.45))
-    };
-
-    let header_row = row![provider_picker, model_selector, iced::widget::space().width(Fill), context_label]
-        .spacing(6)
-        .align_y(iced::Alignment::Center);
-
-    let header = container(header_row)
-        .width(Fill)
-        .padding(Padding::from([6, 10]))
-        .style(|_theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
-            border: Border {
-                color: Color::from_rgb(0.15, 0.15, 0.20),
-                width: 0.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
-
-    // Chat messages
-    let mut message_elements: Vec<Element<'a, Message>> = Vec::new();
-
-    if state.messages.is_empty() && !state.streaming {
-        // Empty state — show a helpful hint.
-        let hint = text("Ask a question about your terminal output, get help with commands, \
-                         or chat about anything. The AI can see your recent terminal output for context.")
-            .size(12)
-            .color(Color::from_rgb(0.40, 0.40, 0.45));
-        message_elements.push(
-            container(hint)
-                .width(Fill)
-                .padding(Padding::from([20, 12]))
-                .into(),
-        );
-    }
+    // ── Messages ──
+    let mut msg_widgets: Vec<Element<'a, Message>> = Vec::new();
 
     for msg in &state.messages {
-        let (label, label_color, content_color, bg) = match msg.role.as_str() {
-            "user" => (
-                "You",
-                Color::from_rgb(0.40, 0.70, 1.0),
-                Color::from_rgb(0.85, 0.87, 0.90),
-                Color::from_rgb(0.10, 0.12, 0.16),
-            ),
-            "assistant" => (
-                "AI",
-                Color::from_rgb(0.40, 0.85, 0.55),
-                Color::from_rgb(0.82, 0.84, 0.88),
-                Color::from_rgb(0.08, 0.10, 0.12),
-            ),
-            "error" => (
-                "Error",
-                Color::from_rgb(0.95, 0.40, 0.35),
-                Color::from_rgb(0.90, 0.55, 0.50),
-                Color::from_rgb(0.15, 0.08, 0.08),
-            ),
-            _ => (
-                "System",
-                Color::from_rgb(0.60, 0.60, 0.65),
-                Color::from_rgb(0.70, 0.70, 0.75),
-                Color::from_rgb(0.10, 0.10, 0.12),
-            ),
+        let (label, color) = match msg.role.as_str() {
+            "user" => ("You:", Color::from_rgb(0.40, 0.70, 1.0)),
+            "assistant" => ("AI:", Color::from_rgb(0.40, 0.85, 0.55)),
+            "error" => ("Error:", Color::from_rgb(0.95, 0.40, 0.35)),
+            _ => ("System:", Color::from_rgb(0.60, 0.60, 0.65)),
         };
-
-        let role_label = text(format!("{label}:"))
-            .size(12)
-            .color(label_color);
-        let content = text(&msg.content)
-            .size(13)
-            .color(content_color);
-
-        let msg_widget = column![role_label, content].spacing(2);
-
-        let msg_container: Element<'a, Message> = container(msg_widget)
-            .width(Fill)
-            .padding(Padding::from([8, 12]))
-            .style(move |_theme: &Theme| iced::widget::container::Style {
-                background: Some(Background::Color(bg)),
-                border: Border {
-                    color: Color::from_rgb(0.12, 0.12, 0.15),
-                    width: 0.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into();
-
-        message_elements.push(msg_container);
-    }
-
-    // Show in-progress streaming response.
-    if state.streaming && !state.current_response.is_empty() {
-        let role_label = text("AI:")
-            .size(12)
-            .color(Color::from_rgb(0.40, 0.85, 0.55));
-        let content = text(format!("{}\u{2588}", state.current_response))
-            .size(13)
-            .color(Color::from_rgb(0.82, 0.84, 0.88));
-
-        let msg_widget = column![role_label, content].spacing(2);
-
-        let msg_container: Element<'a, Message> = container(msg_widget)
-            .width(Fill)
-            .padding(Padding::from([8, 12]))
-            .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(Background::Color(Color::from_rgb(0.08, 0.10, 0.12))),
-                ..Default::default()
-            })
-            .into();
-
-        message_elements.push(msg_container);
-    } else if state.streaming {
-        // Streaming but no tokens yet — show a waiting indicator.
-        let waiting = text("AI is thinking...")
-            .size(12)
-            .color(Color::from_rgb(0.50, 0.50, 0.55));
-        message_elements.push(
-            container(waiting)
-                .width(Fill)
-                .padding(Padding::from([8, 12]))
-                .into(),
+        msg_widgets.push(
+            column![
+                text(label).size(11).color(color),
+                text(&msg.content).size(13).color(Color::from_rgb(0.85, 0.85, 0.88)),
+            ]
+            .spacing(2)
+            .padding(Padding::from([6, 10]))
+            .into(),
         );
     }
 
-    let messages_column = Column::from_vec(message_elements).spacing(2);
+    if state.streaming && !state.current_response.is_empty() {
+        msg_widgets.push(
+            column![
+                text("AI:").size(11).color(Color::from_rgb(0.40, 0.85, 0.55)),
+                text(format!("{}\u{2588}", state.current_response))
+                    .size(13).color(Color::from_rgb(0.85, 0.85, 0.88)),
+            ]
+            .spacing(2)
+            .padding(Padding::from([6, 10]))
+            .into(),
+        );
+    } else if state.streaming {
+        let waiting: Element<'a, Message> = container(
+            text("AI is thinking...").size(12).color(Color::from_rgb(0.50, 0.50, 0.55))
+        ).center_x(Fill).padding(10).into();
+        msg_widgets.push(waiting);
+    }
 
-    let chat_scroll = scrollable(messages_column)
-        .width(Fill)
-        .height(Fill);
+    if msg_widgets.is_empty() {
+        let hint: Element<'a, Message> = container(
+            text("Type a message to start chatting. AI can see your terminal output.")
+                .size(12).color(Color::from_rgb(0.40, 0.40, 0.45))
+        ).center_x(Fill).padding(20).into();
+        msg_widgets.push(hint);
+    }
 
-    // Input area
+    let messages_area: Element<'a, Message> = scrollable(
+        Column::from_vec(msg_widgets).spacing(4).width(Fill).padding(4)
+    )
+    .width(Fill)
+    .into();
+
+    // ── Input ──
     let input_field = text_input("Type a message...", &state.input)
-        .on_input(move |val| Message::AIInputChanged(pane, val))
+        .on_input(move |v| Message::AIInputChanged(pane, v))
         .on_submit(Message::AISendMessage(pane))
         .size(13)
         .padding(Padding::from([8, 10]))
         .id(WidgetId::from(format!("ai-chat-input-{:?}", pane)));
 
-    let send_enabled = !state.input.trim().is_empty() && !state.streaming;
-
     let mut send_btn = button(text("Send").size(12).center())
         .padding(Padding::from([8, 14]))
-        .style(|_theme: &Theme, status: button::Status| {
+        .style(|_: &Theme, status: button::Status| {
             let bg = match status {
                 button::Status::Hovered => Color::from_rgb(0.25, 0.55, 0.85),
                 button::Status::Pressed => Color::from_rgb(0.20, 0.45, 0.75),
@@ -1325,46 +1233,36 @@ fn ai_chat_view<'a>(
             button::Style {
                 background: Some(Background::Color(bg)),
                 text_color: Color::WHITE,
-                border: Border {
-                    color: Color::TRANSPARENT,
-                    width: 0.0,
-                    radius: 4.0.into(),
-                },
+                border: Border { color: Color::TRANSPARENT, width: 0.0, radius: 4.0.into() },
                 ..Default::default()
             }
         });
-
-    if send_enabled {
+    if !state.input.trim().is_empty() && !state.streaming {
         send_btn = send_btn.on_press(Message::AISendMessage(pane));
     }
 
-    let input_row = row![input_field, send_btn]
-        .spacing(4)
-        .align_y(iced::Alignment::Center);
+    let input_area: Element<'a, Message> = container(
+        row![input_field, send_btn].spacing(4).align_y(iced::Alignment::Center)
+    )
+    .width(Fill)
+    .padding(Padding::from([4, 6]))
+    .style(|_: &Theme| iced::widget::container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.09))),
+        border: Border { color: Color::from_rgb(0.15, 0.15, 0.20), width: 1.0, radius: 0.0.into() },
+        ..Default::default()
+    })
+    .into();
 
-    let input_container = container(input_row)
-        .width(Fill)
-        .padding(Padding::from([6, 8]))
-        .style(|_theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.09))),
-            border: Border {
-                color: Color::from_rgb(0.15, 0.15, 0.20),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+    // ── Layout: header on top, messages fill middle, input at bottom ──
+    // Key fix: use container with height=Fill for the messages area
+    // so the scrollable gets proper space allocation
+    let middle = container(messages_area).width(Fill).height(Fill);
 
-    // Assemble: header + scrollable messages + input
-    let layout = column![header, chat_scroll, input_container];
-
-    container(layout)
+    let layout: Element<'a, Message> = column![header, middle, input_area]
         .width(Fill)
         .height(Fill)
-        .style(|_theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
-            ..Default::default()
-        })
+        .into();
+    layout
         .into()
 }
 
@@ -1587,7 +1485,7 @@ fn settings_ai_section<'a>(
         "openai".to_string(),
         "anthropic".to_string(),
         "gemini".to_string(),
-        "grok".to_string(),
+        "xai".to_string(),
         "lmstudio".to_string(),
         "ollama".to_string(),
     ];
