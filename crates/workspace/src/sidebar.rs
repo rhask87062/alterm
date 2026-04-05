@@ -5,6 +5,11 @@
 use iced::widget::{button, column, container, svg, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
+/// Returns `true` when the iced theme is light.
+fn is_light_theme(theme: &Theme) -> bool {
+    matches!(theme, Theme::Light)
+}
+
 /// Actions the sidebar can produce.
 #[derive(Debug, Clone)]
 pub enum SidebarAction {
@@ -67,7 +72,7 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
     container(col)
         .width(Length::Fixed(44.0))
         .height(Length::Fill)
-        .style(|_theme: &Theme| sidebar_container_style())
+        .style(|theme: &Theme| sidebar_container_style(theme))
         .into()
 }
 
@@ -95,9 +100,9 @@ fn sidebar_svg_button<'a, M: Clone + 'a>(
     if let Some(msg) = on_press {
         btn = btn
             .on_press(msg)
-            .style(move |_: &Theme, status| sidebar_button_style(status, true));
+            .style(move |theme: &Theme, status| sidebar_button_style(theme, status, true));
     } else {
-        btn = btn.style(move |_: &Theme, status| sidebar_button_style(status, false));
+        btn = btn.style(move |theme: &Theme, status| sidebar_button_style(theme, status, false));
     }
 
     btn.into()
@@ -119,9 +124,9 @@ fn sidebar_button<'a, M: Clone + 'a>(
     if let Some(msg) = on_press {
         btn = btn
             .on_press(msg)
-            .style(move |_: &Theme, status| sidebar_button_style(status, true));
+            .style(move |theme: &Theme, status| sidebar_button_style(theme, status, true));
     } else {
-        btn = btn.style(move |_: &Theme, status| sidebar_button_style(status, false));
+        btn = btn.style(move |theme: &Theme, status| sidebar_button_style(theme, status, false));
     }
 
     btn.into()
@@ -131,11 +136,20 @@ fn sidebar_button<'a, M: Clone + 'a>(
 // Styles
 // ---------------------------------------------------------------------------
 
-fn sidebar_container_style() -> iced::widget::container::Style {
+fn sidebar_container_style(theme: &Theme) -> iced::widget::container::Style {
+    let light = is_light_theme(theme);
     iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.09))),
+        background: Some(Background::Color(if light {
+            Color::from_rgb(0.92, 0.92, 0.94)
+        } else {
+            Color::from_rgb(0.07, 0.07, 0.09)
+        })),
         border: Border {
-            color: Color::from_rgb(0.15, 0.15, 0.18),
+            color: if light {
+                Color::from_rgb(0.82, 0.82, 0.86)
+            } else {
+                Color::from_rgb(0.15, 0.15, 0.18)
+            },
             width: 1.0,
             radius: 0.0.into(),
         },
@@ -143,12 +157,36 @@ fn sidebar_container_style() -> iced::widget::container::Style {
     }
 }
 
-fn sidebar_button_style(status: button::Status, enabled: bool) -> button::Style {
+fn sidebar_button_style(theme: &Theme, status: button::Status, enabled: bool) -> button::Style {
+    let light = is_light_theme(theme);
+
     let (bg, text_color) = if !enabled {
-        (
-            Color::from_rgb(0.09, 0.09, 0.11),
-            Color::from_rgb(0.35, 0.35, 0.35),
-        )
+        if light {
+            (
+                Color::from_rgb(0.90, 0.90, 0.92),
+                Color::from_rgb(0.60, 0.60, 0.65),
+            )
+        } else {
+            (
+                Color::from_rgb(0.09, 0.09, 0.11),
+                Color::from_rgb(0.35, 0.35, 0.35),
+            )
+        }
+    } else if light {
+        match status {
+            button::Status::Hovered => (
+                Color::from_rgb(0.82, 0.82, 0.88),
+                Color::from_rgb(0.10, 0.10, 0.15),
+            ),
+            button::Status::Pressed => (
+                Color::from_rgb(0.78, 0.78, 0.84),
+                Color::BLACK,
+            ),
+            _ => (
+                Color::from_rgb(0.88, 0.88, 0.92),
+                Color::from_rgb(0.20, 0.20, 0.25),
+            ),
+        }
     } else {
         match status {
             button::Status::Hovered => (
@@ -170,7 +208,11 @@ fn sidebar_button_style(status: button::Status, enabled: bool) -> button::Style 
         background: Some(Background::Color(bg)),
         text_color,
         border: Border {
-            color: Color::from_rgb(0.20, 0.20, 0.25),
+            color: if light {
+                Color::from_rgb(0.78, 0.78, 0.82)
+            } else {
+                Color::from_rgb(0.20, 0.20, 0.25)
+            },
             width: 1.0,
             radius: 4.0.into(),
         },

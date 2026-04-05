@@ -18,6 +18,21 @@ use workspace::{
     CELL_HEIGHT,
 };
 
+// ---------------------------------------------------------------------------
+// Theme helpers
+// ---------------------------------------------------------------------------
+
+/// Returns `true` when the current iced theme is light.
+fn is_light_theme(theme: &Theme) -> bool {
+    matches!(theme, Theme::Light)
+}
+
+/// Pick between a light-mode and dark-mode color.
+#[inline]
+fn themed(theme: &Theme, light: Color, dark: Color) -> Color {
+    if is_light_theme(theme) { light } else { dark }
+}
+
 use ai::{
     anthropic::AnthropicProvider, gemini::GeminiProvider, openai::OpenAIProvider, Provider,
     ProviderConfig, StreamEvent,
@@ -84,6 +99,9 @@ struct Altermative {
     parent_xid: Option<u64>,
     /// Available monospace font families for the settings dropdown.
     available_fonts: Vec<String>,
+    /// Leaked font family name for use with iced's `Font::Family::Name(&'static str)`.
+    /// Updated when settings are saved.
+    terminal_font_family: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +203,10 @@ impl Altermative {
         // Enumerate available monospace fonts for the settings dropdown.
         let available_fonts = enumerate_monospace_fonts();
 
+        // Leak the font family name so it can be used as &'static str with iced's Font API.
+        let terminal_font_family: &'static str =
+            Box::leak(config.appearance.font_family.clone().into_boxed_str());
+
         let app = Altermative {
             tabs: vec![first_tab],
             active_tab: 0,
@@ -196,6 +218,7 @@ impl Altermative {
             hooks,
             parent_xid: None,
             available_fonts,
+            terminal_font_family,
         };
 
         // Request the raw X11 window ID from iced — fires WindowHandleReady.
@@ -998,6 +1021,9 @@ impl Altermative {
                         log::error!("Failed to save settings: {e}");
                     } else {
                         self.config = state.config.clone();
+                        // Update the leaked font family string for the terminal renderer.
+                        self.terminal_font_family =
+                            Box::leak(self.config.appearance.font_family.clone().into_boxed_str());
                         log::info!("Settings saved and applied");
                     }
                 }
@@ -1270,7 +1296,8 @@ impl Altermative {
                 let content: Element<'_, Message> = match block {
                     Block::Terminal { .. } => {
                         let grid = block.render_grid();
-                        let terminal_view = TerminalView::new(grid);
+                        let terminal_view = TerminalView::new(grid)
+                            .with_font_family(self.terminal_font_family);
                         terminal_view.view()
                     }
                     Block::AIChat { state } => {
@@ -1371,20 +1398,25 @@ impl Altermative {
             } else {
                 Color::from_rgb(0.12, 0.12, 0.15)
             };
+            let bg_color_light = if is_selected {
+                Color::from_rgb(0.70, 0.80, 0.95)
+            } else {
+                Color::from_rgb(0.92, 0.92, 0.94)
+            };
             let text_color = if is_selected {
                 Color::from_rgb(1.0, 1.0, 1.0)
             } else {
                 Color::from_rgb(0.75, 0.75, 0.75)
             };
+            let text_color_light = if is_selected {
+                Color::from_rgb(0.05, 0.05, 0.10)
+            } else {
+                Color::from_rgb(0.25, 0.25, 0.30)
+            };
 
-            let label = text(&cmd.label).size(13).color(text_color);
-            let shortcut = text(&cmd.shortcut).size(11).color(
-                if is_selected {
-                    Color::from_rgb(0.7, 0.8, 1.0)
-                } else {
-                    Color::from_rgb(0.45, 0.45, 0.50)
-                },
-            );
+            // Text color is set via container's text_color override (theme-aware).
+            let label = text(&cmd.label).size(13);
+            let shortcut = text(&cmd.shortcut).size(11);
 
             let item_row = row![label, iced::widget::space().width(Fill), shortcut]
                 .spacing(8)
@@ -1393,9 +1425,17 @@ impl Altermative {
             let item_container: Element<'_, Message> = container(item_row)
                 .width(Fill)
                 .padding(6)
-                .style(move |_theme: &Theme| iced::widget::container::Style {
-                    background: Some(Background::Color(bg_color)),
-                    ..Default::default()
+                .style(move |theme: &Theme| {
+                    let light = is_light_theme(theme);
+                    iced::widget::container::Style {
+                        background: Some(Background::Color(
+                            if light { bg_color_light } else { bg_color }
+                        )),
+                        text_color: Some(
+                            if light { text_color_light } else { text_color }
+                        ),
+                        ..Default::default()
+                    }
                 })
                 .into();
 
@@ -1416,14 +1456,25 @@ impl Altermative {
 
         let palette_styled = container(palette_box)
             .padding(4)
-            .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(Background::Color(Color::from_rgb(0.10, 0.10, 0.13))),
-                border: Border {
-                    color: Color::from_rgb(0.30, 0.45, 0.75),
-                    width: 1.0,
-                    radius: 6.0.into(),
-                },
-                ..Default::default()
+            .style(|theme: &Theme| {
+                let light = is_light_theme(theme);
+                iced::widget::container::Style {
+                    background: Some(Background::Color(if light {
+                        Color::from_rgb(0.94, 0.94, 0.96)
+                    } else {
+                        Color::from_rgb(0.10, 0.10, 0.13)
+                    })),
+                    border: Border {
+                        color: if light {
+                            Color::from_rgb(0.60, 0.70, 0.90)
+                        } else {
+                            Color::from_rgb(0.30, 0.45, 0.75)
+                        },
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
+                    ..Default::default()
+                }
             });
 
         // Center horizontally, place near top
@@ -1434,9 +1485,12 @@ impl Altermative {
         )
         .width(Fill)
         .height(Fill)
-        .style(|_theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.5))),
-            ..Default::default()
+        .style(|theme: &Theme| {
+            let alpha = if is_light_theme(theme) { 0.3 } else { 0.5 };
+            iced::widget::container::Style {
+                background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, alpha))),
+                ..Default::default()
+            }
         })
         .into()
     }
@@ -1545,8 +1599,11 @@ fn ai_chat_view<'a>(
     )
     .width(Fill)
     .padding(Padding::from([4, 8]))
-    .style(|_: &Theme| iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
+    .style(|theme: &Theme| iced::widget::container::Style {
+        background: Some(Background::Color(themed(theme,
+            Color::from_rgb(0.92, 0.92, 0.94),
+            Color::from_rgb(0.08, 0.08, 0.11),
+        ))),
         ..Default::default()
     })
     .into();
@@ -1566,14 +1623,20 @@ fn ai_chat_view<'a>(
         let copy_btn = button(text("Copy").size(9))
             .on_press(Message::AICopyMessage(msg.content.clone()))
             .padding(Padding::from([2, 6]))
-            .style(|_: &Theme, status: button::Status| {
-                let bg = match status {
-                    button::Status::Hovered => Color::from_rgb(0.20, 0.20, 0.25),
+            .style(|theme: &Theme, status: button::Status| {
+                let light = is_light_theme(theme);
+                let bg = match (light, status) {
+                    (true, button::Status::Hovered) => Color::from_rgb(0.85, 0.85, 0.90),
+                    (false, button::Status::Hovered) => Color::from_rgb(0.20, 0.20, 0.25),
                     _ => Color::TRANSPARENT,
                 };
                 button::Style {
                     background: Some(Background::Color(bg)),
-                    text_color: Color::from_rgb(0.45, 0.45, 0.50),
+                    text_color: if light {
+                        Color::from_rgb(0.40, 0.40, 0.50)
+                    } else {
+                        Color::from_rgb(0.45, 0.45, 0.50)
+                    },
                     border: Border { color: Color::TRANSPARENT, width: 0.0, radius: 3.0.into() },
                     ..Default::default()
                 }
@@ -1587,7 +1650,7 @@ fn ai_chat_view<'a>(
         msg_widgets.push(
             column![
                 header_row,
-                text(&msg.content).size(13).color(Color::from_rgb(0.85, 0.85, 0.88)),
+                text(&msg.content).size(13),
             ]
             .spacing(2)
             .padding(Padding::from([6, 10]))
@@ -1602,8 +1665,7 @@ fn ai_chat_view<'a>(
         msg_widgets.push(
             column![
                 text(format!("{}:", streaming_name)).size(11).color(Color::from_rgb(0.40, 0.85, 0.55)),
-                text(format!("{}\u{2588}", state.current_response))
-                    .size(13).color(Color::from_rgb(0.85, 0.85, 0.88)),
+                text(format!("{}\u{2588}", state.current_response)).size(13),
             ]
             .spacing(2)
             .padding(Padding::from([6, 10]))
@@ -1611,15 +1673,14 @@ fn ai_chat_view<'a>(
         );
     } else if state.streaming {
         let waiting: Element<'a, Message> = container(
-            text("AI is thinking...").size(12).color(Color::from_rgb(0.50, 0.50, 0.55))
+            text("AI is thinking...").size(12)
         ).center_x(Fill).padding(10).into();
         msg_widgets.push(waiting);
     }
 
     if msg_widgets.is_empty() {
         let hint: Element<'a, Message> = container(
-            text("Type a message to start chatting. AI can see your terminal output.")
-                .size(12).color(Color::from_rgb(0.40, 0.40, 0.45))
+            text("Type a message to start chatting. AI can see your terminal output.").size(12)
         ).center_x(Fill).padding(20).into();
         msg_widgets.push(hint);
     }
@@ -1640,11 +1701,15 @@ fn ai_chat_view<'a>(
 
     let mut send_btn = button(text("Send").size(12).center())
         .padding(Padding::from([8, 14]))
-        .style(|_: &Theme, status: button::Status| {
-            let bg = match status {
-                button::Status::Hovered => Color::from_rgb(0.25, 0.55, 0.85),
-                button::Status::Pressed => Color::from_rgb(0.20, 0.45, 0.75),
-                _ => Color::from_rgb(0.22, 0.50, 0.80),
+        .style(|theme: &Theme, status: button::Status| {
+            let light = is_light_theme(theme);
+            let bg = match (light, status) {
+                (true, button::Status::Hovered) => Color::from_rgb(0.15, 0.45, 0.75),
+                (true, button::Status::Pressed) => Color::from_rgb(0.12, 0.38, 0.68),
+                (true, _) => Color::from_rgb(0.18, 0.48, 0.78),
+                (false, button::Status::Hovered) => Color::from_rgb(0.25, 0.55, 0.85),
+                (false, button::Status::Pressed) => Color::from_rgb(0.20, 0.45, 0.75),
+                (false, _) => Color::from_rgb(0.22, 0.50, 0.80),
             };
             button::Style {
                 background: Some(Background::Color(bg)),
@@ -1662,10 +1727,25 @@ fn ai_chat_view<'a>(
     )
     .width(Fill)
     .padding(Padding::from([4, 6]))
-    .style(|_: &Theme| iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.09))),
-        border: Border { color: Color::from_rgb(0.15, 0.15, 0.20), width: 1.0, radius: 0.0.into() },
-        ..Default::default()
+    .style(|theme: &Theme| {
+        let light = is_light_theme(theme);
+        iced::widget::container::Style {
+            background: Some(Background::Color(if light {
+                Color::from_rgb(0.93, 0.93, 0.95)
+            } else {
+                Color::from_rgb(0.07, 0.07, 0.09)
+            })),
+            border: Border {
+                color: if light {
+                    Color::from_rgb(0.80, 0.80, 0.85)
+                } else {
+                    Color::from_rgb(0.15, 0.15, 0.20)
+                },
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
     })
     .into();
 
@@ -1693,7 +1773,7 @@ fn settings_view<'a>(
     available_fonts: &[String],
 ) -> Element<'a, Message> {
     // ── Header ──
-    let title_label = text("Settings").size(16).color(Color::from_rgb(0.90, 0.92, 0.96));
+    let title_label = text("Settings").size(16);
     let dirty_indicator = if state.dirty {
         text(" (unsaved)").size(12).color(Color::from_rgb(0.90, 0.65, 0.30))
     } else {
@@ -1702,11 +1782,15 @@ fn settings_view<'a>(
 
     let mut save_btn = button(text("Save").size(12).center())
         .padding(Padding::from([6, 16]))
-        .style(|_theme: &Theme, status: button::Status| {
-            let bg = match status {
-                button::Status::Hovered => Color::from_rgb(0.25, 0.60, 0.40),
-                button::Status::Pressed => Color::from_rgb(0.20, 0.50, 0.35),
-                _ => Color::from_rgb(0.22, 0.55, 0.38),
+        .style(|theme: &Theme, status: button::Status| {
+            let light = is_light_theme(theme);
+            let bg = match (light, status) {
+                (true, button::Status::Hovered) => Color::from_rgb(0.20, 0.55, 0.35),
+                (true, button::Status::Pressed) => Color::from_rgb(0.16, 0.46, 0.30),
+                (true, _) => Color::from_rgb(0.18, 0.50, 0.33),
+                (false, button::Status::Hovered) => Color::from_rgb(0.25, 0.60, 0.40),
+                (false, button::Status::Pressed) => Color::from_rgb(0.20, 0.50, 0.35),
+                (false, _) => Color::from_rgb(0.22, 0.55, 0.38),
             };
             button::Style {
                 background: Some(Background::Color(bg)),
@@ -1731,14 +1815,30 @@ fn settings_view<'a>(
     )
     .width(Fill)
     .padding(Padding::from([8, 12]))
-    .style(|_theme: &Theme| iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
-        border: Border {
-            color: Color::from_rgb(0.15, 0.15, 0.20),
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
+    .style(|theme: &Theme| {
+        let light = is_light_theme(theme);
+        iced::widget::container::Style {
+            background: Some(Background::Color(if light {
+                Color::from_rgb(0.92, 0.92, 0.94)
+            } else {
+                Color::from_rgb(0.08, 0.08, 0.11)
+            })),
+            text_color: Some(if light {
+                Color::from_rgb(0.10, 0.10, 0.15)
+            } else {
+                Color::from_rgb(0.90, 0.92, 0.96)
+            }),
+            border: Border {
+                color: if light {
+                    Color::from_rgb(0.80, 0.80, 0.85)
+                } else {
+                    Color::from_rgb(0.15, 0.15, 0.20)
+                },
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
     });
 
     // ── Section navigation ──
@@ -1753,34 +1853,40 @@ fn settings_view<'a>(
         let is_active = state.active_section == *section;
         let sec = *section;
         let lbl = *label;
-        let bg_color = if is_active {
-            Color::from_rgb(0.18, 0.22, 0.32)
-        } else {
-            Color::from_rgb(0.10, 0.10, 0.13)
-        };
-        let text_color = if is_active {
-            Color::from_rgb(0.85, 0.90, 1.0)
-        } else {
-            Color::from_rgb(0.55, 0.55, 0.60)
-        };
 
-        let btn: Element<'a, Message> = button(text(lbl).size(12).color(text_color).center())
+        let btn: Element<'a, Message> = button(text(lbl).size(12).center())
             .on_press(Message::SettingsSectionChanged(pane, sec))
             .width(Fill)
             .padding(Padding::from([8, 4]))
-            .style(move |_theme: &Theme, _status: button::Status| button::Style {
-                background: Some(Background::Color(bg_color)),
-                text_color,
-                border: Border {
-                    color: if is_active {
-                        Color::from_rgb(0.30, 0.45, 0.75)
-                    } else {
-                        Color::TRANSPARENT
+            .style(move |theme: &Theme, _status: button::Status| {
+                let light = is_light_theme(theme);
+                let bg_color = match (light, is_active) {
+                    (true, true) => Color::from_rgb(0.85, 0.88, 0.95),
+                    (true, false) => Color::from_rgb(0.92, 0.92, 0.94),
+                    (false, true) => Color::from_rgb(0.18, 0.22, 0.32),
+                    (false, false) => Color::from_rgb(0.10, 0.10, 0.13),
+                };
+                let text_color = match (light, is_active) {
+                    (true, true) => Color::from_rgb(0.10, 0.10, 0.20),
+                    (true, false) => Color::from_rgb(0.40, 0.40, 0.50),
+                    (false, true) => Color::from_rgb(0.85, 0.90, 1.0),
+                    (false, false) => Color::from_rgb(0.55, 0.55, 0.60),
+                };
+                let border_color = match (light, is_active) {
+                    (true, true) => Color::from_rgb(0.40, 0.55, 0.85),
+                    (false, true) => Color::from_rgb(0.30, 0.45, 0.75),
+                    _ => Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(Background::Color(bg_color)),
+                    text_color,
+                    border: Border {
+                        color: border_color,
+                        width: if is_active { 1.0 } else { 0.0 },
+                        radius: 3.0.into(),
                     },
-                    width: if is_active { 1.0 } else { 0.0 },
-                    radius: 3.0.into(),
-                },
-                ..Default::default()
+                    ..Default::default()
+                }
             })
             .into();
 
@@ -1794,14 +1900,25 @@ fn settings_view<'a>(
     let nav_panel = container(nav_col)
         .padding(Padding::from([8, 4]))
         .height(Fill)
-        .style(|_theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.07, 0.07, 0.09))),
-            border: Border {
-                color: Color::from_rgb(0.15, 0.15, 0.18),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
+        .style(|theme: &Theme| {
+            let light = is_light_theme(theme);
+            iced::widget::container::Style {
+                background: Some(Background::Color(if light {
+                    Color::from_rgb(0.92, 0.92, 0.94)
+                } else {
+                    Color::from_rgb(0.07, 0.07, 0.09)
+                })),
+                border: Border {
+                    color: if light {
+                        Color::from_rgb(0.82, 0.82, 0.86)
+                    } else {
+                        Color::from_rgb(0.15, 0.15, 0.18)
+                    },
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }
         });
 
     // ── Section content ──
@@ -1824,8 +1941,11 @@ fn settings_view<'a>(
     container(column![header, body])
         .width(Fill)
         .height(Fill)
-        .style(|_theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+        .style(|theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(themed(theme,
+                Color::from_rgb(0.96, 0.96, 0.97),
+                Color::from_rgb(0.06, 0.06, 0.08),
+            ))),
             ..Default::default()
         })
         .into()
@@ -1837,13 +1957,11 @@ fn settings_appearance_section<'a>(
     state: &'a workspace::SettingsState,
     available_fonts: &[String],
 ) -> Element<'a, Message> {
-    let label_color = Color::from_rgb(0.70, 0.72, 0.78);
-    let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
-
-    let heading = text("Appearance").size(14).color(heading_color);
+    // Text colors are inherited from the iced theme (Light/Dark) automatically.
+    let heading = text("Appearance").size(14);
 
     // Font size
-    let font_size_label = text("Font size").size(12).color(label_color);
+    let font_size_label = text("Font size").size(12);
     let font_size_input = text_input("14.0", &state.font_size_text)
         .on_input(move |val| Message::SettingsChanged(pane, SettingsField::FontSize(val)))
         .size(13)
@@ -1851,7 +1969,7 @@ fn settings_appearance_section<'a>(
         .width(Length::Fixed(120.0));
 
     // Theme
-    let theme_label = text("Theme").size(12).color(label_color);
+    let theme_label = text("Theme").size(12);
     let theme_options: Vec<String> = vec!["dark".to_string(), "light".to_string()];
     let selected_theme: Option<String> = Some(state.config.appearance.theme.clone());
     let theme_picker = pick_list(
@@ -1864,7 +1982,7 @@ fn settings_appearance_section<'a>(
     .width(Length::Fixed(120.0));
 
     // Font family
-    let font_family_label = text("Font family").size(12).color(label_color);
+    let font_family_label = text("Font family").size(12);
     let font_list: Vec<String> = available_fonts.to_vec();
     let current_font = Some(state.config.appearance.font_family.clone());
     let font_family_picker = pick_list(
@@ -1897,13 +2015,10 @@ fn settings_ai_section<'a>(
     pane: pane_grid::Pane,
     state: &'a workspace::SettingsState,
 ) -> Element<'a, Message> {
-    let label_color = Color::from_rgb(0.70, 0.72, 0.78);
-    let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
-
-    let heading = text("AI Provider Settings").size(14).color(heading_color);
+    let heading = text("AI Provider Settings").size(14);
 
     // Default provider
-    let provider_label = text("Default provider").size(12).color(label_color);
+    let provider_label = text("Default provider").size(12);
     let provider_options: Vec<String> = vec![
         "openai".to_string(),
         "anthropic".to_string(),
@@ -1923,7 +2038,7 @@ fn settings_ai_section<'a>(
     .width(Length::Fixed(160.0));
 
     // Model
-    let model_label = text("Model").size(12).color(label_color);
+    let model_label = text("Model").size(12);
     let model_input = text_input("model name", &state.model_text)
         .on_input(move |val| Message::SettingsChanged(pane, SettingsField::AIModel(val)))
         .size(13)
@@ -1931,7 +2046,7 @@ fn settings_ai_section<'a>(
         .width(Length::Fixed(200.0));
 
     // API Key
-    let api_key_label = text("API key").size(12).color(label_color);
+    let api_key_label = text("API key").size(12);
     let api_key_input = text_input("sk-...", &state.api_key_text)
         .on_input(move |val| Message::SettingsChanged(pane, SettingsField::AIApiKey(val)))
         .secure(true)
@@ -1941,8 +2056,7 @@ fn settings_ai_section<'a>(
 
     // Temperature
     let temp_label = text(format!("Temperature: {:.2}", state.config.ai.temperature))
-        .size(12)
-        .color(label_color);
+        .size(12);
     let temp_slider = slider(
         0.0..=2.0,
         state.config.ai.temperature,
@@ -1952,7 +2066,7 @@ fn settings_ai_section<'a>(
     .width(Length::Fixed(200.0));
 
     // Max tokens
-    let max_tokens_label = text("Max tokens").size(12).color(label_color);
+    let max_tokens_label = text("Max tokens").size(12);
     let max_tokens_input = text_input("4096", &state.max_tokens_text)
         .on_input(move |val| Message::SettingsChanged(pane, SettingsField::MaxTokens(val)))
         .size(13)
@@ -1960,7 +2074,7 @@ fn settings_ai_section<'a>(
         .width(Length::Fixed(120.0));
 
     // System prompt
-    let sys_prompt_label = text("System prompt").size(12).color(label_color);
+    let sys_prompt_label = text("System prompt").size(12);
     let sys_prompt_input = text_input("You are a helpful...", &state.system_prompt_text)
         .on_input(move |val| Message::SettingsChanged(pane, SettingsField::SystemPrompt(val)))
         .size(13)
@@ -1997,13 +2111,10 @@ fn settings_terminal_section<'a>(
     pane: pane_grid::Pane,
     state: &'a workspace::SettingsState,
 ) -> Element<'a, Message> {
-    let label_color = Color::from_rgb(0.70, 0.72, 0.78);
-    let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
-
-    let heading = text("Terminal Settings").size(14).color(heading_color);
+    let heading = text("Terminal Settings").size(14);
 
     // Scrollback lines
-    let scrollback_label = text("Scrollback lines").size(12).color(label_color);
+    let scrollback_label = text("Scrollback lines").size(12);
     let scrollback_input = text_input("10000", &state.scrollback_text)
         .on_input(move |val| Message::SettingsChanged(pane, SettingsField::ScrollbackLines(val)))
         .size(13)
@@ -2049,7 +2160,7 @@ fn browser_view<'a>(
     let back_label = text("\u{25C0}").size(14).center();
     let mut back_btn = button(back_label)
         .padding(Padding::from([4, 8]))
-        .style(|_: &Theme, status: button::Status| nav_button_style(status));
+        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
     if state.can_go_back {
         back_btn = back_btn.on_press(Message::BrowserBack(pane));
     }
@@ -2057,7 +2168,7 @@ fn browser_view<'a>(
     let fwd_label = text("\u{25B6}").size(14).center();
     let mut fwd_btn = button(fwd_label)
         .padding(Padding::from([4, 8]))
-        .style(|_: &Theme, status: button::Status| nav_button_style(status));
+        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
     if state.can_go_forward {
         fwd_btn = fwd_btn.on_press(Message::BrowserForward(pane));
     }
@@ -2066,7 +2177,7 @@ fn browser_view<'a>(
     let reload_btn = button(reload_label)
         .on_press(Message::BrowserReload(pane))
         .padding(Padding::from([4, 8]))
-        .style(|_: &Theme, status: button::Status| nav_button_style(status));
+        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
 
     let url_input = text_input("Enter URL...", &state.input_url)
         .on_input(move |v| Message::BrowserUrlChanged(pane, v))
@@ -2082,14 +2193,25 @@ fn browser_view<'a>(
     )
     .width(Fill)
     .padding(Padding::from([4, 8]))
-    .style(|_: &Theme| iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
-        border: Border {
-            color: Color::from_rgb(0.15, 0.15, 0.20),
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
+    .style(|theme: &Theme| {
+        let light = is_light_theme(theme);
+        iced::widget::container::Style {
+            background: Some(Background::Color(if light {
+                Color::from_rgb(0.92, 0.92, 0.94)
+            } else {
+                Color::from_rgb(0.08, 0.08, 0.11)
+            })),
+            border: Border {
+                color: if light {
+                    Color::from_rgb(0.80, 0.80, 0.85)
+                } else {
+                    Color::from_rgb(0.15, 0.15, 0.20)
+                },
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
     })
     .into();
 
@@ -2112,30 +2234,44 @@ fn browser_view<'a>(
     container(column![nav_bar, webview_area])
         .width(Fill)
         .height(Fill)
-        .style(|_: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+        .style(|theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(themed(theme,
+                Color::from_rgb(0.96, 0.96, 0.97),
+                Color::from_rgb(0.06, 0.06, 0.08),
+            ))),
             ..Default::default()
         })
         .into()
 }
 
 /// Style for browser navigation buttons (back, forward, reload).
-fn nav_button_style(status: button::Status) -> button::Style {
-    let bg = match status {
-        button::Status::Hovered => Color::from_rgb(0.20, 0.20, 0.28),
-        button::Status::Pressed => Color::from_rgb(0.25, 0.25, 0.32),
-        button::Status::Disabled => Color::from_rgb(0.08, 0.08, 0.10),
-        _ => Color::from_rgb(0.12, 0.12, 0.16),
+fn nav_button_style(theme: &Theme, status: button::Status) -> button::Style {
+    let light = is_light_theme(theme);
+    let bg = match (light, status) {
+        (true, button::Status::Hovered) => Color::from_rgb(0.82, 0.82, 0.88),
+        (true, button::Status::Pressed) => Color::from_rgb(0.78, 0.78, 0.84),
+        (true, button::Status::Disabled) => Color::from_rgb(0.92, 0.92, 0.94),
+        (true, _) => Color::from_rgb(0.88, 0.88, 0.92),
+        (false, button::Status::Hovered) => Color::from_rgb(0.20, 0.20, 0.28),
+        (false, button::Status::Pressed) => Color::from_rgb(0.25, 0.25, 0.32),
+        (false, button::Status::Disabled) => Color::from_rgb(0.08, 0.08, 0.10),
+        (false, _) => Color::from_rgb(0.12, 0.12, 0.16),
     };
-    let text_color = match status {
-        button::Status::Disabled => Color::from_rgb(0.30, 0.30, 0.35),
-        _ => Color::from_rgb(0.80, 0.80, 0.85),
+    let text_color = match (light, status) {
+        (true, button::Status::Disabled) => Color::from_rgb(0.65, 0.65, 0.70),
+        (true, _) => Color::from_rgb(0.20, 0.20, 0.25),
+        (false, button::Status::Disabled) => Color::from_rgb(0.30, 0.30, 0.35),
+        (false, _) => Color::from_rgb(0.80, 0.80, 0.85),
     };
     button::Style {
         background: Some(Background::Color(bg)),
         text_color,
         border: Border {
-            color: Color::from_rgb(0.18, 0.18, 0.22),
+            color: if light {
+                Color::from_rgb(0.78, 0.78, 0.82)
+            } else {
+                Color::from_rgb(0.18, 0.18, 0.22)
+            },
             width: 1.0,
             radius: 4.0.into(),
         },
@@ -2163,7 +2299,7 @@ fn preview_view<'a>(
     )
     .on_press(Message::PreviewParent(pane))
     .padding(Padding::from([3, 8]))
-    .style(|_: &Theme, status: button::Status| nav_button_style(status));
+    .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
 
     let path_bar: Element<'a, Message> = container(
         row![path_label, iced::widget::space().width(Fill), parent_btn]
@@ -2172,14 +2308,25 @@ fn preview_view<'a>(
     )
     .width(Fill)
     .padding(Padding::from([4, 8]))
-    .style(|_: &Theme| iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
-        border: Border {
-            color: Color::from_rgb(0.15, 0.15, 0.20),
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
+    .style(|theme: &Theme| {
+        let light = is_light_theme(theme);
+        iced::widget::container::Style {
+            background: Some(Background::Color(if light {
+                Color::from_rgb(0.92, 0.92, 0.94)
+            } else {
+                Color::from_rgb(0.08, 0.08, 0.11)
+            })),
+            border: Border {
+                color: if light {
+                    Color::from_rgb(0.80, 0.80, 0.85)
+                } else {
+                    Color::from_rgb(0.15, 0.15, 0.20)
+                },
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
     })
     .into();
 
@@ -2282,15 +2429,22 @@ fn preview_view<'a>(
                 .on_press(Message::PreviewNavigate(pane, entry_path))
                 .width(Fill)
                 .padding(Padding::from([4, 8]))
-                .style(|_: &Theme, status: button::Status| {
-                    let bg = match status {
-                        button::Status::Hovered => Color::from_rgb(0.12, 0.14, 0.20),
-                        button::Status::Pressed => Color::from_rgb(0.15, 0.17, 0.24),
+                .style(|theme: &Theme, status: button::Status| {
+                    let light = is_light_theme(theme);
+                    let bg = match (light, status) {
+                        (true, button::Status::Hovered) => Color::from_rgb(0.88, 0.90, 0.95),
+                        (true, button::Status::Pressed) => Color::from_rgb(0.84, 0.86, 0.92),
+                        (false, button::Status::Hovered) => Color::from_rgb(0.12, 0.14, 0.20),
+                        (false, button::Status::Pressed) => Color::from_rgb(0.15, 0.17, 0.24),
                         _ => Color::TRANSPARENT,
                     };
                     button::Style {
                         background: Some(Background::Color(bg)),
-                        text_color: Color::from_rgb(0.80, 0.80, 0.82),
+                        text_color: if light {
+                            Color::from_rgb(0.15, 0.15, 0.20)
+                        } else {
+                            Color::from_rgb(0.80, 0.80, 0.82)
+                        },
                         border: Border {
                             color: Color::TRANSPARENT,
                             width: 0.0,
@@ -2346,8 +2500,11 @@ fn preview_view<'a>(
     let content_styled: Element<'a, Message> = container(content_area)
         .width(Fill)
         .height(Fill)
-        .style(|_: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.04, 0.04, 0.06))),
+        .style(|theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(themed(theme,
+                Color::from_rgb(0.97, 0.97, 0.98),
+                Color::from_rgb(0.04, 0.04, 0.06),
+            ))),
             ..Default::default()
         })
         .into();
@@ -2356,8 +2513,11 @@ fn preview_view<'a>(
     container(column![path_bar, content_styled])
         .width(Fill)
         .height(Fill)
-        .style(|_: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+        .style(|theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(themed(theme,
+                Color::from_rgb(0.96, 0.96, 0.97),
+                Color::from_rgb(0.06, 0.06, 0.08),
+            ))),
             ..Default::default()
         })
         .into()
@@ -2593,8 +2753,11 @@ fn hotkey_info_view<'a>() -> Element<'a, Message> {
     container(layout)
         .width(Fill)
         .height(Fill)
-        .style(|_: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+        .style(|theme: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(themed(theme,
+                Color::from_rgb(0.96, 0.96, 0.97),
+                Color::from_rgb(0.06, 0.06, 0.08),
+            ))),
             ..Default::default()
         })
         .into()
@@ -2660,15 +2823,24 @@ fn title_bar_button(label: &str, on_press: Message) -> Element<'_, Message> {
         .width(Length::Fixed(22.0))
         .height(Length::Fixed(20.0))
         .padding(0)
-        .style(|_theme: &Theme, status: button::Status| {
-            let bg = match status {
-                button::Status::Hovered => Color::from_rgb(0.25, 0.25, 0.35),
-                button::Status::Pressed => Color::from_rgb(0.30, 0.30, 0.40),
-                _ => Color::TRANSPARENT,
+        .style(|theme: &Theme, status: button::Status| {
+            let light = is_light_theme(theme);
+            let bg = match (light, status) {
+                (true, button::Status::Hovered) => Color::from_rgb(0.82, 0.82, 0.88),
+                (true, button::Status::Pressed) => Color::from_rgb(0.78, 0.78, 0.84),
+                (true, _) => Color::TRANSPARENT,
+                (false, button::Status::Hovered) => Color::from_rgb(0.25, 0.25, 0.35),
+                (false, button::Status::Pressed) => Color::from_rgb(0.30, 0.30, 0.40),
+                (false, _) => Color::TRANSPARENT,
+            };
+            let text_color = if light {
+                Color::from_rgb(0.30, 0.30, 0.40)
+            } else {
+                Color::from_rgb(0.70, 0.70, 0.75)
             };
             button::Style {
                 background: Some(Background::Color(bg)),
-                text_color: Color::from_rgb(0.70, 0.70, 0.75),
+                text_color,
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
@@ -2685,30 +2857,36 @@ fn title_bar_button(label: &str, on_press: Message) -> Element<'_, Message> {
 // ---------------------------------------------------------------------------
 
 fn title_bar_style(
-    _theme: &Theme,
+    theme: &Theme,
     is_focused: bool,
 ) -> iced::widget::container::Style {
-    let bg = if is_focused {
-        Color::from_rgb(0.14, 0.16, 0.24)
-    } else {
-        Color::from_rgb(0.08, 0.08, 0.10)
+    let light = is_light_theme(theme);
+    let bg = match (light, is_focused) {
+        (true, true) => Color::from_rgb(0.88, 0.90, 0.95),
+        (true, false) => Color::from_rgb(0.93, 0.93, 0.95),
+        (false, true) => Color::from_rgb(0.14, 0.16, 0.24),
+        (false, false) => Color::from_rgb(0.08, 0.08, 0.10),
     };
 
-    let text_color = if is_focused {
-        Color::from_rgb(0.90, 0.92, 0.96)
-    } else {
-        Color::from_rgb(0.50, 0.50, 0.52)
+    let text_color = match (light, is_focused) {
+        (true, true) => Color::from_rgb(0.10, 0.10, 0.15),
+        (true, false) => Color::from_rgb(0.40, 0.40, 0.50),
+        (false, true) => Color::from_rgb(0.90, 0.92, 0.96),
+        (false, false) => Color::from_rgb(0.50, 0.50, 0.52),
+    };
+
+    let border_color = match (light, is_focused) {
+        (true, true) => Color::from_rgb(0.20, 0.45, 0.80),
+        (true, false) => Color::from_rgb(0.80, 0.80, 0.82),
+        (false, true) => Color::from_rgb(0.35, 0.55, 0.90),
+        (false, false) => Color::from_rgb(0.12, 0.12, 0.14),
     };
 
     iced::widget::container::Style {
         background: Some(Background::Color(bg)),
         text_color: Some(text_color),
         border: Border {
-            color: if is_focused {
-                Color::from_rgb(0.35, 0.55, 0.90)
-            } else {
-                Color::from_rgb(0.12, 0.12, 0.14)
-            },
+            color: border_color,
             width: if is_focused { 1.0 } else { 0.0 },
             radius: 0.0.into(),
         },
@@ -2717,17 +2895,27 @@ fn title_bar_style(
 }
 
 fn pane_content_style(
-    _theme: &Theme,
+    theme: &Theme,
     is_focused: bool,
 ) -> iced::widget::container::Style {
+    let light = is_light_theme(theme);
+    let bg = if light {
+        Color::from_rgb(0.96, 0.96, 0.97)
+    } else {
+        Color::from_rgb(0.05, 0.05, 0.05)
+    };
+
+    let border_color = match (light, is_focused) {
+        (true, true) => Color::from_rgb(0.20, 0.45, 0.80),
+        (true, false) => Color::from_rgb(0.80, 0.80, 0.82),
+        (false, true) => Color::from_rgb(0.35, 0.55, 0.90),
+        (false, false) => Color::from_rgb(0.12, 0.12, 0.14),
+    };
+
     iced::widget::container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.05, 0.05, 0.05))),
+        background: Some(Background::Color(bg)),
         border: Border {
-            color: if is_focused {
-                Color::from_rgb(0.35, 0.55, 0.90)
-            } else {
-                Color::from_rgb(0.12, 0.12, 0.14)
-            },
+            color: border_color,
             width: if is_focused { 2.0 } else { 1.0 },
             radius: 0.0.into(),
         },
