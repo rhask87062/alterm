@@ -75,37 +75,23 @@ pub fn create_webview(
 
     let wrapper = X11Parent(parent_xid);
 
-    eprintln!("[WEBVIEW] Creating: pane_id={pane_id} parent_xid={parent_xid:#x} url={url} bounds=({:.0},{:.0},{:.0},{:.0})", bounds.0, bounds.1, bounds.2, bounds.3);
+    // Start with a dark blank page so WebKit's web process initializes with
+    // dark mode active. We then navigate to the real URL immediately after.
+    let dark_blank = "data:text/html,<html style='color-scheme:dark;background:%23121214'><head><meta name='color-scheme' content='dark'></head><body></body></html>";
 
+    let real_url = url.to_string();
     let webview = WebViewBuilder::new()
-        .with_url(url)
+        .with_url(dark_blank)
         .with_visible(true)
-        .with_initialization_script(
-            // Tell websites we prefer dark mode
-            r#"
-            (function() {
-                // Override matchMedia to report dark mode preference
-                const originalMatchMedia = window.matchMedia;
-                window.matchMedia = function(query) {
-                    if (query === '(prefers-color-scheme: dark)') {
-                        return { matches: true, media: query, addEventListener: function(){}, removeEventListener: function(){} };
-                    }
-                    return originalMatchMedia.call(window, query);
-                };
-            })();
-            "#,
-        )
         .with_bounds(Rect {
             position: LogicalPosition::new(bounds.0, bounds.1).into(),
             size: LogicalSize::new(bounds.2, bounds.3).into(),
         })
         .build_as_child(&wrapper)
-        .map_err(|e| {
-            eprintln!("[WEBVIEW] FAILED: {e}");
-            format!("Failed to create webview: {e}")
-        })?;
+        .map_err(|e| format!("Failed to create webview: {e}"))?;
 
-    eprintln!("[WEBVIEW] Success!");
+    // Navigate to the real URL now that dark mode is established
+    let _ = webview.load_url(&real_url);
 
     WEBVIEWS.with(|wvs| {
         wvs.borrow_mut().insert(pane_id, webview);
