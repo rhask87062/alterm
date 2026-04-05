@@ -46,6 +46,8 @@ pub struct RenderGrid {
     pub display_offset: usize,
     /// Total lines in scrollback history.
     pub total_history: usize,
+    /// Whether to use light-mode default colors.
+    pub light_mode: bool,
 }
 
 impl RenderGrid {
@@ -55,15 +57,16 @@ impl RenderGrid {
     /// obtained from `term.cursor_point()`.  When `cursor_visible` is false,
     /// the cursor cell will not be marked (for cursor blink support).
     pub fn from_terminal(term: &TerminalState, palette: &AnsiPalette) -> Self {
-        Self::from_terminal_with_cursor(term, palette, true)
+        Self::from_terminal_with_cursor(term, palette, true, false)
     }
 
     /// Like [`from_terminal`](Self::from_terminal), but allows controlling
-    /// cursor visibility for blink support.
+    /// cursor visibility and light-mode for blink / theme support.
     pub fn from_terminal_with_cursor(
         term: &TerminalState,
         palette: &AnsiPalette,
         cursor_visible: bool,
+        light_mode: bool,
     ) -> Self {
         let rows = term.rows();
         let cols = term.cols();
@@ -82,10 +85,10 @@ impl RenderGrid {
 
             for col in 0..cols {
                 let render_cell = if let Some(cell) = term.cell(row, col) {
-                    cell_to_render(cell, row, col, cursor, palette)
+                    cell_to_render(cell, row, col, cursor, palette, light_mode)
                 } else {
                     // Out-of-bounds — fill with a blank default cell.
-                    blank_cell(palette)
+                    blank_cell(light_mode)
                 };
                 row_cells.push(render_cell);
             }
@@ -97,7 +100,7 @@ impl RenderGrid {
         // history_size: how many lines are actually stored in scrollback
         let total_history = term.term().grid().history_size();
 
-        RenderGrid { cells, rows, cols, display_offset, total_history }
+        RenderGrid { cells, rows, cols, display_offset, total_history, light_mode }
     }
 }
 
@@ -112,6 +115,7 @@ fn cell_to_render(
     col: usize,
     cursor: Option<Point>,
     palette: &AnsiPalette,
+    light_mode: bool,
 ) -> RenderCell {
     let bold = cell.flags.contains(Flags::BOLD);
     let italic = cell.flags.contains(Flags::ITALIC);
@@ -124,8 +128,8 @@ fn cell_to_render(
         (cell.fg, cell.bg)
     };
 
-    let fg = resolve_color(raw_fg, palette, true);
-    let bg = resolve_color(raw_bg, palette, false);
+    let fg = resolve_color(raw_fg, palette, true, light_mode);
+    let bg = resolve_color(raw_bg, palette, false, light_mode);
 
     let is_cursor = cursor.map_or(false, |c| {
         c.line == Line(row as i32) && c.column == Column(col)
@@ -135,10 +139,18 @@ fn cell_to_render(
 }
 
 /// A blank cell using palette defaults.
-fn blank_cell(_palette: &AnsiPalette) -> RenderCell {
-    let (r, g, b) = AnsiPalette::default_fg();
+fn blank_cell(light_mode: bool) -> RenderCell {
+    let (r, g, b) = if light_mode {
+        AnsiPalette::default_fg_light()
+    } else {
+        AnsiPalette::default_fg()
+    };
     let fg = to_float(r, g, b);
-    let (r, g, b) = AnsiPalette::default_bg();
+    let (r, g, b) = if light_mode {
+        AnsiPalette::default_bg_light()
+    } else {
+        AnsiPalette::default_bg()
+    };
     let bg = to_float(r, g, b);
     RenderCell { c: ' ', fg, bg, bold: false, italic: false, underline: false, is_cursor: false }
 }
@@ -147,8 +159,8 @@ fn blank_cell(_palette: &AnsiPalette) -> RenderCell {
 ///
 /// `is_fg` controls which default is used when a `NamedColor` falls outside
 /// the 0–255 indexed range (i.e. the special Foreground/Background/Cursor
-/// sentinels).
-pub fn resolve_color(color: Color, palette: &AnsiPalette, is_fg: bool) -> [f32; 4] {
+/// sentinels).  `light_mode` selects the light-theme default colors.
+pub fn resolve_color(color: Color, palette: &AnsiPalette, is_fg: bool, light_mode: bool) -> [f32; 4] {
     match color {
         // A direct 24-bit RGB value — just normalize it.
         Color::Spec(rgb) => to_float(rgb.r, rgb.g, rgb.b),
@@ -173,7 +185,11 @@ pub fn resolve_color(color: Color, palette: &AnsiPalette, is_fg: bool) -> [f32; 
                 // dim variants, bright fg, etc.  Use theme defaults.
                 match named {
                     NamedColor::Background => {
-                        let (r, g, b) = AnsiPalette::default_bg();
+                        let (r, g, b) = if light_mode {
+                            AnsiPalette::default_bg_light()
+                        } else {
+                            AnsiPalette::default_bg()
+                        };
                         to_float(r, g, b)
                     },
                     _ => {
@@ -181,10 +197,18 @@ pub fn resolve_color(color: Color, palette: &AnsiPalette, is_fg: bool) -> [f32; 
                         // variants) falls back to either the fg or bg default
                         // depending on context.
                         if is_fg {
-                            let (r, g, b) = AnsiPalette::default_fg();
+                            let (r, g, b) = if light_mode {
+                                AnsiPalette::default_fg_light()
+                            } else {
+                                AnsiPalette::default_fg()
+                            };
                             to_float(r, g, b)
                         } else {
-                            let (r, g, b) = AnsiPalette::default_bg();
+                            let (r, g, b) = if light_mode {
+                                AnsiPalette::default_bg_light()
+                            } else {
+                                AnsiPalette::default_bg()
+                            };
                             to_float(r, g, b)
                         }
                     },

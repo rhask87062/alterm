@@ -41,6 +41,16 @@ impl TerminalView {
         }
     }
 
+    /// Set the font size and recalculate cell metrics.
+    ///
+    /// Cell width = `size * 0.6`, cell height = `size * 1.4`.
+    pub fn with_font_size(mut self, size: f32) -> Self {
+        self.font_size = size;
+        self.cell_width = size * 0.6;
+        self.cell_height = size * 1.4;
+        self
+    }
+
     /// Set the font family for terminal text rendering.
     ///
     /// Accepts a `&'static str` font name. If the name is empty or
@@ -105,8 +115,12 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        // Default background from the palette.
-        let (dr, dg, db) = crate::colors::AnsiPalette::default_bg();
+        // Default background — pick light or dark based on the grid's theme flag.
+        let (dr, dg, db) = if self.grid.light_mode {
+            crate::colors::AnsiPalette::default_bg_light()
+        } else {
+            crate::colors::AnsiPalette::default_bg()
+        };
         let default_bg = Color::from_rgb8(dr, dg, db);
 
         // Fill entire background first.
@@ -174,11 +188,14 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
             let track_x = bounds.width - scrollbar_width - 2.0;
             let track_height = bounds.height;
 
+            // Scrollbar base color: dark scrollbar on light bg, light on dark bg.
+            let sb_base = if self.grid.light_mode { 0.0_f32 } else { 1.0_f32 };
+
             // Track background (subtle)
             frame.fill_rectangle(
                 Point::new(track_x, 0.0),
                 Size::new(scrollbar_width, track_height),
-                Color::from_rgba(1.0, 1.0, 1.0, 0.05),
+                Color::from_rgba(sb_base, sb_base, sb_base, 0.05),
             );
 
             // Thumb: size proportional to visible rows vs total content
@@ -197,9 +214,9 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
             let thumb_y = (1.0 - scroll_fraction) * (track_height - thumb_height);
 
             let thumb_color = if self.grid.display_offset > 0 {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.35) // brighter when scrolled
+                Color::from_rgba(sb_base, sb_base, sb_base, 0.35) // brighter when scrolled
             } else {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.15) // dim when at bottom
+                Color::from_rgba(sb_base, sb_base, sb_base, 0.15) // dim when at bottom
             };
 
             frame.fill_rectangle(

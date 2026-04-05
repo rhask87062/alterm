@@ -1038,6 +1038,8 @@ impl Altermative {
                         }
                     }
                 }
+                // Recalculate terminal dimensions in case font size changed.
+                self.resize_all_panes();
             }
 
             // -- Browser --
@@ -1286,6 +1288,7 @@ impl Altermative {
         let tab_bar = tab_bar_view(&titles, self.active_tab, Message::TabBarAction);
 
         // Pane grid for the active tab
+        let light_mode = self.config.appearance.theme == "light";
         let is_maximized = tab.panes.maximized().is_some();
         let has_terminal_context = self.terminal_context(1).is_some();
         let pane_grid_widget =
@@ -1295,8 +1298,9 @@ impl Altermative {
                 // Build content based on block type.
                 let content: Element<'_, Message> = match block {
                     Block::Terminal { .. } => {
-                        let grid = block.render_grid();
+                        let grid = block.render_grid(light_mode);
                         let terminal_view = TerminalView::new(grid)
+                            .with_font_size(self.config.appearance.font_size)
                             .with_font_family(self.terminal_font_family);
                         terminal_view.view()
                     }
@@ -1357,7 +1361,7 @@ impl Altermative {
             .height(Fill);
 
         // Sidebar
-        let sidebar = sidebar_view(Message::SidebarAction);
+        let sidebar = sidebar_view(Message::SidebarAction, light_mode);
 
         // Layout: tab bar on top, then [pane_grid | sidebar] below
         let content_row = row![pane_grid_widget, sidebar];

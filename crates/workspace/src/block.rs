@@ -281,14 +281,20 @@ impl Block {
     ///
     /// Returns a cached grid when nothing has changed since the last render.
     /// For non-terminal blocks, returns a minimal empty grid.
-    pub fn render_grid(&self) -> RenderGrid {
+    ///
+    /// `light_mode` selects light-theme default fg/bg colors.
+    pub fn render_grid(&self, light_mode: bool) -> RenderGrid {
         match self {
             Block::Terminal { cached_grid, state, palette, cursor_visible, .. } => {
                 // Return cached grid if available, otherwise build on demand
-                // (handles the case where view() is called before the first tick)
-                cached_grid.clone().unwrap_or_else(|| {
-                    RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
-                })
+                // (handles the case where view() is called before the first tick).
+                // If the cached grid has a different light_mode we rebuild.
+                if let Some(grid) = cached_grid {
+                    if grid.light_mode == light_mode {
+                        return grid.clone();
+                    }
+                }
+                RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible, light_mode)
             }
             Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {
                 // Non-terminal blocks don't use the terminal canvas.
@@ -298,6 +304,7 @@ impl Block {
                     cols: 0,
                     display_offset: 0,
                     total_history: 0,
+                    light_mode: false,
                 }
             }
         }
@@ -311,8 +318,10 @@ impl Block {
         match self {
             Block::Terminal { state, palette, cursor_visible, dirty, cached_grid, .. } => {
                 if *dirty || cached_grid.is_none() {
+                    // Use the existing cached light_mode, or default to dark.
+                    let lm = cached_grid.as_ref().map_or(false, |g| g.light_mode);
                     *cached_grid = Some(
-                        RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible),
+                        RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible, lm),
                     );
                     *dirty = false;
                 }

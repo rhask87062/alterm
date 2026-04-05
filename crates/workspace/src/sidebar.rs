@@ -28,30 +28,38 @@ pub enum SidebarAction {
 }
 
 /// Render the sidebar as a vertical column of square icon buttons.
+///
+/// `light_mode` controls which SVG icon variant is used (dark icons on
+/// light backgrounds and vice-versa).
 pub fn sidebar_view<'a, M: Clone + 'a>(
     map: impl Fn(SidebarAction) -> M + 'a,
+    light_mode: bool,
 ) -> Element<'a, M> {
     let btn_size = 36.0;
     let btn_padding = Padding::from([6, 0]);
 
     let terminal_btn = sidebar_svg_button(
-        include_bytes!("../../../assets/icons/sidebar/terminal.svg"),
+        &theme_svg(include_bytes!("../../../assets/icons/sidebar/terminal.svg"), light_mode),
         Some(map(SidebarAction::NewTerminal)),
         btn_size,
     );
     let ai_btn = sidebar_button("AI", Some(map(SidebarAction::NewAiChat)), btn_size);
     let web_btn = sidebar_svg_button(
-        include_bytes!("../../../assets/icons/sidebar/browser.svg"),
+        &theme_svg(include_bytes!("../../../assets/icons/sidebar/browser.svg"), light_mode),
         Some(map(SidebarAction::NewBrowser)),
         btn_size,
     );
     let preview_btn = sidebar_svg_button(
-        include_bytes!("../../../assets/icons/sidebar/folder.svg"),
+        &theme_svg(include_bytes!("../../../assets/icons/sidebar/folder.svg"), light_mode),
         Some(map(SidebarAction::NewPreview)),
         btn_size,
     );
     let settings_btn = sidebar_button("\u{2699}", Some(map(SidebarAction::OpenSettings)), btn_size);
-    let info_btn = sidebar_button("?", Some(map(SidebarAction::ShowHotkeyInfo)), btn_size);
+    let info_btn = sidebar_svg_button(
+        &theme_svg(include_bytes!("../../../assets/icons/sidebar/info.svg"), light_mode),
+        Some(map(SidebarAction::ShowHotkeyInfo)),
+        btn_size,
+    );
 
     let top_buttons = column![terminal_btn, ai_btn, web_btn, preview_btn, settings_btn]
         .spacing(4)
@@ -74,6 +82,27 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         .height(Length::Fill)
         .style(|theme: &Theme| sidebar_container_style(theme))
         .into()
+}
+
+/// Swap hardcoded SVG icon colors for the current theme.
+///
+/// In dark mode the original `#CCCCCC` / `#000000` strokes are fine; in light
+/// mode we replace them with darker / lighter variants so the icons stay
+/// visible against the lighter sidebar background.
+fn theme_svg(svg_bytes: &[u8], light_mode: bool) -> Vec<u8> {
+    if light_mode {
+        let s = String::from_utf8_lossy(svg_bytes);
+        s.replace("#CCCCCC", "#333333")
+            .replace("#cccccc", "#333333")
+            .replace("#000000", "#333333")
+            .replace("fill:#CCCCCC", "fill:#333333")
+            .into_bytes()
+    } else {
+        // Dark mode: the info.svg has fill="#000000" which is invisible on
+        // dark backgrounds — swap it to light gray.
+        let s = String::from_utf8_lossy(svg_bytes);
+        s.replace("#000000", "#CCCCCC").into_bytes()
+    }
 }
 
 /// Build a sidebar button with an SVG icon.

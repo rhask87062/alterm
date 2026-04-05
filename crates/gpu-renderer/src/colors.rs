@@ -59,13 +59,23 @@ impl AnsiPalette {
         self.table[index as usize]
     }
 
-    /// Default foreground color.
+    /// Default foreground color (dark theme).
     pub fn default_fg() -> (u8, u8, u8) {
         (0xe8, 0xe8, 0xed)
     }
 
-    /// Default background color.
+    /// Default background color (dark theme).
     pub fn default_bg() -> (u8, u8, u8) {
         (0x12, 0x12, 0x14)
+    }
+
+    /// Default foreground color for light theme.
+    pub fn default_fg_light() -> (u8, u8, u8) {
+        (0x1d, 0x1d, 0x1f)
+    }
+
+    /// Default background color for light theme.
+    pub fn default_bg_light() -> (u8, u8, u8) {
+        (0xf5, 0xf5, 0xf7)
     }
 }
