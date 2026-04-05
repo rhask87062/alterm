@@ -11,6 +11,8 @@ pub struct DisplayMessage {
     pub role: String,
     /// The message content (plain text; may contain markdown in future).
     pub content: String,
+    /// The model that generated this message (for assistant messages).
+    pub model: Option<String>,
 }
 
 /// State for one AI chat session.
@@ -30,6 +32,8 @@ pub struct AIChatState {
     pub model_name: String,
     /// Last error message, if any.
     pub error: Option<String>,
+    /// Model name captured when streaming started (for labeling the response).
+    pub streaming_model: Option<String>,
     /// Scroll offset for the chat history (auto-scroll to bottom).
     pub scroll_to_bottom: bool,
     /// Available models fetched from the provider API (for the dropdown).
@@ -48,6 +52,7 @@ impl AIChatState {
                     "Welcome to AI Chat! Provider: {}, Model: {}. Type a message below.",
                     provider_name, model_name
                 ),
+                model: Some(model_name.clone()),
             }],
             input: String::new(),
             streaming: false,
@@ -55,6 +60,7 @@ impl AIChatState {
             provider_name,
             model_name,
             error: None,
+            streaming_model: None,
             scroll_to_bottom: true,
             available_models: Vec::new(),
             models_loading: false,
@@ -66,14 +72,17 @@ impl AIChatState {
         self.messages.push(DisplayMessage {
             role: "user".to_string(),
             content,
+            model: None,
         });
         self.scroll_to_bottom = true;
     }
 
-    /// Begin receiving a streamed response.
+    /// Begin receiving a streamed response. Captures the current model name
+    /// so it's preserved even if the user switches models mid-conversation.
     pub fn start_streaming(&mut self) {
         self.streaming = true;
         self.current_response.clear();
+        self.streaming_model = Some(self.model_name.clone());
         self.error = None;
     }
 
@@ -91,6 +100,7 @@ impl AIChatState {
             self.messages.push(DisplayMessage {
                 role: "assistant".to_string(),
                 content: std::mem::take(&mut self.current_response),
+                model: self.streaming_model.take(),
             });
         }
         self.scroll_to_bottom = true;
@@ -104,6 +114,7 @@ impl AIChatState {
         self.messages.push(DisplayMessage {
             role: "error".to_string(),
             content: msg,
+            model: None,
         });
         self.scroll_to_bottom = true;
     }

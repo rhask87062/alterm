@@ -1194,13 +1194,12 @@ fn ai_chat_view<'a>(
     // ── Messages ──
     let mut msg_widgets: Vec<Element<'a, Message>> = Vec::new();
 
-    // Build a friendly model display name (e.g. "claude-sonnet-4-20250514" → "Claude Sonnet 4")
-    let model_display = friendly_model_name(&state.model_name);
-
     for msg in &state.messages {
+        // Use the model name stored WITH the message, not the current model
+        let msg_model = msg.model.as_deref().unwrap_or(&state.model_name);
         let (label, color) = match msg.role.as_str() {
             "user" => ("You:".to_string(), Color::from_rgb(0.40, 0.70, 1.0)),
-            "assistant" => (format!("{}:", model_display), Color::from_rgb(0.40, 0.85, 0.55)),
+            "assistant" => (format!("{}:", friendly_model_name(msg_model)), Color::from_rgb(0.40, 0.85, 0.55)),
             "error" => ("Error:".to_string(), Color::from_rgb(0.95, 0.40, 0.35)),
             _ => ("System:".to_string(), Color::from_rgb(0.60, 0.60, 0.65)),
         };
@@ -1237,9 +1236,12 @@ fn ai_chat_view<'a>(
     }
 
     if state.streaming && !state.current_response.is_empty() {
+        let streaming_name = friendly_model_name(
+            state.streaming_model.as_deref().unwrap_or(&state.model_name)
+        );
         msg_widgets.push(
             column![
-                text(format!("{}:", model_display)).size(11).color(Color::from_rgb(0.40, 0.85, 0.55)),
+                text(format!("{}:", streaming_name)).size(11).color(Color::from_rgb(0.40, 0.85, 0.55)),
                 text(format!("{}\u{2588}", state.current_response))
                     .size(13).color(Color::from_rgb(0.85, 0.85, 0.88)),
             ]
