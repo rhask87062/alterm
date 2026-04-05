@@ -222,20 +222,46 @@ impl Altermative {
     /// Resize every terminal in the active tab to its exact pixel dimensions.
     /// Also repositions any browser webviews to match their pane regions.
     fn resize_all_panes(&mut self) {
-        use iced::Size;
+        use iced::{Rectangle, Size};
 
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
         let bounds = Size::new(grid_width, grid_height);
 
         let tab = self.active_tab_mut();
+        let maximized_pane = tab.panes.maximized();
+
+        // When maximized, the focused pane gets the full grid area.
+        // pane_regions() returns the original split tree, not the maximized view.
         let regions = tab.panes.layout().pane_regions(
             PANE_GRID_SPACING,
             PANE_GRID_MIN_SIZE,
             bounds,
         );
 
-        for (pane, rect) in &regions {
+        // Full-grid rectangle for maximized panes
+        let full_rect = Rectangle {
+            x: 0.0, y: 0.0,
+            width: grid_width, height: grid_height,
+        };
+
+        for (pane, default_rect) in &regions {
+            // Use full rect if this pane is maximized, otherwise use the layout region
+            let rect = if maximized_pane == Some(*pane) {
+                &full_rect
+            } else if maximized_pane.is_some() {
+                // Another pane is maximized — this one is hidden.
+                // Hide its webview if it's a browser.
+                if let Some(block) = tab.panes.get(*pane) {
+                    if block.is_browser() {
+                        webview_manager::set_visible(pane_to_id(*pane), false);
+                    }
+                }
+                continue;
+            } else {
+                default_rect
+            };
+
             let content_width = rect.width;
             let content_height = (rect.height - PANE_TITLE_BAR_HEIGHT).max(CELL_HEIGHT * 2.0);
 
@@ -248,9 +274,6 @@ impl Altermative {
                     }
                 }
 
-                // Reposition browser webviews to match the pane region.
-                // The pane_grid starts at x=0 (sidebar is on the RIGHT).
-                // y offset: tab bar + pane's y + title bar + browser nav bar.
                 if block.is_browser() {
                     let pane_id = pane_to_id(*pane);
                     if webview_manager::exists(pane_id) {
@@ -259,6 +282,7 @@ impl Altermative {
                         let wv_w = rect.width as f64;
                         let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
                         webview_manager::set_bounds(pane_id, wv_x, wv_y, wv_w, wv_h);
+                        webview_manager::set_visible(pane_id, true);
                     }
                 }
             }
@@ -988,10 +1012,13 @@ impl Altermative {
                         tab.panes.split(pane_grid::Axis::Vertical, focused, block)
                     {
                         tab.focus = Some(new_pane);
+                        // Resize first so pane_regions are up to date, then create webview.
                         self.resize_all_panes();
-
-                        // Create a real webview for this pane.
                         self.create_browser_webview(new_pane, url);
+                        // Pump GTK immediately so the webview starts rendering.
+                        webview_manager::pump_gtk_events();
+                        // Resize again to ensure webview bounds match final layout.
+                        self.resize_all_panes();
 
                         return widget_focus(WidgetId::from(
                             format!("browser-url-input-{:?}", new_pane),

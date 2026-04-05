@@ -68,6 +68,21 @@ pub fn create_webview(
     let webview = WebViewBuilder::new()
         .with_url(url)
         .with_visible(true)
+        .with_initialization_script(
+            // Tell websites we prefer dark mode
+            r#"
+            (function() {
+                // Override matchMedia to report dark mode preference
+                const originalMatchMedia = window.matchMedia;
+                window.matchMedia = function(query) {
+                    if (query === '(prefers-color-scheme: dark)') {
+                        return { matches: true, media: query, addEventListener: function(){}, removeEventListener: function(){} };
+                    }
+                    return originalMatchMedia.call(window, query);
+                };
+            })();
+            "#,
+        )
         .with_bounds(Rect {
             position: LogicalPosition::new(bounds.0, bounds.1).into(),
             size: LogicalSize::new(bounds.2, bounds.3).into(),
