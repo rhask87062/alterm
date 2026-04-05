@@ -16,7 +16,7 @@ pub use block::{Block, CELL_HEIGHT, CELL_WIDTH};
 pub use browser::BrowserState;
 pub use preview::PreviewState;
 pub use command_palette::CommandPalette;
-pub use keybindings::{match_shortcut, Action};
+pub use keybindings::{all_palette_actions, match_shortcut, Action};
 pub use settings_panel::{SettingsField, SettingsSection, SettingsState};
 pub use sidebar::{sidebar_view, SidebarAction};
 pub use tab::Tab;

@@ -3,7 +3,7 @@
 /// Positioned on the right side of the workspace, provides quick access to
 /// split the focused pane with different block types.
 use iced::widget::{button, column, container, text, tooltip};
-use iced::{Background, Border, Color, Element, Length, Padding, Theme};
+use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 /// Actions the sidebar can produce.
 #[derive(Debug, Clone)]
@@ -18,6 +18,8 @@ pub enum SidebarAction {
     NewPreview,
     /// Open the settings panel in a pane.
     OpenSettings,
+    /// Show the keyboard shortcuts reference pane.
+    ShowHotkeyInfo,
 }
 
 /// Render the sidebar as a vertical column of square icon buttons.
@@ -74,10 +76,30 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         true,
     );
 
-    let col = column![terminal_btn, ai_btn, web_btn, preview_btn, settings_btn]
+    // Hotkey info button — placed at the bottom of the sidebar
+    let info_btn = sidebar_button(
+        "?",
+        "Keyboard shortcuts",
+        Some(map(SidebarAction::ShowHotkeyInfo)),
+        btn_size,
+        true,
+    );
+
+    let top_buttons = column![terminal_btn, ai_btn, web_btn, preview_btn, settings_btn]
         .spacing(4)
-        .padding(btn_padding)
         .align_x(iced::Alignment::Center);
+
+    let bottom_buttons = column![info_btn]
+        .spacing(4)
+        .align_x(iced::Alignment::Center);
+
+    let col = column![
+        top_buttons,
+        iced::widget::space().height(Fill),
+        bottom_buttons,
+    ]
+    .padding(btn_padding)
+    .align_x(iced::Alignment::Center);
 
     container(col)
         .width(Length::Fixed(44.0))

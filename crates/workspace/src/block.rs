@@ -51,6 +51,7 @@ pub enum Block {
     Preview {
         state: PreviewState,
     },
+    HotkeyInfo,
 }
 
 impl Block {
@@ -106,6 +107,16 @@ impl Block {
         }
     }
 
+    /// Create a new hotkey info reference pane (no state needed).
+    pub fn new_hotkey_info() -> Self {
+        Block::HotkeyInfo
+    }
+
+    /// Whether this block is a hotkey info pane.
+    pub fn is_hotkey_info(&self) -> bool {
+        matches!(self, Block::HotkeyInfo)
+    }
+
     /// Drive the block forward one tick:
     /// - Terminal: drain pending PTY output and advance cursor blink.
     /// - AIChat: no-op (streaming is handled via messages).
@@ -158,6 +169,9 @@ impl Block {
             Block::Preview { .. } => {
                 // Preview state is driven by navigation messages.
             }
+            Block::HotkeyInfo => {
+                // Static reference pane — nothing to tick.
+            }
         }
 
         // Rebuild the cached grid only when something changed.
@@ -176,6 +190,7 @@ impl Block {
             Block::Settings { .. } => {}
             Block::Browser { .. } => {}
             Block::Preview { .. } => {}
+            Block::HotkeyInfo => {}
         }
     }
 
@@ -194,6 +209,7 @@ impl Block {
             Block::Settings { .. } => {}
             Block::Browser { .. } => {}
             Block::Preview { .. } => {}
+            Block::HotkeyInfo => {}
         }
         self.refresh_cache();
     }
@@ -209,6 +225,7 @@ impl Block {
             Block::Settings { .. } => (0, 0),
             Block::Browser { .. } => (0, 0),
             Block::Preview { .. } => (0, 0),
+            Block::HotkeyInfo => (0, 0),
         }
     }
 
@@ -231,6 +248,7 @@ impl Block {
                     .unwrap_or_else(|| state.path.display().to_string());
                 format!("Preview — {name}")
             }
+            Block::HotkeyInfo => "Keyboard Shortcuts".to_string(),
         }
     }
 
@@ -272,7 +290,7 @@ impl Block {
                     RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
                 })
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => {
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {
                 // Non-terminal blocks don't use the terminal canvas.
                 RenderGrid {
                     cells: Vec::new(),
@@ -299,7 +317,7 @@ impl Block {
                     *dirty = false;
                 }
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {}
         }
     }
 
@@ -310,7 +328,7 @@ impl Block {
                 *cursor_visible = true;
                 *blink_count = 0;
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {}
         }
     }
 
@@ -324,7 +342,7 @@ impl Block {
                 state.scroll(lines);
                 *dirty = true;
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {}
         }
         self.refresh_cache();
     }
@@ -362,7 +380,7 @@ impl Block {
                     Some(output.join("\n"))
                 }
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => None,
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => None,
         }
     }
 }

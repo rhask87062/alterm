@@ -13,8 +13,9 @@ use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Sub
 
 use gpu_renderer::widget::TerminalView;
 use workspace::{
-    match_shortcut, sidebar_view, tab_bar_view, Action, Block, BrowserState, CommandPalette,
-    PreviewState, SettingsField, SettingsSection, SidebarAction, Tab, TabBarAction, CELL_HEIGHT,
+    all_palette_actions, match_shortcut, sidebar_view, tab_bar_view, Action, Block, BrowserState,
+    CommandPalette, PreviewState, SettingsField, SettingsSection, SidebarAction, Tab, TabBarAction,
+    CELL_HEIGHT,
 };
 
 use ai::{
@@ -119,6 +120,8 @@ enum Message {
     OpenPreview,
     PreviewNavigate(pane_grid::Pane, String),
     PreviewParent(pane_grid::Pane),
+    // Hotkey info
+    ShowHotkeyInfo,
 }
 
 impl Altermative {
@@ -571,6 +574,9 @@ impl Altermative {
                 SidebarAction::OpenSettings => {
                     return self.update(Message::OpenSettings);
                 }
+                SidebarAction::ShowHotkeyInfo => {
+                    return self.update(Message::ShowHotkeyInfo);
+                }
             },
             Message::SidebarNewTerminal => {
                 // Split the focused pane with a new terminal (right).
@@ -913,6 +919,30 @@ impl Altermative {
                 }
             }
 
+            // -- Hotkey Info --
+            Message::ShowHotkeyInfo => {
+                // Check if a hotkey info pane already exists — focus it instead.
+                let tab = self.active_tab_mut();
+                let existing = tab.panes.iter()
+                    .find(|(_p, b)| b.is_hotkey_info())
+                    .map(|(p, _)| *p);
+                if let Some(info_pane) = existing {
+                    tab.focus = Some(info_pane);
+                    return Task::none();
+                }
+                // Open a new hotkey info pane.
+                let block = Block::new_hotkey_info();
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if let Some((new_pane, _split)) =
+                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
+                    {
+                        tab.focus = Some(new_pane);
+                    }
+                }
+                self.resize_all_panes();
+            }
+
             // Command palette messages
             Message::PaletteQueryChanged(query) => {
                 self.palette.update_query(query);
@@ -965,7 +995,7 @@ impl Altermative {
                     let tab = self.active_tab();
                     if let Some(focused) = tab.focus {
                         if let Some(block) = tab.panes.get(focused) {
-                            if block.is_ai_chat() || block.is_settings() || block.is_browser() || block.is_preview() {
+                            if block.is_ai_chat() || block.is_settings() || block.is_browser() || block.is_preview() || block.is_hotkey_info() {
                                 return Task::none();
                             }
                         }
@@ -1053,6 +1083,9 @@ impl Altermative {
                     }
                     Block::Preview { state } => {
                         preview_view(pane, state)
+                    }
+                    Block::HotkeyInfo => {
+                        hotkey_info_view()
                     }
                 };
 
@@ -2142,6 +2175,230 @@ fn format_size(bytes: u64) -> String {
     } else {
         format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Hotkey Info view
+// ---------------------------------------------------------------------------
+
+/// Build the hotkey info reference pane showing all keyboard shortcuts.
+fn hotkey_info_view<'a>() -> Element<'a, Message> {
+    let accent = Color::from_rgb(0.40, 0.65, 1.0);
+    let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
+    let shortcut_color = Color::from_rgb(0.70, 0.80, 1.0);
+    let label_color = Color::from_rgb(0.80, 0.80, 0.84);
+    let dim_color = Color::from_rgb(0.50, 0.50, 0.55);
+
+    // ── ASCII logo header ──
+    let logo_text = include_str!("../../assets/ascii_logo.txt");
+    let logo: Element<'a, Message> = container(
+        text(logo_text)
+            .size(11)
+            .color(accent)
+            .font(iced::Font::MONOSPACE),
+    )
+    .width(Fill)
+    .padding(Padding { top: 12.0, right: 16.0, bottom: 4.0, left: 16.0 })
+    .into();
+
+    // ── Title ──
+    let title: Element<'a, Message> = container(
+        text("Keyboard Shortcuts").size(16).color(heading_color),
+    )
+    .width(Fill)
+    .padding(Padding { top: 4.0, right: 16.0, bottom: 8.0, left: 16.0 })
+    .into();
+
+    // ── Build shortcut rows from the keybinding registry ──
+    let all_actions = all_palette_actions();
+
+    // Categorize actions
+    let tab_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,
+        Action::NewTab | Action::CloseTab | Action::NextTab | Action::PrevTab | Action::RenameTab
+    )).collect();
+    // Also include JumpToTab as a hardcoded entry
+    let pane_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,
+        Action::SplitRight | Action::SplitDown | Action::ClosePane | Action::MaximizeToggle |
+        Action::FocusUp | Action::FocusDown | Action::FocusLeft | Action::FocusRight
+    )).collect();
+    let tool_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,
+        Action::ToggleAIChat | Action::CommandPalette | Action::OpenSettings
+    )).collect();
+    let terminal_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,
+        Action::Copy | Action::Paste | Action::ScrollPageUp | Action::ScrollPageDown
+    )).collect();
+
+    let mut items: Vec<Element<'a, Message>> = Vec::new();
+
+    // Helper to build a category section
+    fn build_section<'a>(
+        category: &'a str,
+        actions: &[&Action],
+        extra_rows: &[(&'a str, &'a str)],
+        accent: Color,
+        shortcut_color: Color,
+        label_color: Color,
+    ) -> Vec<Element<'a, Message>> {
+        let mut elems: Vec<Element<'a, Message>> = Vec::new();
+
+        // Category heading
+        elems.push(
+            container(
+                text(category).size(13).color(accent).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::MONOSPACE
+                }),
+            )
+            .padding(Padding { top: 10.0, right: 16.0, bottom: 4.0, left: 16.0 })
+            .into(),
+        );
+
+        // Action rows from registry
+        for action in actions {
+            let shortcut_str = action.shortcut_hint();
+            let label_str = action.label();
+            let row_widget = row![
+                text(shortcut_str)
+                    .size(12)
+                    .color(shortcut_color)
+                    .font(iced::Font::MONOSPACE)
+                    .width(Length::Fixed(160.0)),
+                text(label_str)
+                    .size(12)
+                    .color(label_color),
+            ]
+            .spacing(12)
+            .align_y(iced::Alignment::Center);
+
+            elems.push(
+                container(row_widget)
+                    .padding(Padding { top: 2.0, right: 16.0, bottom: 2.0, left: 24.0 })
+                    .into(),
+            );
+        }
+
+        // Extra hardcoded rows
+        for (shortcut, desc) in extra_rows {
+            let row_widget = row![
+                text(*shortcut)
+                    .size(12)
+                    .color(shortcut_color)
+                    .font(iced::Font::MONOSPACE)
+                    .width(Length::Fixed(160.0)),
+                text(*desc)
+                    .size(12)
+                    .color(label_color),
+            ]
+            .spacing(12)
+            .align_y(iced::Alignment::Center);
+
+            elems.push(
+                container(row_widget)
+                    .padding(Padding { top: 2.0, right: 16.0, bottom: 2.0, left: 24.0 })
+                    .into(),
+            );
+        }
+
+        elems
+    }
+
+    // Tabs section (add JumpToTab as extra since it's excluded from palette)
+    items.extend(build_section(
+        "TABS",
+        &tab_actions,
+        &[("Ctrl+1-9", "Jump to Tab")],
+        accent, shortcut_color, label_color,
+    ));
+
+    // Panes section (add Navigate Panes summary)
+    items.extend(build_section(
+        "PANES",
+        &pane_actions,
+        &[],
+        accent, shortcut_color, label_color,
+    ));
+
+    // AI & Tools section
+    items.extend(build_section(
+        "AI & TOOLS",
+        &tool_actions,
+        &[],
+        accent, shortcut_color, label_color,
+    ));
+
+    // Terminal section (add ScrollUp/Down as extras)
+    items.extend(build_section(
+        "TERMINAL",
+        &terminal_actions,
+        &[
+            ("Shift+Up", "Scroll Up"),
+            ("Shift+Down", "Scroll Down"),
+        ],
+        accent, shortcut_color, label_color,
+    ));
+
+    // Mouse section (all hardcoded)
+    items.push(
+        container(
+            text("MOUSE").size(13).color(accent).font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..iced::Font::MONOSPACE
+            }),
+        )
+        .padding(Padding { top: 10.0, right: 16.0, bottom: 4.0, left: 16.0 })
+        .into(),
+    );
+    let mouse_rows: Vec<(&str, &str)> = vec![
+        ("Drag title bar", "Rearrange panes"),
+        ("Drag split edge", "Resize panes"),
+        ("Scroll wheel", "Terminal scrollback"),
+    ];
+    for (shortcut, desc) in mouse_rows {
+        let row_widget = row![
+            text(shortcut)
+                .size(12)
+                .color(dim_color)
+                .font(iced::Font::MONOSPACE)
+                .width(Length::Fixed(160.0)),
+            text(desc)
+                .size(12)
+                .color(label_color),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center);
+
+        items.push(
+            container(row_widget)
+                .padding(Padding { top: 2.0, right: 16.0, bottom: 2.0, left: 24.0 })
+                .into(),
+        );
+    }
+
+    // Bottom spacing
+    items.push(iced::widget::space().height(Length::Fixed(20.0)).into());
+
+    let content_column = Column::from_vec(items).spacing(0).width(Fill);
+
+    let scrollable_content: Element<'a, Message> = scrollable(
+        content_column,
+    )
+    .width(Fill)
+    .height(Fill)
+    .into();
+
+    // ── Full layout ──
+    let layout = column![logo, title, scrollable_content]
+        .width(Fill)
+        .height(Fill);
+
+    container(layout)
+        .width(Fill)
+        .height(Fill)
+        .style(|_: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+            ..Default::default()
+        })
+        .into()
 }
 
 // ---------------------------------------------------------------------------
