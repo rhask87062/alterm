@@ -30,7 +30,13 @@ fn main() -> iced::Result {
 
     iced::application(Altermative::new, Altermative::update, Altermative::view)
         .title("Altermative")
-        .theme(Theme::Dark)
+        .theme(|app: &Altermative| {
+            if app.config.appearance.theme == "light" {
+                Theme::Light
+            } else {
+                Theme::Dark
+            }
+        })
         .window_size((900.0, 600.0))
         .subscription(Altermative::subscription)
         .run()
@@ -76,6 +82,8 @@ struct Altermative {
     hooks: LuaHooks,
     /// X11 window ID of the iced window (set once WindowHandleReady fires).
     parent_xid: Option<u64>,
+    /// Available monospace font families for the settings dropdown.
+    available_fonts: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +182,9 @@ impl Altermative {
         let first_tab = Tab::new_with_size(grid_width, content_height)
             .expect("Failed to create initial tab");
 
+        // Enumerate available monospace fonts for the settings dropdown.
+        let available_fonts = enumerate_monospace_fonts();
+
         let app = Altermative {
             tabs: vec![first_tab],
             active_tab: 0,
@@ -184,6 +195,7 @@ impl Altermative {
             config,
             hooks,
             parent_xid: None,
+            available_fonts,
         };
 
         // Request the raw X11 window ID from iced — fires WindowHandleReady.
@@ -1265,7 +1277,7 @@ impl Altermative {
                         ai_chat_view(pane, state, has_terminal_context)
                     }
                     Block::Settings { state } => {
-                        settings_view(pane, state)
+                        settings_view(pane, state, &self.available_fonts)
                     }
                     Block::Browser { state } => {
                         browser_view(pane, state)
@@ -1678,6 +1690,7 @@ fn ai_chat_view<'a>(
 fn settings_view<'a>(
     pane: pane_grid::Pane,
     state: &'a workspace::SettingsState,
+    available_fonts: &[String],
 ) -> Element<'a, Message> {
     // ── Header ──
     let title_label = text("Settings").size(16).color(Color::from_rgb(0.90, 0.92, 0.96));
@@ -1793,7 +1806,7 @@ fn settings_view<'a>(
 
     // ── Section content ──
     let section_content: Element<'a, Message> = match state.active_section {
-        SettingsSection::Appearance => settings_appearance_section(pane, state),
+        SettingsSection::Appearance => settings_appearance_section(pane, state, available_fonts),
         SettingsSection::AI => settings_ai_section(pane, state),
         SettingsSection::Terminal => settings_terminal_section(pane, state),
     };
@@ -1822,6 +1835,7 @@ fn settings_view<'a>(
 fn settings_appearance_section<'a>(
     pane: pane_grid::Pane,
     state: &'a workspace::SettingsState,
+    available_fonts: &[String],
 ) -> Element<'a, Message> {
     let label_color = Color::from_rgb(0.70, 0.72, 0.78);
     let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
@@ -1851,11 +1865,16 @@ fn settings_appearance_section<'a>(
 
     // Font family
     let font_family_label = text("Font family").size(12).color(label_color);
-    let font_family_input = text_input("monospace", &state.font_family_text)
-        .on_input(move |val| Message::SettingsChanged(pane, SettingsField::FontFamily(val)))
-        .size(13)
-        .padding(6)
-        .width(Length::Fixed(200.0));
+    let font_list: Vec<String> = available_fonts.to_vec();
+    let current_font = Some(state.config.appearance.font_family.clone());
+    let font_family_picker = pick_list(
+        font_list,
+        current_font,
+        move |val: String| Message::SettingsChanged(pane, SettingsField::FontFamily(val)),
+    )
+    .text_size(13)
+    .padding(6)
+    .width(Length::Fixed(250.0));
 
     column![
         heading,
@@ -1867,7 +1886,7 @@ fn settings_appearance_section<'a>(
         theme_picker,
         iced::widget::space().height(Length::Fixed(8.0)),
         font_family_label,
-        font_family_input,
+        font_family_picker,
     ]
     .spacing(4)
     .into()
@@ -2727,6 +2746,47 @@ fn pane_content_style(
 ///      "grok-3" → "Grok 3"
 ///      "gemini-2.0-flash" → "Gemini 2.0 Flash"
 ///      "llama3.2" → "Llama3.2"
+/// Enumerate monospace fonts available on the system using fc-list.
+fn enumerate_monospace_fonts() -> Vec<String> {
+    // Try fc-list for monospace fonts on Linux
+    if let Ok(output) = std::process::Command::new("fc-list")
+        .args([":spacing=mono", "family"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut fonts: Vec<String> = stdout
+                .lines()
+                .map(|line| {
+                    // fc-list output: "Family Name" or "Family Name,Alias"
+                    line.split(',').next().unwrap_or(line).trim().to_string()
+                })
+                .filter(|name| !name.is_empty())
+                .collect();
+            fonts.sort();
+            fonts.dedup();
+            if !fonts.is_empty() {
+                return fonts;
+            }
+        }
+    }
+
+    // Fallback list of common monospace fonts
+    vec![
+        "monospace".to_string(),
+        "Courier New".to_string(),
+        "DejaVu Sans Mono".to_string(),
+        "Fira Code".to_string(),
+        "Hack".to_string(),
+        "Inconsolata".to_string(),
+        "JetBrains Mono".to_string(),
+        "Liberation Mono".to_string(),
+        "Noto Sans Mono".to_string(),
+        "Source Code Pro".to_string(),
+        "Ubuntu Mono".to_string(),
+    ]
+}
+
 fn friendly_model_name(model_id: &str) -> String {
     if model_id.is_empty() {
         return "AI".to_string();
