@@ -10,6 +10,7 @@ use gpu_renderer::grid::RenderGrid;
 use terminal::{PtyHandle, TerminalEvent, TerminalState};
 
 use browser::BrowserState;
+use preview::PreviewState;
 
 use crate::ai_chat::AIChatState;
 use crate::settings_panel::SettingsState;
@@ -46,6 +47,9 @@ pub enum Block {
     },
     Browser {
         state: BrowserState,
+    },
+    Preview {
+        state: PreviewState,
     },
 }
 
@@ -92,6 +96,13 @@ impl Block {
     pub fn new_browser(url: &str) -> Self {
         Block::Browser {
             state: BrowserState::new(url),
+        }
+    }
+
+    /// Create a new file preview block at the given path.
+    pub fn new_preview(path: &str) -> Self {
+        Block::Preview {
+            state: PreviewState::open(path),
         }
     }
 
@@ -144,6 +155,9 @@ impl Block {
             Block::Browser { .. } => {
                 // Browser state is driven by user navigation messages.
             }
+            Block::Preview { .. } => {
+                // Preview state is driven by navigation messages.
+            }
         }
 
         // Rebuild the cached grid only when something changed.
@@ -161,6 +175,7 @@ impl Block {
             Block::AIChat { .. } => {}
             Block::Settings { .. } => {}
             Block::Browser { .. } => {}
+            Block::Preview { .. } => {}
         }
     }
 
@@ -178,6 +193,7 @@ impl Block {
             Block::AIChat { .. } => {}
             Block::Settings { .. } => {}
             Block::Browser { .. } => {}
+            Block::Preview { .. } => {}
         }
         self.refresh_cache();
     }
@@ -192,6 +208,7 @@ impl Block {
             Block::AIChat { .. } => (0, 0),
             Block::Settings { .. } => (0, 0),
             Block::Browser { .. } => (0, 0),
+            Block::Preview { .. } => (0, 0),
         }
     }
 
@@ -207,6 +224,12 @@ impl Block {
             }
             Block::Browser { state } => {
                 format!("Browser — {}", state.display_title())
+            }
+            Block::Preview { state } => {
+                let name = state.path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| state.path.display().to_string());
+                format!("Preview — {name}")
             }
         }
     }
@@ -231,6 +254,11 @@ impl Block {
         matches!(self, Block::Browser { .. })
     }
 
+    /// Whether this block is a file preview.
+    pub fn is_preview(&self) -> bool {
+        matches!(self, Block::Preview { .. })
+    }
+
     /// Build a render-ready grid from the block's current terminal state.
     ///
     /// Returns a cached grid when nothing has changed since the last render.
@@ -244,7 +272,7 @@ impl Block {
                     RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible)
                 })
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => {
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => {
                 // Non-terminal blocks don't use the terminal canvas.
                 RenderGrid {
                     cells: Vec::new(),
@@ -271,7 +299,7 @@ impl Block {
                     *dirty = false;
                 }
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => {}
         }
     }
 
@@ -282,7 +310,7 @@ impl Block {
                 *cursor_visible = true;
                 *blink_count = 0;
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => {}
         }
     }
 
@@ -296,7 +324,7 @@ impl Block {
                 state.scroll(lines);
                 *dirty = true;
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => {}
         }
         self.refresh_cache();
     }
@@ -334,7 +362,7 @@ impl Block {
                     Some(output.join("\n"))
                 }
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } => None,
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } => None,
         }
     }
 }

@@ -40,3 +40,4 @@ workspace = { path = "crates/workspace" }
 ai = { path = "crates/ai" }
 altermative-config = { path = "crates/config" }
 browser = { path = "crates/browser" }
+preview = { path = "crates/preview" }

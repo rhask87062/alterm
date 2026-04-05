@@ -14,7 +14,7 @@ use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Sub
 use gpu_renderer::widget::TerminalView;
 use workspace::{
     match_shortcut, sidebar_view, tab_bar_view, Action, Block, BrowserState, CommandPalette,
-    SettingsField, SettingsSection, SidebarAction, Tab, TabBarAction, CELL_HEIGHT,
+    PreviewState, SettingsField, SettingsSection, SidebarAction, Tab, TabBarAction, CELL_HEIGHT,
 };
 
 use ai::{
@@ -113,6 +113,10 @@ enum Message {
     BrowserForward(pane_grid::Pane),
     BrowserReload(pane_grid::Pane),
     BrowserUrlChanged(pane_grid::Pane, String),
+    // Preview
+    OpenPreview,
+    PreviewNavigate(pane_grid::Pane, String),
+    PreviewParent(pane_grid::Pane),
 }
 
 impl Altermative {
@@ -550,6 +554,9 @@ impl Altermative {
                 SidebarAction::NewBrowser => {
                     return self.update(Message::OpenBrowser);
                 }
+                SidebarAction::NewPreview => {
+                    return self.update(Message::OpenPreview);
+                }
                 SidebarAction::OpenSettings => {
                     return self.update(Message::OpenSettings);
                 }
@@ -856,6 +863,45 @@ impl Altermative {
                 }
             }
 
+            // -- Preview --
+            Message::OpenPreview => {
+                let home = dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("/"));
+                let path_str = home.to_string_lossy().to_string();
+                let block = Block::new_preview(&path_str);
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if let Some((new_pane, _split)) =
+                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
+                    {
+                        tab.focus = Some(new_pane);
+                    }
+                }
+                self.resize_all_panes();
+            }
+            Message::PreviewNavigate(pane, path) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Preview { state }) = tab.panes.get_mut(pane) {
+                    state.navigate_to(&path);
+                }
+            }
+            Message::PreviewParent(pane) => {
+                let parent = {
+                    let tab = self.active_tab();
+                    if let Some(Block::Preview { state }) = tab.panes.get(pane) {
+                        state.parent_dir()
+                    } else {
+                        None
+                    }
+                };
+                if let Some(parent_path) = parent {
+                    let tab = self.active_tab_mut();
+                    if let Some(Block::Preview { state }) = tab.panes.get_mut(pane) {
+                        state.navigate_to(&parent_path);
+                    }
+                }
+            }
+
             // Command palette messages
             Message::PaletteQueryChanged(query) => {
                 self.palette.update_query(query);
@@ -908,7 +954,7 @@ impl Altermative {
                     let tab = self.active_tab();
                     if let Some(focused) = tab.focus {
                         if let Some(block) = tab.panes.get(focused) {
-                            if block.is_ai_chat() || block.is_settings() || block.is_browser() {
+                            if block.is_ai_chat() || block.is_settings() || block.is_browser() || block.is_preview() {
                                 return Task::none();
                             }
                         }
@@ -993,6 +1039,9 @@ impl Altermative {
                     }
                     Block::Browser { state } => {
                         browser_view(pane, state)
+                    }
+                    Block::Preview { state } => {
+                        preview_view(pane, state)
                     }
                 };
 
@@ -1848,6 +1897,239 @@ fn nav_button_style(status: button::Status) -> button::Style {
             radius: 4.0.into(),
         },
         ..Default::default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// File Preview view
+// ---------------------------------------------------------------------------
+
+/// Build the file preview view for a pane.
+fn preview_view<'a>(
+    pane: pane_grid::Pane,
+    state: &'a PreviewState,
+) -> Element<'a, Message> {
+    // ── Path bar ──
+    let path_display = state.path.display().to_string();
+    let path_label = text(format!("  {path_display}"))
+        .size(13)
+        .color(Color::from_rgb(0.75, 0.80, 0.90));
+
+    let parent_btn = button(
+        text("\u{2191} Up").size(12).center(),
+    )
+    .on_press(Message::PreviewParent(pane))
+    .padding(Padding::from([3, 8]))
+    .style(|_: &Theme, status: button::Status| nav_button_style(status));
+
+    let path_bar: Element<'a, Message> = container(
+        row![path_label, iced::widget::space().width(Fill), parent_btn]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+    )
+    .width(Fill)
+    .padding(Padding::from([4, 8]))
+    .style(|_: &Theme| iced::widget::container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.11))),
+        border: Border {
+            color: Color::from_rgb(0.15, 0.15, 0.20),
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    })
+    .into();
+
+    // ── Content area ──
+    let content_area: Element<'a, Message> = match &state.content {
+        preview::PreviewContent::HighlightedCode(lines) => {
+            let mut code_rows: Vec<Element<'a, Message>> = Vec::with_capacity(lines.len());
+            for line in lines {
+                let line_num = text(format!("{:>4} ", line.line_number))
+                    .size(13)
+                    .color(Color::from_rgb(0.35, 0.35, 0.42))
+                    .font(iced::Font::MONOSPACE);
+
+                let mut span_elements: Vec<Element<'a, Message>> = Vec::new();
+                for span in &line.spans {
+                    let fg = Color::from_rgb(
+                        span.fg.0 as f32 / 255.0,
+                        span.fg.1 as f32 / 255.0,
+                        span.fg.2 as f32 / 255.0,
+                    );
+                    let mut t = text(&span.text)
+                        .size(13)
+                        .color(fg)
+                        .font(iced::Font::MONOSPACE);
+                    if span.bold {
+                        t = t.font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..iced::Font::MONOSPACE
+                        });
+                    }
+                    span_elements.push(t.into());
+                }
+
+                let spans_row: Element<'a, Message> = iced::widget::Row::from_vec(span_elements)
+                    .into();
+
+                let line_row: Element<'a, Message> = row![line_num, spans_row]
+                    .align_y(iced::Alignment::Start)
+                    .into();
+
+                code_rows.push(line_row);
+            }
+
+            let code_column = Column::from_vec(code_rows).spacing(0);
+
+            scrollable(
+                container(code_column)
+                    .width(Fill)
+                    .padding(Padding::from([4, 8])),
+            )
+            .width(Fill)
+            .height(Fill)
+            .into()
+        }
+
+        preview::PreviewContent::Text(content) => {
+            let text_widget = text(content)
+                .size(13)
+                .color(Color::from_rgb(0.80, 0.80, 0.82))
+                .font(iced::Font::MONOSPACE);
+
+            scrollable(
+                container(text_widget)
+                    .width(Fill)
+                    .padding(Padding::from([8, 12])),
+            )
+            .width(Fill)
+            .height(Fill)
+            .into()
+        }
+
+        preview::PreviewContent::Directory(entries) => {
+            let mut entry_rows: Vec<Element<'a, Message>> = Vec::new();
+
+            for entry in entries {
+                let icon = if entry.is_dir { "\u{1F4C1}" } else { "\u{1F4C4}" };
+                let icon_text = text(icon).size(13);
+
+                let name_color = if entry.is_dir {
+                    Color::from_rgb(0.40, 0.65, 0.95)
+                } else {
+                    Color::from_rgb(0.80, 0.80, 0.82)
+                };
+                let name_text = text(&entry.name)
+                    .size(13)
+                    .color(name_color);
+
+                let size_label = if entry.is_dir {
+                    text("[dir]").size(11).color(Color::from_rgb(0.45, 0.45, 0.50))
+                } else {
+                    text(format_size(entry.size)).size(11).color(Color::from_rgb(0.45, 0.45, 0.50))
+                };
+
+                let entry_path = state.path.join(&entry.name).to_string_lossy().to_string();
+                let entry_row = button(
+                    row![icon_text, name_text, iced::widget::space().width(Fill), size_label]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                )
+                .on_press(Message::PreviewNavigate(pane, entry_path))
+                .width(Fill)
+                .padding(Padding::from([4, 8]))
+                .style(|_: &Theme, status: button::Status| {
+                    let bg = match status {
+                        button::Status::Hovered => Color::from_rgb(0.12, 0.14, 0.20),
+                        button::Status::Pressed => Color::from_rgb(0.15, 0.17, 0.24),
+                        _ => Color::TRANSPARENT,
+                    };
+                    button::Style {
+                        background: Some(Background::Color(bg)),
+                        text_color: Color::from_rgb(0.80, 0.80, 0.82),
+                        border: Border {
+                            color: Color::TRANSPARENT,
+                            width: 0.0,
+                            radius: 2.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                });
+
+                entry_rows.push(entry_row.into());
+            }
+
+            let dir_column = Column::from_vec(entry_rows).spacing(1);
+
+            scrollable(
+                container(dir_column)
+                    .width(Fill)
+                    .padding(Padding::from([4, 4])),
+            )
+            .width(Fill)
+            .height(Fill)
+            .into()
+        }
+
+        preview::PreviewContent::ImageInfo { width, height } => {
+            container(
+                text(format!("Image: {width} x {height}"))
+                    .size(14)
+                    .color(Color::from_rgb(0.60, 0.65, 0.75)),
+            )
+            .width(Fill)
+            .height(Fill)
+            .center_x(Fill)
+            .center_y(Fill)
+            .into()
+        }
+
+        preview::PreviewContent::Unsupported(msg) => {
+            container(
+                text(msg)
+                    .size(14)
+                    .color(Color::from_rgb(0.70, 0.40, 0.40)),
+            )
+            .width(Fill)
+            .height(Fill)
+            .center_x(Fill)
+            .center_y(Fill)
+            .into()
+        }
+    };
+
+    // ── Wrap content ──
+    let content_styled: Element<'a, Message> = container(content_area)
+        .width(Fill)
+        .height(Fill)
+        .style(|_: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.04, 0.04, 0.06))),
+            ..Default::default()
+        })
+        .into();
+
+    // ── Layout: path bar on top, content fills the rest ──
+    container(column![path_bar, content_styled])
+        .width(Fill)
+        .height(Fill)
+        .style(|_: &Theme| iced::widget::container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.06, 0.06, 0.08))),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Format a file size in human-readable form.
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
 

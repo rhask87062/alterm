@@ -12,3 +12,5 @@ iced = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
 browser = { workspace = true }
+preview = { workspace = true }
+dirs = { workspace = true }

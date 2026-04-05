@@ -14,6 +14,8 @@ pub enum SidebarAction {
     NewAiChat,
     /// Split the focused pane with a new browser.
     NewBrowser,
+    /// Split the focused pane with a new file preview.
+    NewPreview,
     /// Open the settings panel in a pane.
     OpenSettings,
 }
@@ -54,6 +56,15 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         true,
     );
 
+    // File preview button — active
+    let preview_btn = sidebar_button(
+        "F",
+        "File preview (split)",
+        Some(map(SidebarAction::NewPreview)),
+        btn_size,
+        true,
+    );
+
     // Settings button — active
     let settings_btn = sidebar_button(
         "\u{2699}",
@@ -63,7 +74,7 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         true,
     );
 
-    let col = column![terminal_btn, ai_btn, web_btn, settings_btn]
+    let col = column![terminal_btn, ai_btn, web_btn, preview_btn, settings_btn]
         .spacing(4)
         .padding(btn_padding)
         .align_x(iced::Alignment::Center);
