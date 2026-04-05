@@ -79,9 +79,14 @@ pub async fn fetch_models(
 
 fn anthropic_hardcoded_models() -> Vec<String> {
     vec![
+        "claude-opus-4-5-20250414".to_string(),
         "claude-sonnet-4-20250514".to_string(),
         "claude-haiku-4-5-20251001".to_string(),
-        "claude-opus-4-5-20250414".to_string(),
+        "claude-3-5-sonnet-20241022".to_string(),
+        "claude-3-5-haiku-20241022".to_string(),
+        "claude-3-opus-20240229".to_string(),
+        "claude-3-sonnet-20240229".to_string(),
+        "claude-3-haiku-20240307".to_string(),
     ]
 }
 

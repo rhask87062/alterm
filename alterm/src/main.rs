@@ -1137,11 +1137,37 @@ fn ai_chat_view<'a>(
         move |s| Message::AIProviderChanged(pane, s),
     ).text_size(11).padding(Padding::from([2, 6]));
 
-    let model_input = text_input("model", &state.model_name)
-        .on_input(move |v| Message::AIModelChanged(pane, v))
-        .size(11)
+    let model_selector: Element<'a, Message> = if !state.available_models.is_empty() {
+        // Dropdown with fetched models
+        let mut models = state.available_models.clone();
+        // Ensure current model is in the list even if not returned by API
+        if !state.model_name.is_empty() && !models.contains(&state.model_name) {
+            models.insert(0, state.model_name.clone());
+        }
+        pick_list(
+            models,
+            Some(state.model_name.clone()),
+            move |selected| Message::AIModelChanged(pane, selected),
+        )
+        .text_size(11)
         .padding(Padding::from([2, 6]))
-        .width(Length::Fixed(180.0));
+        .width(Length::Fixed(220.0))
+        .into()
+    } else if state.models_loading {
+        container(
+            text("Loading models...").size(10).color(Color::from_rgb(0.50, 0.50, 0.55))
+        )
+        .padding(Padding::from([4, 8]))
+        .into()
+    } else {
+        // Fallback: text input if fetch failed or hasn't run yet
+        text_input("model name", &state.model_name)
+            .on_input(move |v| Message::AIModelChanged(pane, v))
+            .size(11)
+            .padding(Padding::from([2, 6]))
+            .width(Length::Fixed(180.0))
+            .into()
+    };
 
     let context_text = if has_terminal_context {
         text("Context: Terminal").size(10).color(Color::from_rgb(0.40, 0.70, 0.50))
@@ -1150,7 +1176,7 @@ fn ai_chat_view<'a>(
     };
 
     let header: Element<'a, Message> = container(
-        row![provider_picker, model_input, iced::widget::space().width(Fill), context_text]
+        row![provider_picker, model_selector, iced::widget::space().width(Fill), context_text]
             .spacing(6).align_y(iced::Alignment::Center)
     )
     .width(Fill)
