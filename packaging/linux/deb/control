@@ -1,0 +1,10 @@
+Package: altermative
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: arm64
+Depends: libwebkit2gtk-4.1-0, libgtk-3-0
+Maintainer: Russell Haskell <rhask87062@gmail.com>
+Description: GPU-accelerated terminal workspace with AI integration
+ Altermative is a cross-platform terminal emulator built in Rust
+ with tiling workspace, AI chat, embedded browser, and file preview.

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Altermative
+Comment=GPU-accelerated terminal workspace with AI integration
+Exec=alterm
+Icon=altermative
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+Keywords=terminal;shell;console;ai;workspace;
+StartupWMClass=altermative
