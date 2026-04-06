@@ -49,12 +49,17 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         Some(map(SidebarAction::NewBrowser)),
         btn_size,
     );
-    let preview_btn = sidebar_svg_button(
+    let preview_btn = sidebar_svg_button_with_icon_size(
         &theme_svg(include_bytes!("../../../assets/icons/sidebar/folder.svg"), light_mode),
         Some(map(SidebarAction::NewPreview)),
         btn_size,
+        24.0,  // slightly larger icon for folder
     );
-    let settings_btn = sidebar_button("\u{2699}", Some(map(SidebarAction::OpenSettings)), btn_size);
+    let settings_btn = sidebar_svg_button(
+        &theme_svg(include_bytes!("../../../assets/icons/sidebar/settings-svgrepo-com.svg"), light_mode),
+        Some(map(SidebarAction::OpenSettings)),
+        btn_size,
+    );
     let info_btn = sidebar_svg_button(
         &theme_svg(include_bytes!("../../../assets/icons/sidebar/info.svg"), light_mode),
         Some(map(SidebarAction::ShowHotkeyInfo)),
@@ -111,9 +116,19 @@ fn sidebar_svg_button<'a, M: Clone + 'a>(
     on_press: Option<M>,
     size: f32,
 ) -> Element<'a, M> {
+    sidebar_svg_button_with_icon_size(svg_bytes, on_press, size, 20.0)
+}
+
+/// Build a sidebar button with an SVG icon at a custom icon size.
+fn sidebar_svg_button_with_icon_size<'a, M: Clone + 'a>(
+    svg_bytes: &[u8],
+    on_press: Option<M>,
+    size: f32,
+    icon_size: f32,
+) -> Element<'a, M> {
     let icon = svg(svg::Handle::from_memory(svg_bytes.to_vec()))
-        .width(Length::Fixed(20.0))
-        .height(Length::Fixed(20.0));
+        .width(Length::Fixed(icon_size))
+        .height(Length::Fixed(icon_size));
 
     let icon_container = container(icon)
         .width(Length::Fixed(size))
