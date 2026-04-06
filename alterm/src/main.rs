@@ -2514,7 +2514,7 @@ fn preview_view<'a>(
         .into();
 
     // ── Layout: path bar on top, content fills the rest ──
-    container(column![path_bar, content_styled])
+    container(column![path_bar, content_styled].width(Fill).height(Fill))
         .width(Fill)
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
