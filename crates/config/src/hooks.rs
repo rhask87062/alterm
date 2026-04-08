@@ -47,7 +47,7 @@ impl LuaHooks {
                 .map_err(|e| e.to_string())?;
         }
         globals
-            .set("altermative", alt_table)
+            .set("alterm", alt_table)
             .map_err(|e| e.to_string())?;
 
         Ok(())

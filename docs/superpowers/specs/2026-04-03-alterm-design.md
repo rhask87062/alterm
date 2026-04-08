@@ -1,4 +1,4 @@
-# Altermative — Design Specification
+# Alterm — Design Specification
 
 **Date:** 2026-04-03
 **Author:** Russell Alan Haskell + Claude
@@ -6,15 +6,15 @@
 
 ## Overview
 
-Altermative is a GPU-accelerated, cross-platform terminal workspace built in Rust. It combines the workspace UX of WaveTerm (tiling blocks, drag-to-split, widget sidebar, embedded browser, AI chat) with the raw performance of WezTerm (GPU-rendered terminal, sub-millisecond input latency) — without the Electron bloat that makes WaveTerm slow.
+Alterm is a GPU-accelerated, cross-platform terminal workspace built in Rust. It combines the workspace UX of WaveTerm (tiling blocks, drag-to-split, widget sidebar, embedded browser, AI chat) with the raw performance of WezTerm (GPU-rendered terminal, sub-millisecond input latency) — without the Electron bloat that makes WaveTerm slow.
 
-**App name:** Altermative
+**App name:** Alterm
 **Binary:** `alterm`
 **Tagline:** The alternative terminal — for beginners, intermediates, and experts.
 
 ### Why the Name
 
-"Altermative" carries four layers of meaning:
+"Alterm" carries four layers of meaning:
 1. **Alternative** — a better alternative to slow Electron-based terminals
 2. **Alter** — transform how you work with terminals
 3. **Term** — it's a terminal, embedded right in the name
@@ -147,7 +147,7 @@ The AI chat block can access terminal output through three mechanisms:
 ### File Locations
 
 ```
-~/.config/altermative/
+~/.config/alterm/
 ├── config.toml          # Main configuration
 ├── hooks.lua            # Optional Lua hooks for dynamic behavior
 ├── themes/              # Custom theme files
@@ -269,7 +269,7 @@ The AI chat block can access terminal output through three mechanisms:
 
 ### Development
 ```
-~/dev-projects/apps/altermative/    # Source code
+~/dev-projects/apps/alterm/    # Source code
 ```
 
 ### Install (user-local)
@@ -280,7 +280,7 @@ cargo install --path .
 
 ### Desktop Shortcut (Linux)
 ```
-~/.local/share/applications/altermative.desktop
+~/.local/share/applications/alterm.desktop
 ```
 
 ### Future Distribution
@@ -293,7 +293,7 @@ cargo install --path .
 ## Project Structure (Planned)
 
 ```
-altermative/
+alterm/
 ├── Cargo.toml               # Workspace root
 ├── README.md
 ├── alterm/                   # Main binary crate

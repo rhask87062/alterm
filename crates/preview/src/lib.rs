@@ -1,5 +1,6 @@
 pub mod code;
 pub mod image;
+pub mod pptx;
 
 pub use code::{HighlightedLine, HighlightedSpan};
 
@@ -9,6 +10,7 @@ pub enum FileType {
     Markdown,
     Image,
     Text,
+    Pptx,
     Directory,
     Unsupported,
 }
@@ -18,7 +20,18 @@ pub enum PreviewContent {
     Text(String),
     HighlightedCode(Vec<HighlightedLine>),
     Directory(Vec<DirEntry>),
-    ImageInfo { width: u32, height: u32 },
+    /// Raster image (PNG, JPG, GIF, WEBP, BMP) — rendered by the UI layer.
+    Image,
+    /// SVG file — rendered by the UI layer.
+    Svg,
+    /// PPTX slide conversion is running asynchronously.
+    Converting,
+    /// Rendered PPTX slides (PNG paths) ready to display.
+    Slides {
+        images: Vec<std::path::PathBuf>,
+        /// Temp directory to clean up when navigating away.
+        temp_dir: std::path::PathBuf,
+    },
     /// Holds a human-readable error / reason when the file cannot be shown.
     Unsupported(String),
 }
@@ -67,6 +80,7 @@ fn detect_file_type(path: &std::path::Path) -> FileType {
         Some("html") => FileType::Code { language: "HTML".into() },
         Some("css") => FileType::Code { language: "CSS".into() },
         Some("sh") | Some("bash") => FileType::Code { language: "Bash".into() },
+        Some("pptx") => FileType::Pptx,
         Some("md") => FileType::Markdown,
         Some("png")
         | Some("jpg")
@@ -115,12 +129,14 @@ fn load_content(path: &std::path::Path, file_type: &FileType) -> PreviewContent 
         }
 
         FileType::Image => {
-            // Attempt to read basic header metadata; fall back gracefully.
-            match image::image_info(path) {
-                Some((w, h)) => PreviewContent::ImageInfo { width: w, height: h },
-                None => PreviewContent::Unsupported(
-                    "Image preview not yet supported.".into(),
-                ),
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_lowercase());
+            if ext.as_deref() == Some("svg") {
+                PreviewContent::Svg
+            } else {
+                PreviewContent::Image
             }
         }
 
@@ -133,6 +149,9 @@ fn load_content(path: &std::path::Path, file_type: &FileType) -> PreviewContent 
                 Err(e) => PreviewContent::Unsupported(format!("Cannot read file: {e}")),
             }
         }
+
+        // Actual conversion is done asynchronously by the caller.
+        FileType::Pptx => PreviewContent::Converting,
 
         FileType::Markdown | FileType::Text => match std::fs::read_to_string(path) {
             Ok(text) => PreviewContent::Text(text),
@@ -160,7 +179,20 @@ impl PreviewState {
     pub fn open(path: impl AsRef<std::path::Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         let file_type = detect_file_type(&path);
+        let type_name = match &file_type {
+            FileType::Directory => "Directory",
+            FileType::Code { .. } => "Code",
+            FileType::Markdown => "Markdown",
+            FileType::Text => "Text",
+            FileType::Pptx => "Pptx",
+            FileType::Image => "Image",
+            FileType::Unsupported => "Unsupported",
+        };
+        eprintln!("[preview] open: {:?}  is_dir={} → FileType::{}", path, path.is_dir(), type_name);
         let content = load_content(&path, &file_type);
+        if let PreviewContent::Directory(ref entries) = content {
+            eprintln!("[preview] directory entry count: {}", entries.len());
+        }
         PreviewState {
             path,
             file_type,
@@ -171,6 +203,8 @@ impl PreviewState {
 
     /// Navigate to a new path, resetting scroll.
     pub fn navigate_to(&mut self, path: impl AsRef<std::path::Path>) {
+        // Clean up any rendered slide images from the previous path.
+        self.cleanup_slides();
         let path = path.as_ref().to_path_buf();
         let file_type = detect_file_type(&path);
         let content = load_content(&path, &file_type);
@@ -180,8 +214,21 @@ impl PreviewState {
         self.scroll_offset = 0;
     }
 
+    /// Remove the temporary slide-image directory if one exists.
+    fn cleanup_slides(&self) {
+        if let PreviewContent::Slides { temp_dir, .. } = &self.content {
+            let _ = std::fs::remove_dir_all(temp_dir);
+        }
+    }
+
     /// Return the parent directory of the currently previewed path, if any.
     pub fn parent_dir(&self) -> Option<std::path::PathBuf> {
         self.path.parent().map(|p| p.to_path_buf())
+    }
+}
+
+impl Drop for PreviewState {
+    fn drop(&mut self) {
+        self.cleanup_slides();
     }
 }

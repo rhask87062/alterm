@@ -1,1 +1,1 @@
-Place altermative.png (256x256) here for the app icon.
+Place alterm.png (256x256) here for the app icon.

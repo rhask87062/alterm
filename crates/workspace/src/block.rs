@@ -87,7 +87,7 @@ impl Block {
     }
 
     /// Create a new settings panel block with a working copy of the given config.
-    pub fn new_settings(config: altermative_config::AppConfig) -> Self {
+    pub fn new_settings(config: alterm_config::AppConfig) -> Self {
         Block::Settings {
             state: SettingsState::new(config),
         }

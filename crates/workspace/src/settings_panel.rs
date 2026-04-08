@@ -2,7 +2,7 @@
 ///
 /// `SettingsState` holds a working copy of `AppConfig` that the user edits
 /// in-place. Changes are persisted to disk when the Save button is pressed.
-use altermative_config::AppConfig;
+use alterm_config::AppConfig;
 
 /// Which section of the settings panel is currently visible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,8 +201,8 @@ impl SettingsState {
     fn ensure_provider_entry<'a>(
         config: &'a mut AppConfig,
         provider: &str,
-    ) -> &'a mut altermative_config::ProviderEntry {
-        use altermative_config::ProviderEntry;
+    ) -> &'a mut alterm_config::ProviderEntry {
+        use alterm_config::ProviderEntry;
         let slot = match provider {
             "openai" => &mut config.ai.providers.openai,
             "anthropic" => &mut config.ai.providers.anthropic,

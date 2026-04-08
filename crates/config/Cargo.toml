@@ -1,5 +1,5 @@
 [package]
-name = "altermative-config"
+name = "alterm-config"
 version.workspace = true
 edition.workspace = true
 

@@ -4,8 +4,8 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, opaque, pane_grid, pick_list, row, scrollable, slider, stack, text,
-    text_input, toggler, Column, Id as WidgetId,
+    button, column, container, mouse_area, opaque, pane_grid, pick_list, row, scrollable, slider,
+    stack, text, text_input, toggler, Column, Id as WidgetId,
 };
 use iced::widget::operation::focus as widget_focus;
 use iced::window;
@@ -22,9 +22,50 @@ use workspace::{
 // Theme helpers
 // ---------------------------------------------------------------------------
 
-/// Returns `true` when the current iced theme is light.
+/// Returns `true` when the current iced theme is a light variant.
 fn is_light_theme(theme: &Theme) -> bool {
-    matches!(theme, Theme::Light)
+    matches!(
+        theme,
+        Theme::Light
+            | Theme::SolarizedLight
+            | Theme::GruvboxLight
+            | Theme::CatppuccinLatte
+            | Theme::TokyoNightLight
+            | Theme::KanagawaLotus
+    )
+}
+
+/// Returns `true` when the config theme string is a light variant.
+fn is_config_light_theme(s: &str) -> bool {
+    matches!(s, "light" | "Solarized Light" | "Gruvbox Light" | "Catppuccin Latte")
+}
+
+/// Map a config theme string to an iced `Theme`.
+fn theme_from_config(s: &str) -> Theme {
+    match s {
+        "light" => Theme::Light,
+        "Solarized Light" => Theme::SolarizedLight,
+        "Solarized Dark" => Theme::SolarizedDark,
+        "Gruvbox Light" => Theme::GruvboxLight,
+        "Gruvbox Dark" => Theme::GruvboxDark,
+        "Catppuccin Latte" => Theme::CatppuccinLatte,
+        "Catppuccin Mocha" => Theme::CatppuccinMocha,
+        _ => Theme::Dark, // "dark" and any unrecognised value
+    }
+}
+
+/// Return the light↔dark partner for a theme string.
+fn theme_partner(s: &str) -> &'static str {
+    match s {
+        "light" => "dark",
+        "Solarized Light" => "Solarized Dark",
+        "Gruvbox Light" => "Gruvbox Dark",
+        "Catppuccin Latte" => "Catppuccin Mocha",
+        "Solarized Dark" => "Solarized Light",
+        "Gruvbox Dark" => "Gruvbox Light",
+        "Catppuccin Mocha" => "Catppuccin Latte",
+        _ => "light", // "dark" → "light", unknown → "light"
+    }
 }
 
 /// Pick between a light-mode and dark-mode color.
@@ -37,23 +78,23 @@ use ai::{
     anthropic::AnthropicProvider, gemini::GeminiProvider, openai::OpenAIProvider, Provider,
     ProviderConfig, StreamEvent,
 };
-use altermative_config::{hooks::LuaHooks, AppConfig};
+use alterm_config::{hooks::LuaHooks, AppConfig};
 use browser::webview_manager;
 
 fn main() -> iced::Result {
+    // Set webkit2gtk env vars before any library initialization so they take
+    // effect before the webkit subprocess is spawned.
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    std::env::set_var("GTK_THEME", "Adwaita:dark");
+
     env_logger::init();
 
-    iced::application(Altermative::new, Altermative::update, Altermative::view)
-        .title("Altermative")
-        .theme(|app: &Altermative| {
-            if app.config.appearance.theme == "light" {
-                Theme::Light
-            } else {
-                Theme::Dark
-            }
-        })
+    iced::application(Alterm::new, Alterm::update, Alterm::view)
+        .title("Alterm")
+        .theme(|app: &Alterm| theme_from_config(&app.config.appearance.theme))
         .window_size((900.0, 600.0))
-        .subscription(Altermative::subscription)
+        .subscription(Alterm::subscription)
         .run()
 }
 
@@ -82,7 +123,7 @@ fn pane_to_id(pane: pane_grid::Pane) -> u64 {
         .unwrap_or(0)
 }
 
-struct Altermative {
+struct Alterm {
     tabs: Vec<Tab>,
     active_tab: usize,
     palette: CommandPalette,
@@ -111,6 +152,7 @@ enum Message {
     MouseScroll(f32),
     ClipboardContent(Option<String>),
     PaneClicked(pane_grid::Pane),
+    PaneHovered(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
     SplitHorizontal,
@@ -163,13 +205,19 @@ enum Message {
     OpenPreview,
     PreviewNavigate(pane_grid::Pane, String),
     PreviewParent(pane_grid::Pane),
+    PptxSlidesReady(pane_grid::Pane, Vec<std::path::PathBuf>, std::path::PathBuf),
+    PptxConversionFailed(pane_grid::Pane, String),
+    PreviewSlidePrev(pane_grid::Pane),
+    PreviewSlideNext(pane_grid::Pane),
     // Hotkey info
     ShowHotkeyInfo,
+    // Theme toggle
+    ToggleTheme,
     // Window handle (X11 XID) ready
     WindowHandleReady(u64),
 }
 
-impl Altermative {
+impl Alterm {
     fn new() -> (Self, Task<Message>) {
         let window_width = 900.0_f32;
         let window_height = 600.0_f32;
@@ -183,7 +231,7 @@ impl Altermative {
             AppConfig::default()
         });
 
-        // Load optional Lua hooks from ~/.config/altermative/hooks.lua.
+        // Load optional Lua hooks from ~/.config/alterm/hooks.lua.
         let mut hooks = LuaHooks::new();
         match hooks.load_file(&AppConfig::hooks_path()) {
             Ok(true) => log::info!("Lua hooks loaded from {:?}", AppConfig::hooks_path()),
@@ -207,7 +255,7 @@ impl Altermative {
         let terminal_font_family: &'static str =
             Box::leak(config.appearance.font_family.clone().into_boxed_str());
 
-        let app = Altermative {
+        let app = Alterm {
             tabs: vec![first_tab],
             active_tab: 0,
             palette: CommandPalette::new(),
@@ -559,6 +607,11 @@ impl Altermative {
                     }
                 }
             }
+            Message::PaneHovered(pane) => {
+                // Focus the pane under the cursor so scroll events go to it,
+                // but don't steal keyboard focus from whichever widget has it.
+                self.active_tab_mut().focus = Some(pane);
+            }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
                 self.active_tab_mut().panes.drop(pane, target);
                 self.resize_all_panes();
@@ -579,8 +632,12 @@ impl Altermative {
                 let tab = self.active_tab_mut();
                 if let Some(focused) = tab.focus {
                     // Halve cols for a vertical-axis split (left|right).
-                    let (rows, cols) = tab.panes.get(focused)
-                        .map(|b| b.dimensions()).unwrap_or((24, 80));
+                    // Non-terminal panes return (0,0) — clamp to safe defaults.
+                    let (rows, cols) = {
+                        let (r, c) = tab.panes.get(focused)
+                            .map(|b| b.dimensions()).unwrap_or((24, 80));
+                        (r.max(24), c.max(80))
+                    };
                     let half_cols = (cols / 2).max(20);
                     if let Ok(block) = Block::new_terminal(rows, half_cols) {
                         if let Some((new_pane, _split)) =
@@ -600,8 +657,12 @@ impl Altermative {
                 let tab = self.active_tab_mut();
                 if let Some(focused) = tab.focus {
                     // Halve rows for a horizontal-axis split (top/bottom).
-                    let (rows, cols) = tab.panes.get(focused)
-                        .map(|b| b.dimensions()).unwrap_or((24, 80));
+                    // Non-terminal panes return (0,0) — clamp to safe defaults.
+                    let (rows, cols) = {
+                        let (r, c) = tab.panes.get(focused)
+                            .map(|b| b.dimensions()).unwrap_or((24, 80));
+                        (r.max(24), c.max(80))
+                    };
                     let half_rows = (rows / 2).max(4);
                     if let Ok(block) = Block::new_terminal(half_rows, cols) {
                         if let Some((new_pane, _split)) =
@@ -657,8 +718,11 @@ impl Altermative {
             // Per-pane title bar controls (operate on a specific pane)
             Message::SplitPaneRight(pane) => {
                 let tab = self.active_tab_mut();
-                let (rows, cols) = tab.panes.get(pane)
-                    .map(|b| b.dimensions()).unwrap_or((24, 80));
+                let (rows, cols) = {
+                    let (r, c) = tab.panes.get(pane)
+                        .map(|b| b.dimensions()).unwrap_or((24, 80));
+                    (r.max(24), c.max(80))
+                };
                 let half_cols = (cols / 2).max(20);
                 if let Ok(block) = Block::new_terminal(rows, half_cols) {
                     if let Some((new_pane, _split)) =
@@ -674,8 +738,11 @@ impl Altermative {
             }
             Message::SplitPaneDown(pane) => {
                 let tab = self.active_tab_mut();
-                let (rows, cols) = tab.panes.get(pane)
-                    .map(|b| b.dimensions()).unwrap_or((24, 80));
+                let (rows, cols) = {
+                    let (r, c) = tab.panes.get(pane)
+                        .map(|b| b.dimensions()).unwrap_or((24, 80));
+                    (r.max(24), c.max(80))
+                };
                 let half_rows = (rows / 2).max(4);
                 if let Ok(block) = Block::new_terminal(half_rows, cols) {
                     if let Some((new_pane, _split)) =
@@ -782,6 +849,9 @@ impl Altermative {
                 SidebarAction::ShowHotkeyInfo => {
                     return self.update(Message::ShowHotkeyInfo);
                 }
+                SidebarAction::ToggleTheme => {
+                    return self.update(Message::ToggleTheme);
+                }
             },
             Message::SidebarNewTerminal => {
                 // Split the focused pane with a new terminal (right).
@@ -863,7 +933,7 @@ impl Altermative {
                             format!(
                                 "No API key configured for '{provider_name}'. \
                                  Add one in Settings (Ctrl+Shift+,) or edit \
-                                 ~/.config/altermative/config.toml"
+                                 ~/.config/alterm/config.toml"
                             ),
                         ));
                     }
@@ -935,7 +1005,7 @@ impl Altermative {
                         let base_url = entry
                             .map(|e| e.resolved_base_url(&pname))
                             .unwrap_or_else(|| {
-                                altermative_config::default_base_url(&pname)
+                                alterm_config::default_base_url(&pname)
                                     .unwrap_or("")
                                     .to_string()
                             });
@@ -1105,9 +1175,11 @@ impl Altermative {
 
             // -- Preview --
             Message::OpenPreview => {
-                let home = dirs::home_dir()
+                let start_path = std::env::current_dir()
+                    .ok()
+                    .or_else(dirs::home_dir)
                     .unwrap_or_else(|| std::path::PathBuf::from("/"));
-                let path_str = home.to_string_lossy().to_string();
+                let path_str = start_path.to_string_lossy().to_string();
                 let block = Block::new_preview(&path_str);
                 let tab = self.active_tab_mut();
                 if let Some(focused) = tab.focus {
@@ -1123,6 +1195,24 @@ impl Altermative {
                 let tab = self.active_tab_mut();
                 if let Some(Block::Preview { state }) = tab.panes.get_mut(pane) {
                     state.navigate_to(&path);
+                    if matches!(state.file_type, preview::FileType::Pptx) {
+                        let pptx_path = state.path.clone();
+                        return iced::Task::perform(
+                            async move {
+                                tokio::task::spawn_blocking(move || {
+                                    preview::pptx::render_slides(&pptx_path)
+                                })
+                                .await
+                                .unwrap_or_else(|e| Err(e.to_string()))
+                            },
+                            move |result| match result {
+                                Ok((images, temp_dir)) => {
+                                    Message::PptxSlidesReady(pane, images, temp_dir)
+                                }
+                                Err(e) => Message::PptxConversionFailed(pane, e),
+                            },
+                        );
+                    }
                 }
             }
             Message::PreviewParent(pane) => {
@@ -1138,6 +1228,47 @@ impl Altermative {
                     let tab = self.active_tab_mut();
                     if let Some(Block::Preview { state }) = tab.panes.get_mut(pane) {
                         state.navigate_to(&parent_path);
+                    }
+                }
+            }
+
+            Message::PptxSlidesReady(pane, images, temp_dir) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Preview { state }) = tab.panes.get_mut(pane) {
+                    if matches!(state.file_type, preview::FileType::Pptx) {
+                        state.content = preview::PreviewContent::Slides { images, temp_dir };
+                        state.scroll_offset = 0;
+                    } else {
+                        // Pane navigated away before conversion finished — drop temp dir.
+                        let _ = std::fs::remove_dir_all(temp_dir);
+                    }
+                } else {
+                    let _ = std::fs::remove_dir_all(temp_dir);
+                }
+            }
+            Message::PptxConversionFailed(pane, err) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Preview { state }) = tab.panes.get_mut(pane) {
+                    state.content = preview::PreviewContent::Unsupported(format!(
+                        "Slide conversion failed:\n\n{err}"
+                    ));
+                }
+            }
+            Message::PreviewSlidePrev(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Preview { state }) = tab.panes.get_mut(pane) {
+                    if state.scroll_offset > 0 {
+                        state.scroll_offset -= 1;
+                    }
+                }
+            }
+            Message::PreviewSlideNext(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Preview { state }) = tab.panes.get_mut(pane) {
+                    if let preview::PreviewContent::Slides { images, .. } = &state.content {
+                        if state.scroll_offset + 1 < images.len() {
+                            state.scroll_offset += 1;
+                        }
                     }
                 }
             }
@@ -1269,6 +1400,23 @@ impl Altermative {
                 }
             }
 
+            // -- Theme toggle --
+            Message::ToggleTheme => {
+                let new_theme = theme_partner(&self.config.appearance.theme).to_string();
+                self.config.appearance.theme = new_theme;
+                if let Err(e) = self.config.save(&AppConfig::config_path()) {
+                    log::error!("Failed to save theme: {e}");
+                }
+                // Sync any open settings panes so their working copy matches.
+                for tab in &mut self.tabs {
+                    for (_pane, block) in tab.panes.iter_mut() {
+                        if let Block::Settings { state } = block {
+                            state.config.appearance.theme = self.config.appearance.theme.clone();
+                        }
+                    }
+                }
+            }
+
             // -- Window handle --
             Message::WindowHandleReady(xid) => {
                 eprintln!("[WINDOW] Got raw window ID: {xid} (hex: {xid:#x})");
@@ -1288,7 +1436,7 @@ impl Altermative {
         let tab_bar = tab_bar_view(&titles, self.active_tab, Message::TabBarAction);
 
         // Pane grid for the active tab
-        let light_mode = self.config.appearance.theme == "light";
+        let light_mode = is_config_light_theme(&self.config.appearance.theme);
         let is_maximized = tab.panes.maximized().is_some();
         let has_terminal_context = self.terminal_context(1).is_some();
         let pane_grid_widget =
@@ -1321,8 +1469,8 @@ impl Altermative {
                     }
                 };
 
-                // Title bar with control buttons.
-                let title = text(block.title()).size(12);
+                // Title bar with control buttons (no label).
+                let title = text("").size(12);
 
                 // Build control buttons row
                 let split_right_btn = title_bar_button("|", Message::SplitPaneRight(pane));
@@ -1347,6 +1495,9 @@ impl Altermative {
                     .controls(controls)
                     .padding(4)
                     .style(move |theme: &Theme| title_bar_style(theme, is_focused));
+
+                let content = mouse_area(content)
+                    .on_enter(Message::PaneHovered(pane));
 
                 pane_grid::Content::new(content)
                     .title_bar(title_bar)
@@ -1974,7 +2125,16 @@ fn settings_appearance_section<'a>(
 
     // Theme
     let theme_label = text("Theme").size(12);
-    let theme_options: Vec<String> = vec!["dark".to_string(), "light".to_string()];
+    let theme_options: Vec<String> = vec![
+        "dark".to_string(),
+        "light".to_string(),
+        "Solarized Dark".to_string(),
+        "Solarized Light".to_string(),
+        "Gruvbox Dark".to_string(),
+        "Gruvbox Light".to_string(),
+        "Catppuccin Mocha".to_string(),
+        "Catppuccin Latte".to_string(),
+    ];
     let selected_theme: Option<String> = Some(state.config.appearance.theme.clone());
     let theme_picker = pick_list(
         theme_options,
@@ -2293,10 +2453,27 @@ fn preview_view<'a>(
     state: &'a PreviewState,
 ) -> Element<'a, Message> {
     // ── Path bar ──
-    let path_display = state.path.display().to_string();
+    // Truncate from the front so the current directory name is always visible.
+    let path_full = state.path.display().to_string();
+    let path_display = {
+        let chars: Vec<char> = path_full.chars().collect();
+        if chars.len() > 42 {
+            // Keep last 41 chars; try to break on a '/' boundary.
+            let raw_start = chars.len() - 41;
+            let start = chars[raw_start..]
+                .iter()
+                .position(|&c| c == '/')
+                .map(|i| raw_start + i)
+                .unwrap_or(raw_start);
+            format!("\u{2026}{}", chars[start..].iter().collect::<String>())
+        } else {
+            path_full
+        }
+    };
     let path_label = text(format!("  {path_display}"))
         .size(13)
-        .color(Color::from_rgb(0.75, 0.80, 0.90));
+        .color(Color::from_rgb(0.75, 0.80, 0.90))
+        .width(Fill);
 
     let parent_btn = button(
         text("\u{2191} Up").size(12).center(),
@@ -2306,7 +2483,7 @@ fn preview_view<'a>(
     .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
 
     let path_bar: Element<'a, Message> = container(
-        row![path_label, iced::widget::space().width(Fill), parent_btn]
+        row![path_label, parent_btn]
             .spacing(8)
             .align_y(iced::Alignment::Center),
     )
@@ -2382,7 +2559,6 @@ fn preview_view<'a>(
                     .padding(Padding::from([4, 8])),
             )
             .width(Fill)
-            .height(Fill)
             .into()
         }
 
@@ -2398,7 +2574,6 @@ fn preview_view<'a>(
                     .padding(Padding::from([8, 12])),
             )
             .width(Fill)
-            .height(Fill)
             .into()
         }
 
@@ -2461,7 +2636,7 @@ fn preview_view<'a>(
                 entry_rows.push(entry_row.into());
             }
 
-            let dir_column = Column::from_vec(entry_rows).spacing(1);
+            let dir_column = Column::from_vec(entry_rows).spacing(1).width(Fill);
 
             scrollable(
                 container(dir_column)
@@ -2473,17 +2648,105 @@ fn preview_view<'a>(
             .into()
         }
 
-        preview::PreviewContent::ImageInfo { width, height } => {
+        preview::PreviewContent::Image => {
+            let handle = iced::widget::image::Handle::from_path(&state.path);
             container(
-                text(format!("Image: {width} x {height}"))
-                    .size(14)
-                    .color(Color::from_rgb(0.60, 0.65, 0.75)),
+                iced::widget::image(handle)
+                    .content_fit(iced::ContentFit::Contain)
+                    .width(Fill)
+                    .height(Fill),
+            )
+            .width(Fill)
+            .height(Fill)
+            .into()
+        }
+
+        preview::PreviewContent::Svg => {
+            let handle = iced::widget::svg::Handle::from_path(&state.path);
+            container(
+                iced::widget::svg(handle)
+                    .content_fit(iced::ContentFit::Contain)
+                    .width(Fill)
+                    .height(Fill),
+            )
+            .width(Fill)
+            .height(Fill)
+            .into()
+        }
+
+        preview::PreviewContent::Converting => {
+            container(
+                column![
+                    text("Converting slides\u{2026}").size(15).color(Color::from_rgb(0.65, 0.75, 0.95)),
+                    text("LibreOffice is rendering your presentation.")
+                        .size(12)
+                        .color(Color::from_rgb(0.50, 0.50, 0.55)),
+                ]
+                .spacing(8)
+                .align_x(iced::Alignment::Center),
             )
             .width(Fill)
             .height(Fill)
             .center_x(Fill)
             .center_y(Fill)
             .into()
+        }
+
+        preview::PreviewContent::Slides { images, .. } => {
+            let total = images.len();
+            let idx = state.scroll_offset.min(total.saturating_sub(1));
+
+            // Navigation bar
+            let slide_label = text(format!("Slide {} / {}", idx + 1, total))
+                .size(13)
+                .color(Color::from_rgb(0.80, 0.82, 0.90));
+
+            let mut prev_btn = button(text("\u{25C0}").size(13).center())
+                .padding(Padding::from([3, 10]))
+                .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
+            if idx > 0 {
+                prev_btn = prev_btn.on_press(Message::PreviewSlidePrev(pane));
+            }
+
+            let mut next_btn = button(text("\u{25B6}").size(13).center())
+                .padding(Padding::from([3, 10]))
+                .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
+            if idx + 1 < total {
+                next_btn = next_btn.on_press(Message::PreviewSlideNext(pane));
+            }
+
+            let slide_nav: Element<'a, Message> = container(
+                row![prev_btn, slide_label, next_btn]
+                    .spacing(10)
+                    .align_y(iced::Alignment::Center),
+            )
+            .width(Fill)
+            .padding(Padding::from([4, 8]))
+            .style(|theme: &Theme| iced::widget::container::Style {
+                background: Some(Background::Color(themed(theme,
+                    Color::from_rgb(0.88, 0.88, 0.92),
+                    Color::from_rgb(0.10, 0.10, 0.13),
+                ))),
+                ..Default::default()
+            })
+            .into();
+
+            // Slide image
+            let handle = iced::widget::image::Handle::from_path(&images[idx]);
+            let slide_img: Element<'a, Message> = container(
+                iced::widget::image(handle)
+                    .content_fit(iced::ContentFit::Contain)
+                    .width(Fill)
+                    .height(Fill),
+            )
+            .width(Fill)
+            .height(Fill)
+            .into();
+
+            column![slide_nav, slide_img]
+                .width(Fill)
+                .height(Fill)
+                .into()
         }
 
         preview::PreviewContent::Unsupported(msg) => {

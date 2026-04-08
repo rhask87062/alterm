@@ -1,31 +1,34 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "Building Altermative..."
-cargo build --release
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common/metadata.sh
+source "${SCRIPT_DIR}/common/metadata.sh"
+
+cd "${REPO_ROOT}"
+
+echo "Building Alterm..."
+cargo build --release --package "${PACKAGE_NAME}"
 
 echo "Installing binary..."
-install -Dm755 target/release/alterm "$HOME/.cargo/bin/alterm"
+install -Dm755 "target/release/${BINARY_NAME}" "$HOME/.cargo/bin/${BINARY_NAME}"
 
 echo "Installing desktop entry..."
-install -Dm644 packaging/linux/altermative.desktop "$HOME/.local/share/applications/altermative.desktop"
-
-# Install icon if it exists
-if [ -f assets/icons/altermative.png ]; then
-    install -Dm644 assets/icons/altermative.png "$HOME/.local/share/icons/hicolor/256x256/apps/altermative.png"
-fi
+install -Dm644 "packaging/linux/alterm.desktop" "$HOME/.local/share/applications/alterm.desktop"
 
 echo "Creating default config..."
-mkdir -p "$HOME/.config/altermative"
-if [ ! -f "$HOME/.config/altermative/config.toml" ]; then
-    cp config/default.toml "$HOME/.config/altermative/config.toml"
-    echo "Default config created at ~/.config/altermative/config.toml"
+mkdir -p "$HOME/.config/alterm"
+if [ ! -f "$HOME/.config/alterm/config.toml" ]; then
+    cp "config/default.toml" "$HOME/.config/alterm/config.toml"
+    echo "Default config created at ~/.config/alterm/config.toml"
 fi
+install -Dm644 "config/hooks.lua.example" "$HOME/.config/alterm/hooks.lua.example"
 
 echo ""
-echo "Altermative installed successfully!"
-echo "  Binary: ~/.cargo/bin/alterm"
-echo "  Desktop: ~/.local/share/applications/altermative.desktop"
-echo "  Config: ~/.config/altermative/config.toml"
+echo "Alterm installed successfully!"
+echo "  Binary: ~/.cargo/bin/${BINARY_NAME}"
+echo "  Desktop: ~/.local/share/applications/alterm.desktop"
+echo "  Config: ~/.config/alterm/config.toml"
+echo "  Hooks example: ~/.config/alterm/hooks.lua.example"
 echo ""
 echo "You may need to log out and back in for the desktop entry to appear."

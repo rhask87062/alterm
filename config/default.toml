@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Altermative — default configuration
-# Location: ~/.config/altermative/config.toml
+# Alterm — default configuration
+# Location: ~/.config/alterm/config.toml
 #
 # All values shown here are the built-in defaults.
 # Remove or comment out any entry to keep the default.

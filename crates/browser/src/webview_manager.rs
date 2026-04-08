@@ -22,16 +22,6 @@ thread_local! {
 pub fn init_gtk() {
     GTK_INITIALIZED.with(|init| {
         if !*init.borrow() {
-            // Force WebKit to use software rendering — avoids GBM/DRM permission
-            // errors on systems where GPU buffer allocation is restricted (common
-            // with NVIDIA proprietary drivers).
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-
-            // Force dark theme BEFORE GTK init so WebKit picks it up immediately.
-            // This makes prefers-color-scheme: dark work on the first page load.
-            std::env::set_var("GTK_THEME", "Adwaita:dark");
-
             gtk::init().expect("Failed to init GTK");
 
             // Also set the GTK property for any runtime checks
@@ -47,6 +37,12 @@ pub fn init_gtk() {
 /// Pump pending GTK events so webkit2gtk can process network/render tasks.
 /// Call this every tick from the iced main loop.
 pub fn pump_gtk_events() {
+    // Skip entirely if there are no active webviews — avoids processing
+    // stale GDK events that could reference freed frame clock objects.
+    let has_webviews = WEBVIEWS.with(|wvs| !wvs.borrow().is_empty());
+    if !has_webviews {
+        return;
+    }
     GTK_INITIALIZED.with(|init| {
         if *init.borrow() {
             // Process up to a limited number of events per tick to avoid blocking.
@@ -138,6 +134,25 @@ pub fn set_visible(pane_id: u64, visible: bool) {
 
 /// Destroy a webview, removing it from tracking.
 pub fn destroy(pane_id: u64) {
+    // Hide first so webkit2gtk can unschedule any pending frame clock
+    // callbacks before the widget is dropped. Without this, processing the
+    // stale GDK frame-clock events on the next pump causes a SIGSEGV.
+    WEBVIEWS.with(|wvs| {
+        if let Some(wv) = wvs.borrow().get(&pane_id) {
+            let _ = wv.set_visible(false);
+        }
+    });
+    // Pump a few events so webkit2gtk can process the hide and cancel
+    // its frame clock subscriptions before we drop the widget.
+    GTK_INITIALIZED.with(|init| {
+        if *init.borrow() {
+            let mut count = 0;
+            while gtk::events_pending() && count < 20 {
+                gtk::main_iteration_do(false);
+                count += 1;
+            }
+        }
+    });
     WEBVIEWS.with(|wvs| {
         if wvs.borrow_mut().remove(&pane_id).is_some() {
             log::info!("WebView destroyed: pane_id={pane_id}");

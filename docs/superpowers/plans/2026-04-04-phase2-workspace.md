@@ -13,7 +13,7 @@
 ## File Structure
 
 ```
-altermative/
+alterm/
 ├── alterm/src/
 │   └── main.rs                    # Rewritten: App now manages workspace
 ├── crates/

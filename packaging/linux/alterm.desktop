@@ -1,10 +1,10 @@
 [Desktop Entry]
-Name=Altermative
+Name=Alterm
 Comment=GPU-accelerated terminal workspace with AI integration
 Exec=alterm
-Icon=altermative
+Icon=alterm
 Terminal=false
 Type=Application
 Categories=System;TerminalEmulator;
 Keywords=terminal;shell;console;ai;workspace;
-StartupWMClass=altermative
+StartupWMClass=alterm

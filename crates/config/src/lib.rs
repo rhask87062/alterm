@@ -51,7 +51,7 @@ impl AppConfig {
         Ok(())
     }
 
-    /// Returns `$XDG_CONFIG_HOME/altermative/` (or `~/.config/altermative/`).
+    /// Returns `$XDG_CONFIG_HOME/alterm/` (or `~/.config/alterm/`).
     pub fn config_dir() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| {
@@ -59,7 +59,7 @@ impl AppConfig {
                     .unwrap_or_else(|| PathBuf::from("."))
                     .join(".config")
             })
-            .join("altermative")
+            .join("alterm")
     }
 
     /// Returns the default config file path: `config_dir()/config.toml`.

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** AI chat block with multi-provider streaming support, terminal context awareness, TOML configuration with a GUI settings panel, and a theme engine — making Altermative an AI-native workspace.
+**Goal:** AI chat block with multi-provider streaming support, terminal context awareness, TOML configuration with a GUI settings panel, and a theme engine — making Alterm an AI-native workspace.
 
 **Architecture:** A new `ai` crate provides a `Provider` trait with implementations for OpenAI-compatible APIs (OpenAI, Grok, LM Studio, Ollama), Anthropic, and Google Gemini. A new `config` crate handles TOML loading/saving with hot-reload. The AI chat block lives in the workspace crate alongside the Terminal block. Streaming responses use `reqwest` with SSE parsing, bridged to iced via `Task::stream`.
 
@@ -13,7 +13,7 @@
 ## File Structure
 
 ```
-altermative/
+alterm/
 ├── crates/
 │   ├── ai/                          # NEW: AI provider abstraction
 │   │   ├── Cargo.toml
@@ -390,8 +390,8 @@ pub struct KeybindingsConfig {
 impl AppConfig {
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> { ... }
     pub fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> { ... }
-    pub fn config_dir() -> PathBuf { ... }  // ~/.config/altermative/
-    pub fn config_path() -> PathBuf { ... } // ~/.config/altermative/config.toml
+    pub fn config_dir() -> PathBuf { ... }  // ~/.config/alterm/
+    pub fn config_path() -> PathBuf { ... } // ~/.config/alterm/config.toml
 }
 ```
 
@@ -570,7 +570,7 @@ cargo check --workspace && git add -A && git commit -m "feat: settings panel wit
 
 - [ ] **Step 1: Load config on startup**
 
-In `Altermative::new()`, load `~/.config/altermative/config.toml`. If it doesn't exist, create with defaults. Pass config to relevant components.
+In `Alterm::new()`, load `~/.config/alterm/config.toml`. If it doesn't exist, create with defaults. Pass config to relevant components.
 
 - [ ] **Step 2: Apply theme from config**
 
@@ -608,7 +608,7 @@ git add -A && git commit -m "feat: Phase 3 complete — AI chat, config, themes"
 - [ ] OpenAI-compatible provider (OpenAI, Grok, LM Studio, Ollama)
 - [ ] Anthropic Claude provider
 - [ ] Google Gemini provider
-- [ ] TOML configuration at ~/.config/altermative/config.toml
+- [ ] TOML configuration at ~/.config/alterm/config.toml
 - [ ] AI chat block with streaming response display
 - [ ] Terminal context awareness (active pane output sent to AI)
 - [ ] Settings panel GUI (appearance, AI, terminal settings)

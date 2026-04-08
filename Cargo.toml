@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace.dependencies]
-iced = { version = "0.14", features = ["wgpu", "tokio", "canvas", "svg"] }
+iced = { version = "0.14", features = ["wgpu", "tokio", "canvas", "svg", "image"] }
 alacritty_terminal = "0.26.0-rc1"
 portable-pty = "0.9"
 cosmic-text = "0.18"
@@ -39,6 +39,6 @@ terminal = { path = "crates/terminal" }
 gpu-renderer = { path = "crates/gpu-renderer" }
 workspace = { path = "crates/workspace" }
 ai = { path = "crates/ai" }
-altermative-config = { path = "crates/config" }
+alterm-config = { path = "crates/config" }
 browser = { path = "crates/browser" }
 preview = { path = "crates/preview" }

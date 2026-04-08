@@ -1,11 +1,15 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "Uninstalling Altermative..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common/metadata.sh
+source "${SCRIPT_DIR}/common/metadata.sh"
 
-rm -f "$HOME/.cargo/bin/alterm"
-rm -f "$HOME/.local/share/applications/altermative.desktop"
-rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/altermative.png"
+echo "Uninstalling Alterm..."
 
-echo "Altermative uninstalled."
-echo "Config files at ~/.config/altermative/ were NOT removed."
+rm -f "$HOME/.cargo/bin/${BINARY_NAME}"
+rm -f "$HOME/.local/share/applications/alterm.desktop"
+rm -f "$HOME/.config/alterm/hooks.lua.example"
+
+echo "Alterm uninstalled."
+echo "Config files at ~/.config/alterm/ were NOT removed."

@@ -1,5 +1,5 @@
--- Altermative hooks file
--- Place this at ~/.config/altermative/hooks.lua
+-- Alterm hooks file
+-- Place this at ~/.config/alterm/hooks.lua
 
 -- Called when a new terminal is created
 function on_terminal_created()

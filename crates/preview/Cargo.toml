@@ -6,3 +6,5 @@ edition.workspace = true
 [dependencies]
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 log.workspace = true
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"

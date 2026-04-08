@@ -13,7 +13,7 @@
 ## File Structure
 
 ```
-altermative/
+alterm/
 ├── Cargo.toml                    # Workspace root
 ├── alterm/                       # Binary crate
 │   ├── Cargo.toml
@@ -92,8 +92,8 @@ edition.workspace = true
 
 [dependencies]
 iced.workspace = true
-altermative-terminal = { path = "../crates/terminal" }
-altermative-gpu-renderer = { path = "../crates/gpu-renderer" }
+alterm-terminal = { path = "../crates/terminal" }
+alterm-gpu-renderer = { path = "../crates/gpu-renderer" }
 tokio.workspace = true
 log.workspace = true
 env_logger.workspace = true
@@ -104,7 +104,7 @@ env_logger.workspace = true
 ```toml
 # crates/terminal/Cargo.toml
 [package]
-name = "altermative-terminal"
+name = "alterm-terminal"
 version.workspace = true
 edition.workspace = true
 
@@ -120,7 +120,7 @@ log.workspace = true
 ```toml
 # crates/gpu-renderer/Cargo.toml
 [package]
-name = "altermative-gpu-renderer"
+name = "alterm-gpu-renderer"
 version.workspace = true
 edition.workspace = true
 
@@ -128,7 +128,7 @@ edition.workspace = true
 iced.workspace = true
 cosmic-text.workspace = true
 glyphon.workspace = true
-altermative-terminal = { path = "../terminal" }
+alterm-terminal = { path = "../terminal" }
 log.workspace = true
 ```
 
@@ -155,7 +155,7 @@ use iced::widget::text;
 
 fn main() -> iced::Result {
     env_logger::init();
-    application("Altermative", App::update, App::view)
+    application("Alterm", App::update, App::view)
         .window_size(Size::new(900.0, 600.0))
         .theme(|_| Theme::Dark)
         .run()
@@ -171,7 +171,7 @@ impl App {
     fn update(&mut self, _message: Message) {}
 
     fn view(&self) -> Element<Message> {
-        text("Altermative — terminal coming soon").into()
+        text("Alterm — terminal coming soon").into()
     }
 }
 ```
@@ -187,14 +187,14 @@ impl App {
 
 - [ ] **Step 7: Verify it compiles and runs**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo run --bin alterm`
+Run: `cd ~/dev-projects/apps/alterm && cargo run --bin alterm`
 
-Expected: An iced window opens with dark theme showing "Altermative — terminal coming soon"
+Expected: An iced window opens with dark theme showing "Alterm — terminal coming soon"
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add -A
 git commit -m "feat: project scaffold with workspace, iced window opens"
 ```
@@ -334,14 +334,14 @@ pub use pty::PtyHandle;
 
 - [ ] **Step 4: Verify it compiles**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo check`
+Run: `cd ~/dev-projects/apps/alterm && cargo check`
 
 Expected: Compiles with no errors (warnings about unused `term` module are OK)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add crates/terminal/
 git commit -m "feat: PTY spawning with async reader thread"
 ```
@@ -487,7 +487,7 @@ pub use term::TerminalState;
 
 - [ ] **Step 3: Verify it compiles**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo check`
+Run: `cd ~/dev-projects/apps/alterm && cargo check`
 
 Expected: Compiles. There may be deprecation warnings from alacritty_terminal — that's fine.
 
@@ -496,7 +496,7 @@ Note: If `alacritty_terminal` API differs from what's shown here (it evolves rap
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add crates/terminal/
 git commit -m "feat: terminal emulation backend wrapping alacritty_terminal"
 ```
@@ -513,7 +513,7 @@ git commit -m "feat: terminal emulation backend wrapping alacritty_terminal"
 
 ```rust
 // tests/color_test.rs
-use altermative_gpu_renderer::colors::AnsiPalette;
+use alterm_gpu_renderer::colors::AnsiPalette;
 
 #[test]
 fn test_standard_black() {
@@ -567,7 +567,7 @@ fn test_grayscale_255() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo test --test color_test`
+Run: `cd ~/dev-projects/apps/alterm && cargo test --test color_test`
 
 Expected: FAIL — `AnsiPalette` doesn't exist yet.
 
@@ -658,14 +658,14 @@ pub mod grid;
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo test --test color_test`
+Run: `cd ~/dev-projects/apps/alterm && cargo test --test color_test`
 
 Expected: All 7 tests PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add crates/gpu-renderer/src/colors.rs tests/color_test.rs crates/gpu-renderer/src/lib.rs
 git commit -m "feat: ANSI 256-color palette with tests"
 ```
@@ -709,7 +709,7 @@ fn to_float(r: u8, g: u8, b: u8) -> [f32; 4] {
 
 impl RenderGrid {
     /// Convert an alacritty_terminal screen into render data
-    pub fn from_terminal(term: &altermative_terminal::TerminalState, palette: &AnsiPalette) -> Self {
+    pub fn from_terminal(term: &alterm_terminal::TerminalState, palette: &AnsiPalette) -> Self {
         let rows = term.rows();
         let cols = term.cols();
         let cursor = term.cursor_point();
@@ -772,14 +772,14 @@ Note: The exact `alacritty_terminal` color and flags API may differ slightly bet
 
 - [ ] **Step 2: Verify it compiles**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo check`
+Run: `cd ~/dev-projects/apps/alterm && cargo check`
 
 Expected: Compiles. There may be warnings about unused code — that's fine.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add crates/gpu-renderer/src/grid.rs
 git commit -m "feat: terminal grid to render data conversion"
 ```
@@ -946,14 +946,14 @@ pub enum RendererMessage {
 
 - [ ] **Step 3: Verify it compiles**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo check`
+Run: `cd ~/dev-projects/apps/alterm && cargo check`
 
 Expected: Compiles. The canvas API may need minor adjustments depending on the exact iced 0.14 canvas API — the pattern of `canvas::Program`, `Frame`, `fill_rectangle`, `fill_text` is stable.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add crates/gpu-renderer/
 git commit -m "feat: terminal canvas rendering widget with cell grid drawing"
 ```
@@ -972,16 +972,16 @@ git commit -m "feat: terminal canvas rendering widget with cell grid drawing"
 use iced::{application, Element, Subscription, Theme, Size, Task};
 use iced::widget::{column, container, text};
 
-use altermative_terminal::{PtyHandle, TerminalEvent, TerminalState};
-use altermative_gpu_renderer::colors::AnsiPalette;
-use altermative_gpu_renderer::grid::RenderGrid;
-use altermative_gpu_renderer::widget::TerminalView;
+use alterm_terminal::{PtyHandle, TerminalEvent, TerminalState};
+use alterm_gpu_renderer::colors::AnsiPalette;
+use alterm_gpu_renderer::grid::RenderGrid;
+use alterm_gpu_renderer::widget::TerminalView;
 
 use tokio::sync::mpsc;
 
 fn main() -> iced::Result {
     env_logger::init();
-    application("Altermative", App::update, App::view)
+    application("Alterm", App::update, App::view)
         .subscription(App::subscription)
         .window_size(Size::new(900.0, 600.0))
         .theme(|_| Theme::Dark)
@@ -1003,7 +1003,7 @@ enum Message {
     PtyExited(i32),
     PtyError(String),
     KeyboardInput(iced::keyboard::Key, iced::keyboard::Modifiers),
-    Renderer(altermative_gpu_renderer::RendererMessage),
+    Renderer(alterm_gpu_renderer::RendererMessage),
 }
 
 impl Default for App {
@@ -1192,7 +1192,7 @@ In update:
 
 - [ ] **Step 3: Verify it compiles and runs**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo run --bin alterm`
+Run: `cd ~/dev-projects/apps/alterm && cargo run --bin alterm`
 
 Expected: A window opens with a dark background. You should see your shell prompt rendered as text. Typing should produce characters. Basic commands like `ls` should show output with colors.
 
@@ -1206,7 +1206,7 @@ Known limitations at this stage:
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add alterm/src/main.rs
 git commit -m "feat: working terminal — PTY, VT parsing, and canvas rendering connected"
 ```
@@ -1263,14 +1263,14 @@ Handle in update:
 
 - [ ] **Step 2: Test resize**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo run --bin alterm`
+Run: `cd ~/dev-projects/apps/alterm && cargo run --bin alterm`
 
 Expected: Resizing the window reflows terminal content. Running `tput cols; tput lines` in the terminal should show updated values after resize.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add alterm/src/main.rs
 git commit -m "feat: terminal resize handling — PTY and grid update on window resize"
 ```
@@ -1340,14 +1340,14 @@ The `RenderGrid::from_terminal` function should already work with scrollback bec
 
 - [ ] **Step 4: Test scrollback**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo run --bin alterm`
+Run: `cd ~/dev-projects/apps/alterm && cargo run --bin alterm`
 
 Test: Run `seq 1 200` to fill scrollback, then scroll up with the mouse wheel. You should see earlier lines.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add alterm/src/main.rs crates/terminal/src/term.rs
 git commit -m "feat: mouse wheel scrollback support"
 ```
@@ -1454,7 +1454,7 @@ Add `PasteText(String)` to Message and handle:
 
 - [ ] **Step 3: Test copy/paste**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo run --bin alterm`
+Run: `cd ~/dev-projects/apps/alterm && cargo run --bin alterm`
 
 Test: Type `echo "hello world"`. Select text with mouse, press Ctrl+Shift+C. Press Ctrl+Shift+V to paste.
 
@@ -1463,7 +1463,7 @@ Note: Full mouse selection will need pixel-to-grid-point conversion. For Phase 1
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add alterm/src/main.rs crates/terminal/src/term.rs
 git commit -m "feat: copy/paste with Ctrl+Shift+C/V"
 ```
@@ -1521,7 +1521,7 @@ In the `Tick` handler, after draining PTY output, check for title events:
 
 - [ ] **Step 3: Final test**
 
-Run: `cd ~/dev-projects/apps/altermative && cargo run --bin alterm`
+Run: `cd ~/dev-projects/apps/alterm && cargo run --bin alterm`
 
 Verify:
 1. Window opens with dark background and shell prompt
@@ -1537,7 +1537,7 @@ Verify:
 - [ ] **Step 4: Commit**
 
 ```bash
-cd ~/dev-projects/apps/altermative
+cd ~/dev-projects/apps/alterm
 git add alterm/src/main.rs
 git commit -m "feat: cursor blink, terminal event handling, Phase 1 complete"
 ```

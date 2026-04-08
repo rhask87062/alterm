@@ -25,6 +25,8 @@ pub enum SidebarAction {
     OpenSettings,
     /// Show the keyboard shortcuts reference pane.
     ShowHotkeyInfo,
+    /// Toggle between light and dark theme.
+    ToggleTheme,
 }
 
 /// Render the sidebar as a vertical column of square icon buttons.
@@ -36,7 +38,7 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
     light_mode: bool,
 ) -> Element<'a, M> {
     let btn_size = 36.0;
-    let btn_padding = Padding::from([6, 0]);
+    let btn_padding = Padding::from([6, 4]);
 
     let terminal_btn = sidebar_svg_button(
         &theme_svg(include_bytes!("../../../assets/icons/sidebar/terminal.svg"), light_mode),
@@ -66,11 +68,23 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         btn_size,
     );
 
+    // Show the icon of the mode to switch TO: sun in dark mode, moon in light mode.
+    let theme_icon_bytes: &[u8] = if light_mode {
+        include_bytes!("../../../assets/icons/sidebar/darkmode.svg")
+    } else {
+        include_bytes!("../../../assets/icons/sidebar/lightmode.svg")
+    };
+    let theme_btn = sidebar_svg_button(
+        &theme_svg(theme_icon_bytes, light_mode),
+        Some(map(SidebarAction::ToggleTheme)),
+        btn_size,
+    );
+
     let top_buttons = column![terminal_btn, ai_btn, web_btn, preview_btn, settings_btn]
         .spacing(4)
         .align_x(iced::Alignment::Center);
 
-    let bottom_buttons = column![info_btn]
+    let bottom_buttons = column![theme_btn, info_btn]
         .spacing(4)
         .align_x(iced::Alignment::Center);
 

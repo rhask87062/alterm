@@ -4,7 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-gtk = "0.18"
 log.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
 raw-window-handle = "0.6"
 wry = { version = "0.55", features = ["devtools"] }

@@ -13,7 +13,7 @@
 ## File Structure
 
 ```
-altermative/
+alterm/
 ├── crates/
 │   ├── browser/                    # NEW: webview embedding
 │   │   ├── Cargo.toml
@@ -249,7 +249,7 @@ The preview block view shows:
 
 ```
 ┌──────────────────────────────────────┐
-│ 📁 ~/projects/altermative/src/main.rs │  ← path bar
+│ 📁 ~/projects/alterm/src/main.rs │  ← path bar
 ├──────────────────────────────────────┤
 │ 1  use iced::{application, ...};     │
 │ 2                                    │  ← syntax highlighted
