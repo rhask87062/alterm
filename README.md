@@ -4,15 +4,6 @@ A GPU-accelerated, cross-platform terminal workspace built in Rust. Combines the
 
 **For beginners, intermediates, and experts.**
 
-## Why the Name
-
-"Alterm" carries four layers of meaning:
-
-1. **Alternative** — a better alternative to slow Electron-based terminals
-2. **Alter** — transform how you work with terminals
-3. **Term** — it's a terminal, embedded right in the name
-4. **Alan** — the creator's middle name (Russell Alan Haskell), a personal signature in the tradition of WezTerm (named after Wez Furlong)
-
 ## Features (Planned)
 
 - GPU-accelerated terminal rendering via wgpu
