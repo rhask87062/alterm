@@ -45,8 +45,10 @@ impl PtyHandle {
             .openpty(size)
             .map_err(|e| format!("openpty failed: {e}"))?;
 
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        let cmd = CommandBuilder::new(&shell);
+        let shell = default_shell();
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.env("TERM", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string()));
+        cmd.env("SHELL", &shell);
 
         let child = pair
             .slave
@@ -142,4 +144,21 @@ impl PtyHandle {
             Err(_) => false,         // error querying — treat as dead
         }
     }
+}
+
+fn default_shell() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .filter(|shell| !shell.trim().is_empty())
+        .unwrap_or_else(|| {
+            #[cfg(target_os = "macos")]
+            {
+                "/bin/zsh".to_string()
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                "/bin/bash".to_string()
+            }
+        })
 }
