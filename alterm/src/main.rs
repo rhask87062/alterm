@@ -164,7 +164,7 @@ struct Alterm {
 #[derive(Debug, Clone)]
 enum Message {
     Tick,
-    KeyboardInput(Key, Modifiers, Option<String>),
+    KeyboardInput(Key, Key, Modifiers),
     MouseScroll(f32),
     ClipboardContent(Option<String>),
     PaneClicked(pane_grid::Pane),
@@ -1323,7 +1323,7 @@ impl Alterm {
                 }
             }
 
-            Message::KeyboardInput(key, modifiers, text) => {
+            Message::KeyboardInput(key, modified_key, modifiers) => {
                 // When the palette is open, intercept navigation keys.
                 if self.palette.visible {
                     match &key {
@@ -1383,7 +1383,7 @@ impl Alterm {
                 }
 
                 // Forward to focused terminal.
-                if let Some(bytes) = key_to_bytes(&key, &modifiers, text.as_deref()) {
+                if let Some(bytes) = key_to_bytes(&key, &modified_key, &modifiers) {
                     let tab = self.active_tab_mut();
                     if let Some(focused) = tab.focus {
                         if let Some(block) = tab.panes.get_mut(focused) {
@@ -1693,10 +1693,10 @@ impl Alterm {
                 match event {
                     Event::Keyboard(iced::keyboard::Event::KeyPressed {
                         key,
+                        modified_key,
                         modifiers,
-                        text: key_text,
                         ..
-                    }) => Some(Message::KeyboardInput(key, modifiers, key_text.map(|s| s.to_string()))),
+                    }) => Some(Message::KeyboardInput(key, modified_key, modifiers)),
                     _ => None,
                 }
             });
@@ -3346,7 +3346,7 @@ fn friendly_model_name(model_id: &str) -> String {
     }
 }
 
-fn key_to_bytes(key: &Key, modifiers: &Modifiers, text: Option<&str>) -> Option<Vec<u8>> {
+fn key_to_bytes(key: &Key, modified_key: &Key, modifiers: &Modifiers) -> Option<Vec<u8>> {
     match key {
         Key::Character(c) => {
             // Handle Ctrl+<letter> sequences.
@@ -3360,14 +3360,12 @@ fn key_to_bytes(key: &Key, modifiers: &Modifiers, text: Option<&str>) -> Option<
                     }
                 }
             }
-
-            // For printable input, trust the text emitted by the platform after
-            // applying Shift/layout rules instead of guessing from the key code.
-            if let Some(text) = text.filter(|text| !text.is_empty()) {
-                return Some(text.as_bytes().to_vec());
+            match modified_key {
+                Key::Character(text) if !text.is_empty() => Some(text.as_bytes().to_vec()),
+                Key::Named(named) => named_key_to_bytes(named, modifiers),
+                Key::Unidentified => None,
+                _ => Some(c.as_bytes().to_vec()),
             }
-
-            Some(c.as_bytes().to_vec())
         }
         Key::Named(named) => named_key_to_bytes(named, modifiers),
         Key::Unidentified => None,
