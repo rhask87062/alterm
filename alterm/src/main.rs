@@ -164,7 +164,7 @@ struct Alterm {
 #[derive(Debug, Clone)]
 enum Message {
     Tick,
-    KeyboardInput(Key, Modifiers),
+    KeyboardInput(Key, Modifiers, Option<String>),
     MouseScroll(f32),
     ClipboardContent(Option<String>),
     PaneClicked(pane_grid::Pane),
@@ -1323,7 +1323,7 @@ impl Alterm {
                 }
             }
 
-            Message::KeyboardInput(key, modifiers) => {
+            Message::KeyboardInput(key, modifiers, text) => {
                 // When the palette is open, intercept navigation keys.
                 if self.palette.visible {
                     match &key {
@@ -1383,7 +1383,7 @@ impl Alterm {
                 }
 
                 // Forward to focused terminal.
-                if let Some(bytes) = key_to_bytes(&key, &modifiers) {
+                if let Some(bytes) = key_to_bytes(&key, &modifiers, text.as_deref()) {
                     let tab = self.active_tab_mut();
                     if let Some(focused) = tab.focus {
                         if let Some(block) = tab.panes.get_mut(focused) {
@@ -1694,9 +1694,9 @@ impl Alterm {
                     Event::Keyboard(iced::keyboard::Event::KeyPressed {
                         key,
                         modifiers,
-                        text: _,
+                        text: key_text,
                         ..
-                    }) => Some(Message::KeyboardInput(key, modifiers)),
+                    }) => Some(Message::KeyboardInput(key, modifiers, key_text.map(|s| s.to_string()))),
                     _ => None,
                 }
             });
@@ -3346,13 +3346,12 @@ fn friendly_model_name(model_id: &str) -> String {
     }
 }
 
-fn key_to_bytes(key: &Key, modifiers: &Modifiers) -> Option<Vec<u8>> {
+fn key_to_bytes(key: &Key, modifiers: &Modifiers, text: Option<&str>) -> Option<Vec<u8>> {
     match key {
         Key::Character(c) => {
-            let s = remap_printable_char(c.as_str(), modifiers);
             // Handle Ctrl+<letter> sequences.
             if modifiers.control() {
-                if let Some(ch) = s.chars().next() {
+                if let Some(ch) = c.chars().next() {
                     let lower = ch.to_ascii_lowercase();
                     if lower >= 'a' && lower <= 'z' {
                         // Ctrl+A = 0x01, ..., Ctrl+Z = 0x1A
@@ -3361,57 +3360,18 @@ fn key_to_bytes(key: &Key, modifiers: &Modifiers) -> Option<Vec<u8>> {
                     }
                 }
             }
-            Some(s.as_bytes().to_vec())
+
+            // For printable input, trust the text emitted by the platform after
+            // applying Shift/layout rules instead of guessing from the key code.
+            if let Some(text) = text.filter(|text| !text.is_empty()) {
+                return Some(text.as_bytes().to_vec());
+            }
+
+            Some(c.as_bytes().to_vec())
         }
         Key::Named(named) => named_key_to_bytes(named, modifiers),
         Key::Unidentified => None,
     }
-}
-
-fn remap_printable_char(input: &str, modifiers: &Modifiers) -> String {
-    if input.chars().count() != 1 {
-        return input.to_string();
-    }
-
-    let ch = input.chars().next().unwrap_or_default();
-
-    if modifiers.shift() {
-        if ch.is_ascii_lowercase() {
-            return ch.to_ascii_uppercase().to_string();
-        }
-
-        let shifted = match ch {
-            '1' => '!',
-            '2' => '@',
-            '3' => '#',
-            '4' => '$',
-            '5' => '%',
-            '6' => '^',
-            '7' => '&',
-            '8' => '*',
-            '9' => '(',
-            '0' => ')',
-            '-' => '_',
-            '=' => '+',
-            '[' => '{',
-            ']' => '}',
-            '\\' => '|',
-            ';' => ':',
-            '\'' => '"',
-            ',' => '<',
-            '.' => '>',
-            '/' => '?',
-            '`' => '~',
-            _ => ch,
-        };
-        return shifted.to_string();
-    }
-
-    if ch.is_ascii_uppercase() {
-        return ch.to_ascii_lowercase().to_string();
-    }
-
-    input.to_string()
 }
 
 /// Convert a named key to the corresponding byte sequence for the PTY.
