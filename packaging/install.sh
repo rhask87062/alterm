@@ -15,6 +15,10 @@ install -Dm755 "target/release/${BINARY_NAME}" "$HOME/.cargo/bin/${BINARY_NAME}"
 
 echo "Installing desktop entry..."
 install -Dm644 "packaging/linux/alterm.desktop" "$HOME/.local/share/applications/alterm.desktop"
+if [ -f "${LINUX_ICON_PATH}" ]; then
+    echo "Installing app icon..."
+    install -Dm644 "${LINUX_ICON_PATH}" "$HOME/.local/share/icons/hicolor/256x256/apps/alterm.png"
+fi
 
 echo "Creating default config..."
 mkdir -p "$HOME/.config/alterm"

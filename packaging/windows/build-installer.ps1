@@ -30,6 +30,7 @@ try {
 }
 
 Copy-Item (Join-Path $repoRoot "target\release\alterm.exe") (Join-Path $stageDir "alterm.exe") -Force
+Copy-Item (Join-Path $repoRoot "assets\icons\alterm.ico") (Join-Path $stageDir "alterm.ico") -Force
 Copy-Item (Join-Path $repoRoot "README.md") (Join-Path $stageDir "README.txt") -Force
 Copy-Item (Join-Path $repoRoot "config\default.toml") (Join-Path $stageDir "config.toml.example") -Force
 Copy-Item (Join-Path $repoRoot "config\hooks.lua.example") (Join-Path $stageDir "hooks.lua.example") -Force

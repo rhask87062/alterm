@@ -25,6 +25,9 @@ install -Dm755 "target/release/${BINARY_NAME}" "${MACOS_DIR}/${BINARY_NAME}"
 install -Dm644 "config/default.toml" "${RESOURCES_DIR}/config.toml.example"
 install -Dm644 "config/hooks.lua.example" "${RESOURCES_DIR}/hooks.lua.example"
 install -Dm644 "README.md" "${RESOURCES_DIR}/README.txt"
+if [ -f "${MACOS_ICON_PATH}" ]; then
+    install -Dm644 "${MACOS_ICON_PATH}" "${RESOURCES_DIR}/alterm.icns"
+fi
 
 sed \
     -e "s/__APP_NAME__/${APP_NAME}/g" \

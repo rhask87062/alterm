@@ -93,9 +93,25 @@ fn main() -> iced::Result {
     iced::application(Alterm::new, Alterm::update, Alterm::view)
         .title("Alterm")
         .theme(|app: &Alterm| theme_from_config(&app.config.appearance.theme))
-        .window_size((900.0, 600.0))
+        .window(window::Settings {
+            size: iced::Size::new(900.0, 600.0),
+            icon: load_window_icon(),
+            ..window::Settings::default()
+        })
         .subscription(Alterm::subscription)
         .run()
+}
+
+fn load_window_icon() -> Option<window::Icon> {
+    window::icon::from_file_data(
+        include_bytes!("../../assets/icons/alterm-logo.png"),
+        None,
+    )
+    .map_err(|error| {
+        log::warn!("Failed to load window icon from assets/icons/alterm-logo.png: {error}");
+        error
+    })
+    .ok()
 }
 
 /// Estimated height consumed by the tab bar (padding + button + padding).
@@ -3333,7 +3349,7 @@ fn friendly_model_name(model_id: &str) -> String {
 fn key_to_bytes(key: &Key, modifiers: &Modifiers) -> Option<Vec<u8>> {
     match key {
         Key::Character(c) => {
-            let s = c.as_str();
+            let s = remap_printable_char(c.as_str(), modifiers);
             // Handle Ctrl+<letter> sequences.
             if modifiers.control() {
                 if let Some(ch) = s.chars().next() {
@@ -3350,6 +3366,52 @@ fn key_to_bytes(key: &Key, modifiers: &Modifiers) -> Option<Vec<u8>> {
         Key::Named(named) => named_key_to_bytes(named, modifiers),
         Key::Unidentified => None,
     }
+}
+
+fn remap_printable_char(input: &str, modifiers: &Modifiers) -> String {
+    if input.chars().count() != 1 {
+        return input.to_string();
+    }
+
+    let ch = input.chars().next().unwrap_or_default();
+
+    if modifiers.shift() {
+        if ch.is_ascii_lowercase() {
+            return ch.to_ascii_uppercase().to_string();
+        }
+
+        let shifted = match ch {
+            '1' => '!',
+            '2' => '@',
+            '3' => '#',
+            '4' => '$',
+            '5' => '%',
+            '6' => '^',
+            '7' => '&',
+            '8' => '*',
+            '9' => '(',
+            '0' => ')',
+            '-' => '_',
+            '=' => '+',
+            '[' => '{',
+            ']' => '}',
+            '\\' => '|',
+            ';' => ':',
+            '\'' => '"',
+            ',' => '<',
+            '.' => '>',
+            '/' => '?',
+            '`' => '~',
+            _ => ch,
+        };
+        return shifted.to_string();
+    }
+
+    if ch.is_ascii_uppercase() {
+        return ch.to_ascii_lowercase().to_string();
+    }
+
+    input.to_string()
 }
 
 /// Convert a named key to the corresponding byte sequence for the PTY.

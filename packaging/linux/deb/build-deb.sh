@@ -19,6 +19,7 @@ mkdir -p "${PKG_ROOT}/DEBIAN"
 mkdir -p "${PKG_ROOT}/usr/bin"
 mkdir -p "${PKG_ROOT}/usr/share/applications"
 mkdir -p "${PKG_ROOT}/usr/share/alterm"
+mkdir -p "${PKG_ROOT}/usr/share/icons/hicolor/256x256/apps"
 
 sed \
     -e "s/__VERSION__/${VERSION}/g" \
@@ -28,6 +29,9 @@ install -Dm755 "${REPO_ROOT}/target/release/${BINARY_NAME}" "${PKG_ROOT}/usr/bin
 install -Dm644 "${REPO_ROOT}/packaging/linux/alterm.desktop" "${PKG_ROOT}/usr/share/applications/alterm.desktop"
 install -Dm644 "${REPO_ROOT}/config/default.toml" "${PKG_ROOT}/usr/share/alterm/config.toml.example"
 install -Dm644 "${REPO_ROOT}/config/hooks.lua.example" "${PKG_ROOT}/usr/share/alterm/hooks.lua.example"
+if [ -f "${LINUX_ICON_PATH}" ]; then
+    install -Dm644 "${LINUX_ICON_PATH}" "${PKG_ROOT}/usr/share/icons/hicolor/256x256/apps/alterm.png"
+fi
 
 echo "Building .deb..."
 dpkg-deb --build "${PKG_ROOT}" "${DIST_DIR}/${PKG_NAME}.deb"

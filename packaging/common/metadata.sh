@@ -12,6 +12,9 @@ BUNDLE_ID="dev.alterm.app"
 MAINTAINER_NAME="Russell Haskell"
 MAINTAINER_EMAIL="rhask87062@gmail.com"
 DESCRIPTION="GPU-accelerated terminal workspace with AI integration"
+LINUX_ICON_PATH="${REPO_ROOT}/assets/icons/alterm.png"
+MACOS_ICON_PATH="${REPO_ROOT}/assets/icons/alterm.icns"
+WINDOWS_ICON_PATH="${REPO_ROOT}/assets/icons/alterm.ico"
 
 read_version() {
     sed -n 's/^version = "\(.*\)"/\1/p' "${REPO_ROOT}/alterm/Cargo.toml" | head -n1
