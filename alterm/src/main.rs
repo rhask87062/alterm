@@ -4,8 +4,8 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, mouse_area, opaque, pane_grid, pick_list, row, scrollable, slider,
-    stack, text, text_input, toggler, Column, Id as WidgetId,
+    button, column, container, opaque, pane_grid, pick_list, row, scrollable, slider, stack, text,
+    text_input, toggler, Column, Id as WidgetId,
 };
 use iced::widget::operation::focus as widget_focus;
 use iced::window;
@@ -168,7 +168,6 @@ enum Message {
     MouseScroll(f32),
     ClipboardContent(Option<String>),
     PaneClicked(pane_grid::Pane),
-    PaneHovered(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
     SplitHorizontal,
@@ -204,6 +203,7 @@ enum Message {
     AIFetchModels(pane_grid::Pane),
     AIModelsFetched(pane_grid::Pane, Vec<String>),
     AICopyMessage(String),
+    TerminalSelected(String),
     ToggleAIChat,
     // Settings panel
     OpenSettings,
@@ -622,11 +622,6 @@ impl Alterm {
                         ));
                     }
                 }
-            }
-            Message::PaneHovered(pane) => {
-                // Focus the pane under the cursor so scroll events go to it,
-                // but don't steal keyboard focus from whichever widget has it.
-                self.active_tab_mut().focus = Some(pane);
             }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
                 self.active_tab_mut().panes.drop(pane, target);
@@ -1055,6 +1050,9 @@ impl Alterm {
             Message::AICopyMessage(content) => {
                 return iced::clipboard::write(content);
             }
+            Message::TerminalSelected(text) => {
+                return iced::clipboard::write(text);
+            }
             Message::AIModelsFetched(pane, models) => {
                 let tab = self.active_tab_mut();
                 if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
@@ -1466,7 +1464,7 @@ impl Alterm {
                         let terminal_view = TerminalView::new(grid)
                             .with_font_size(self.config.appearance.font_size)
                             .with_font_family(self.terminal_font_family);
-                        terminal_view.view()
+                        terminal_view.view(Message::TerminalSelected)
                     }
                     Block::AIChat { state } => {
                         ai_chat_view(pane, state, has_terminal_context)
@@ -1511,9 +1509,6 @@ impl Alterm {
                     .controls(controls)
                     .padding(4)
                     .style(move |theme: &Theme| title_bar_style(theme, is_focused));
-
-                let content = mouse_area(content)
-                    .on_enter(Message::PaneHovered(pane));
 
                 pane_grid::Content::new(content)
                     .title_bar(title_bar)
