@@ -152,7 +152,7 @@ struct Alterm {
     config: AppConfig,
     /// Optional Lua hooks (loaded from hooks.lua if present).
     hooks: LuaHooks,
-    /// X11 window ID of the iced window (set once WindowHandleReady fires).
+    /// Native window handle (NSView on macOS, XID on X11, HWND on Windows).
     parent_xid: Option<u64>,
     /// Available monospace font families for the settings dropdown.
     available_fonts: Vec<String>,
@@ -285,17 +285,18 @@ impl Alterm {
             terminal_font_family,
         };
 
-        // Request the raw X11 window ID from iced — fires WindowHandleReady.
-        // First get the Id of the oldest (main) window, then query its raw ID.
-        let fetch_xid = window::oldest().then(|opt_id| {
+        // Request the native window handle from iced — fires WindowHandleReady.
+        // window::run() gives us &dyn HasWindowHandle so we can extract the
+        // correct platform handle: NSView on macOS, XID on X11, HWND on Windows.
+        let fetch_handle = window::oldest().then(|opt_id| {
             if let Some(id) = opt_id {
-                window::raw_id::<Message>(id).map(Message::WindowHandleReady)
+                window::run(id, extract_native_window_handle).map(Message::WindowHandleReady)
             } else {
                 Task::none()
             }
         });
 
-        (app, fetch_xid)
+        (app, fetch_handle)
     }
 
     /// Get a reference to the active tab.
@@ -3394,5 +3395,32 @@ fn named_key_to_bytes(named: &Named, _modifiers: &Modifiers) -> Option<Vec<u8>> 
         Named::Shift | Named::Control | Named::Alt | Named::Super | Named::Meta => None,
 
         _ => None,
+    }
+}
+
+/// Extract the native parent-window handle that wry needs for child webviews.
+///
+/// On each platform, iced's `window::run()` gives us `&dyn HasWindowHandle`.
+/// The `raw_id()` API returns an opaque winit `WindowId` which is only a valid
+/// X11 XID on Linux — on macOS it's a `WindowDelegate` pointer, not an NSView.
+fn extract_native_window_handle(w: &dyn iced::window::Window) -> u64 {
+    use iced::window::raw_window_handle::RawWindowHandle;
+    match w.window_handle().map(|h| h.as_raw()) {
+        #[cfg(target_os = "linux")]
+        Ok(RawWindowHandle::Xlib(h)) => h.window as u64,
+        #[cfg(target_os = "linux")]
+        Ok(RawWindowHandle::Xcb(h)) => h.window.get() as u64,
+        #[cfg(target_os = "macos")]
+        Ok(RawWindowHandle::AppKit(h)) => h.ns_view.as_ptr() as u64,
+        #[cfg(target_os = "windows")]
+        Ok(RawWindowHandle::Win32(h)) => h.hwnd.get() as u64,
+        Ok(_) => {
+            log::warn!("Browser embedding not supported for this window handle type");
+            0
+        }
+        Err(e) => {
+            log::warn!("Failed to get native window handle: {e}");
+            0
+        }
     }
 }

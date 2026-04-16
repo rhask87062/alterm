@@ -1,75 +1,86 @@
 /// WebView manager — manages wry WebView instances on the main thread.
 ///
 /// `wry::WebView` is `!Send`, so we store all instances in a `thread_local!`.
-/// This is safe because iced's `update()` and `view()` run on the main thread.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use gtk::prelude::ObjectExt;
-use raw_window_handle::{
-    HandleError, HasWindowHandle, RawWindowHandle, WindowHandle, XlibWindowHandle,
-};
+use raw_window_handle::{HandleError, HasWindowHandle, RawWindowHandle, WindowHandle};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{Rect, WebView, WebViewBuilder};
 
+// Platform-specific imports
+#[cfg(target_os = "linux")]
+use {
+    gtk::prelude::ObjectExt,
+    raw_window_handle::XlibWindowHandle,
+};
+#[cfg(target_os = "macos")]
+use {
+    raw_window_handle::AppKitWindowHandle,
+    std::ffi::c_void,
+    std::ptr::NonNull,
+};
+#[cfg(target_os = "windows")]
+use {
+    raw_window_handle::Win32WindowHandle,
+    std::num::NonZeroIsize,
+};
+
 thread_local! {
     static WEBVIEWS: RefCell<HashMap<u64, WebView>> = RefCell::new(HashMap::new());
+    #[cfg(target_os = "linux")]
     static GTK_INITIALIZED: RefCell<bool> = RefCell::new(false);
 }
 
-/// Ensure GTK is initialized (required by webkit2gtk before any webview creation).
+/// Ensure GTK is initialized. No-op on non-Linux platforms.
 pub fn init_gtk() {
+    #[cfg(target_os = "linux")]
     GTK_INITIALIZED.with(|init| {
         if !*init.borrow() {
             gtk::init().expect("Failed to init GTK");
-
-            // Also set the GTK property for any runtime checks
             if let Some(settings) = gtk::Settings::default() {
                 settings.set_property("gtk-application-prefer-dark-theme", true);
             }
-
             *init.borrow_mut() = true;
         }
     });
 }
 
-/// Pump pending GTK events so webkit2gtk can process network/render tasks.
-/// Call this every tick from the iced main loop.
+/// Pump pending GTK events. No-op on non-Linux platforms.
 pub fn pump_gtk_events() {
-    // Skip entirely if there are no active webviews — avoids processing
-    // stale GDK events that could reference freed frame clock objects.
-    let has_webviews = WEBVIEWS.with(|wvs| !wvs.borrow().is_empty());
-    if !has_webviews {
-        return;
-    }
-    GTK_INITIALIZED.with(|init| {
-        if *init.borrow() {
-            // Process up to a limited number of events per tick to avoid blocking.
-            let mut count = 0;
-            while gtk::events_pending() && count < 50 {
-                gtk::main_iteration_do(false);
-                count += 1;
-            }
+    #[cfg(target_os = "linux")]
+    {
+        let has_webviews = WEBVIEWS.with(|wvs| !wvs.borrow().is_empty());
+        if !has_webviews {
+            return;
         }
-    });
+        GTK_INITIALIZED.with(|init| {
+            if *init.borrow() {
+                let mut count = 0;
+                while gtk::events_pending() && count < 50 {
+                    gtk::main_iteration_do(false);
+                    count += 1;
+                }
+            }
+        });
+    }
 }
 
-/// Create a webview as a child of the given X11 window.
+/// Create a webview as a child of the native window identified by `parent_id`.
 ///
-/// - `pane_id`: unique identifier for tracking (derived from pane index).
-/// - `parent_xid`: the X11 window ID of the iced window.
-/// - `url`: initial URL to load.
-/// - `bounds`: (x, y, width, height) in logical pixels, relative to the parent window.
+/// - Linux: `parent_id` is an X11 XID.
+/// - macOS: `parent_id` is an NSView pointer.
+/// - Windows: `parent_id` is an HWND.
 pub fn create_webview(
     pane_id: u64,
-    parent_xid: u64,
+    parent_id: u64,
     url: &str,
     bounds: (f64, f64, f64, f64),
 ) -> Result<(), String> {
     init_gtk();
 
-    let wrapper = X11Parent(parent_xid);
+    let wrapper = NativeParent(parent_id);
 
     let webview = WebViewBuilder::new()
         .with_url(url)
@@ -87,16 +98,12 @@ pub fn create_webview(
 
     log::info!(
         "WebView created: pane_id={pane_id} url={url} bounds=({}, {}, {}, {})",
-        bounds.0,
-        bounds.1,
-        bounds.2,
-        bounds.3
+        bounds.0, bounds.1, bounds.2, bounds.3
     );
 
     Ok(())
 }
 
-/// Navigate an existing webview to a new URL.
 pub fn navigate(pane_id: u64, url: &str) {
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
@@ -107,7 +114,6 @@ pub fn navigate(pane_id: u64, url: &str) {
     });
 }
 
-/// Update the position and size of an existing webview.
 pub fn set_bounds(pane_id: u64, x: f64, y: f64, w: f64, h: f64) {
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
@@ -121,7 +127,6 @@ pub fn set_bounds(pane_id: u64, x: f64, y: f64, w: f64, h: f64) {
     });
 }
 
-/// Show or hide a webview.
 pub fn set_visible(pane_id: u64, visible: bool) {
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
@@ -132,18 +137,14 @@ pub fn set_visible(pane_id: u64, visible: bool) {
     });
 }
 
-/// Destroy a webview, removing it from tracking.
 pub fn destroy(pane_id: u64) {
-    // Hide first so webkit2gtk can unschedule any pending frame clock
-    // callbacks before the widget is dropped. Without this, processing the
-    // stale GDK frame-clock events on the next pump causes a SIGSEGV.
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
             let _ = wv.set_visible(false);
         }
     });
-    // Pump a few events so webkit2gtk can process the hide and cancel
-    // its frame clock subscriptions before we drop the widget.
+
+    #[cfg(target_os = "linux")]
     GTK_INITIALIZED.with(|init| {
         if *init.borrow() {
             let mut count = 0;
@@ -153,6 +154,7 @@ pub fn destroy(pane_id: u64) {
             }
         }
     });
+
     WEBVIEWS.with(|wvs| {
         if wvs.borrow_mut().remove(&pane_id).is_some() {
             log::info!("WebView destroyed: pane_id={pane_id}");
@@ -160,17 +162,13 @@ pub fn destroy(pane_id: u64) {
     });
 }
 
-/// Check whether a webview exists for the given pane.
 pub fn exists(pane_id: u64) -> bool {
     WEBVIEWS.with(|wvs| wvs.borrow().contains_key(&pane_id))
 }
 
-/// Reload the current page in the webview.
 pub fn reload(pane_id: u64) {
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
-            // wry doesn't have a direct reload method; re-load the current URL
-            // via JavaScript.
             if let Err(e) = wv.evaluate_script("location.reload()") {
                 log::warn!("WebView reload failed for pane {pane_id}: {e}");
             }
@@ -178,7 +176,6 @@ pub fn reload(pane_id: u64) {
     });
 }
 
-/// Go back in the webview's navigation history.
 pub fn go_back(pane_id: u64) {
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
@@ -189,7 +186,6 @@ pub fn go_back(pane_id: u64) {
     });
 }
 
-/// Go forward in the webview's navigation history.
 pub fn go_forward(pane_id: u64) {
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
@@ -201,16 +197,33 @@ pub fn go_forward(pane_id: u64) {
 }
 
 // ---------------------------------------------------------------------------
-// X11 parent window handle wrapper
+// Platform-specific parent window handle wrappers
 // ---------------------------------------------------------------------------
 
-/// Wrapper that implements `HasWindowHandle` for an X11 window ID (XID).
-struct X11Parent(u64);
+struct NativeParent(u64);
 
-impl HasWindowHandle for X11Parent {
+#[cfg(target_os = "linux")]
+impl HasWindowHandle for NativeParent {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         let handle = XlibWindowHandle::new(self.0 as std::ffi::c_ulong);
-        // SAFETY: the handle is valid for the lifetime of this borrow.
         Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::Xlib(handle)) })
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl HasWindowHandle for NativeParent {
+    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+        let ptr = NonNull::new(self.0 as *mut c_void).ok_or(HandleError::Unavailable)?;
+        let handle = AppKitWindowHandle::new(ptr);
+        Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::AppKit(handle)) })
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl HasWindowHandle for NativeParent {
+    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+        let hwnd = NonZeroIsize::new(self.0 as isize).ok_or(HandleError::Unavailable)?;
+        let handle = Win32WindowHandle::new(hwnd);
+        Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::Win32(handle)) })
     }
 }

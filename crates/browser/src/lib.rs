@@ -4,41 +4,29 @@
 /// - `BrowserState`: tracks URL, navigation history, and loading status.
 /// - `webview_manager`: manages real wry `WebView` instances on the main thread.
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod webview_manager;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub mod webview_manager {
-    /// The current embedded browser implementation is Linux-only.
+    /// Embedded browser is not supported on this platform.
     pub fn init_gtk() {}
-
     pub fn pump_gtk_events() {}
-
     pub fn create_webview(
         _pane_id: u64,
         _parent_window: u64,
         _url: &str,
         _bounds: (f64, f64, f64, f64),
     ) -> Result<(), String> {
-        Err("Embedded browser is not packaged on this platform yet.".to_string())
+        Err("Embedded browser is not supported on this platform.".to_string())
     }
-
     pub fn navigate(_pane_id: u64, _url: &str) {}
-
     pub fn set_bounds(_pane_id: u64, _x: f64, _y: f64, _w: f64, _h: f64) {}
-
     pub fn set_visible(_pane_id: u64, _visible: bool) {}
-
     pub fn destroy(_pane_id: u64) {}
-
-    pub fn exists(_pane_id: u64) -> bool {
-        false
-    }
-
+    pub fn exists(_pane_id: u64) -> bool { false }
     pub fn reload(_pane_id: u64) {}
-
     pub fn go_back(_pane_id: u64) {}
-
     pub fn go_forward(_pane_id: u64) {}
 }
 
