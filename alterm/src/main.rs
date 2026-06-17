@@ -2870,8 +2870,12 @@ fn hotkey_info_view<'a>() -> Element<'a, Message> {
     let tool_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,
         Action::ToggleAIChat | Action::CommandPalette | Action::OpenSettings
     )).collect();
+    let windows_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,
+        Action::NewTerminal | Action::NewBrowser | Action::NewPreview |
+        Action::ShowHotkeyInfo | Action::ToggleTheme
+    )).collect();
     let terminal_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,
-        Action::Copy | Action::Paste | Action::ScrollPageUp | Action::ScrollPageDown
+        Action::Copy | Action::Paste | Action::ScrollPageUp | Action::ScrollPageDown | Action::Search
     )).collect();
 
     let mut items: Vec<Element<'a, Message>> = Vec::new();
@@ -2968,6 +2972,14 @@ fn hotkey_info_view<'a>() -> Element<'a, Message> {
     items.extend(build_section(
         "AI & TOOLS",
         &tool_actions,
+        &[],
+        accent, shortcut_color, label_color,
+    ));
+
+    // Windows section (new-block / tool-window shortcuts)
+    items.extend(build_section(
+        "WINDOWS",
+        &windows_actions,
         &[],
         accent, shortcut_color, label_color,
     ));
