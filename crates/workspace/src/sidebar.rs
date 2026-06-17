@@ -2,8 +2,9 @@
 ///
 /// Positioned on the right side of the workspace, provides quick access to
 /// split the focused pane with different block types.
-use iced::widget::{button, column, container, svg, text};
+use iced::widget::{button, column, container, svg, text, tooltip};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
+use crate::keybindings::Action;
 
 /// Returns `true` when the iced theme is light.
 fn is_light_theme(theme: &Theme) -> bool {
@@ -40,32 +41,50 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
     let btn_size = 36.0;
     let btn_padding = Padding::from([6, 4]);
 
-    let terminal_btn = sidebar_svg_button(
-        &theme_svg(include_bytes!("../../../assets/icons/sidebar/terminal.svg"), light_mode),
-        Some(map(SidebarAction::NewTerminal)),
-        btn_size,
+    let terminal_btn = with_tooltip(
+        sidebar_svg_button(
+            &theme_svg(include_bytes!("../../../assets/icons/sidebar/terminal.svg"), light_mode),
+            Some(map(SidebarAction::NewTerminal)),
+            btn_size,
+        ),
+        tip_text(Action::NewTerminal),
     );
-    let ai_btn = sidebar_button("AI", Some(map(SidebarAction::NewAiChat)), btn_size);
-    let web_btn = sidebar_svg_button(
-        &theme_svg(include_bytes!("../../../assets/icons/sidebar/browser.svg"), light_mode),
-        Some(map(SidebarAction::NewBrowser)),
-        btn_size,
+    let ai_btn = with_tooltip(
+        sidebar_button("AI", Some(map(SidebarAction::NewAiChat)), btn_size),
+        tip_text(Action::ToggleAIChat),
     );
-    let preview_btn = sidebar_svg_button_with_icon_size(
-        &theme_svg(include_bytes!("../../../assets/icons/sidebar/folder.svg"), light_mode),
-        Some(map(SidebarAction::NewPreview)),
-        btn_size,
-        24.0,  // slightly larger icon for folder
+    let web_btn = with_tooltip(
+        sidebar_svg_button(
+            &theme_svg(include_bytes!("../../../assets/icons/sidebar/browser.svg"), light_mode),
+            Some(map(SidebarAction::NewBrowser)),
+            btn_size,
+        ),
+        tip_text(Action::NewBrowser),
     );
-    let settings_btn = sidebar_svg_button(
-        &theme_svg(include_bytes!("../../../assets/icons/sidebar/settings-svgrepo-com.svg"), light_mode),
-        Some(map(SidebarAction::OpenSettings)),
-        btn_size,
+    let preview_btn = with_tooltip(
+        sidebar_svg_button_with_icon_size(
+            &theme_svg(include_bytes!("../../../assets/icons/sidebar/folder.svg"), light_mode),
+            Some(map(SidebarAction::NewPreview)),
+            btn_size,
+            24.0,  // slightly larger icon for folder
+        ),
+        tip_text(Action::NewPreview),
     );
-    let info_btn = sidebar_svg_button(
-        &theme_svg(include_bytes!("../../../assets/icons/sidebar/info.svg"), light_mode),
-        Some(map(SidebarAction::ShowHotkeyInfo)),
-        btn_size,
+    let settings_btn = with_tooltip(
+        sidebar_svg_button(
+            &theme_svg(include_bytes!("../../../assets/icons/sidebar/settings-svgrepo-com.svg"), light_mode),
+            Some(map(SidebarAction::OpenSettings)),
+            btn_size,
+        ),
+        tip_text(Action::OpenSettings),
+    );
+    let info_btn = with_tooltip(
+        sidebar_svg_button(
+            &theme_svg(include_bytes!("../../../assets/icons/sidebar/info.svg"), light_mode),
+            Some(map(SidebarAction::ShowHotkeyInfo)),
+            btn_size,
+        ),
+        tip_text(Action::ShowHotkeyInfo),
     );
 
     // Show the icon of the mode to switch TO: sun in dark mode, moon in light mode.
@@ -74,10 +93,13 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
     } else {
         include_bytes!("../../../assets/icons/sidebar/lightmode.svg")
     };
-    let theme_btn = sidebar_svg_button(
-        &theme_svg(theme_icon_bytes, light_mode),
-        Some(map(SidebarAction::ToggleTheme)),
-        btn_size,
+    let theme_btn = with_tooltip(
+        sidebar_svg_button(
+            &theme_svg(theme_icon_bytes, light_mode),
+            Some(map(SidebarAction::ToggleTheme)),
+            btn_size,
+        ),
+        tip_text(Action::ToggleTheme),
     );
 
     let top_buttons = column![terminal_btn, ai_btn, web_btn, preview_btn, settings_btn]
@@ -188,6 +210,50 @@ fn sidebar_button<'a, M: Clone + 'a>(
     }
 
     btn.into()
+}
+
+/// Tooltip text for a sidebar button: "Label  (Ctrl+Shift+X)".
+fn tip_text(action: Action) -> String {
+    format!("{}  ({})", action.label(), action.shortcut_hint())
+}
+
+/// Wrap a built sidebar button in a left-positioned hover tooltip.
+fn with_tooltip<'a, M: 'a>(content: Element<'a, M>, hint: String) -> Element<'a, M> {
+    tooltip(
+        content,
+        container(text(hint).size(12))
+            .padding(Padding::from([4, 8]))
+            .style(tooltip_box_style),
+        tooltip::Position::Left,
+    )
+    .gap(6)
+    .into()
+}
+
+/// Styled background box for sidebar tooltips (theme-aware).
+///
+/// The box stays dark in both themes (light text on a dark box reads well over
+/// either background); the light branch is only slightly lighter for contrast.
+fn tooltip_box_style(theme: &Theme) -> iced::widget::container::Style {
+    let light = is_light_theme(theme);
+    iced::widget::container::Style {
+        background: Some(Background::Color(if light {
+            Color::from_rgb(0.20, 0.20, 0.24)
+        } else {
+            Color::from_rgb(0.16, 0.16, 0.20)
+        })),
+        text_color: Some(Color::from_rgb(0.95, 0.95, 0.95)),
+        border: Border {
+            color: if light {
+                Color::from_rgb(0.35, 0.35, 0.40)
+            } else {
+                Color::from_rgb(0.30, 0.30, 0.36)
+            },
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
