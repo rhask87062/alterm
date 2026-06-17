@@ -268,7 +268,11 @@ mod tests {
             assert!(!action.shortcut_hint().is_empty());
             assert!(!action.label().is_empty());
         }
+        assert_eq!(Action::NewTerminal.shortcut_hint(), "Ctrl+Shift+N");
+        assert_eq!(Action::NewBrowser.shortcut_hint(), "Ctrl+Shift+B");
         assert_eq!(Action::NewPreview.shortcut_hint(), "Ctrl+Shift+O");
+        assert_eq!(Action::ShowHotkeyInfo.shortcut_hint(), "Ctrl+Shift+H");
+        assert_eq!(Action::ToggleTheme.shortcut_hint(), "Ctrl+Shift+L");
         assert_eq!(Action::Search.shortcut_hint(), "Ctrl+Shift+F");
     }
 

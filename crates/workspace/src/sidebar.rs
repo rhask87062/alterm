@@ -231,6 +231,9 @@ fn with_tooltip<'a, M: 'a>(content: Element<'a, M>, hint: String) -> Element<'a,
 }
 
 /// Styled background box for sidebar tooltips (theme-aware).
+///
+/// The box stays dark in both themes (light text on a dark box reads well over
+/// either background); the light branch is only slightly lighter for contrast.
 fn tooltip_box_style(theme: &Theme) -> iced::widget::container::Style {
     let light = is_light_theme(theme);
     iced::widget::container::Style {
