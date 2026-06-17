@@ -3,7 +3,8 @@
 //! Wide-first: columns are added before rows so terminals keep their width.
 //! Windows fill row-major (left->right across a row, then top->bottom).
 
-use iced::widget::pane_grid::{self, Configuration};
+use iced::widget::pane_grid::{self, Configuration, Pane, State};
+use iced::{Rectangle, Size};
 
 /// Compute `(rows, cols)` for a wide-first balanced grid of `n` windows.
 ///
@@ -40,6 +41,62 @@ pub fn build_grid_config<T>(items: Vec<T>) -> Configuration<T> {
 
     // Stack the rows top->bottom with a Horizontal chain.
     combine(row_configs, pane_grid::Axis::Horizontal)
+}
+
+/// Panes sorted into row-major spatial order (top->bottom, then left->right).
+pub fn panes_in_spatial_order<T>(state: &State<T>) -> Vec<Pane> {
+    // spacing/min_size = 0 so tiny grids aren't distorted by clamping; the bounds
+    // value is arbitrary because ordering is scale-invariant.
+    let regions = state
+        .layout()
+        .pane_regions(0.0, 0.0, Size::new(1000.0, 1000.0));
+    let mut entries: Vec<(Pane, Rectangle)> = regions.into_iter().collect();
+    entries.sort_by(|(_, a), (_, b)| {
+        a.y.partial_cmp(&b.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    entries.into_iter().map(|(p, _)| p).collect()
+}
+
+/// Result of rebuilding a tab's layout into a balanced grid.
+pub struct RebuildInfo {
+    /// `(old_pane, new_pane)` for each pre-existing window, in spatial order.
+    pub remap: Vec<(Pane, Pane)>,
+    /// The pane holding the newly added window.
+    pub new_pane: Pane,
+}
+
+/// Drain every window from `state` in spatial order, append `new_item`, and
+/// replace `state` with a freshly built wide-first balanced grid.
+///
+/// `placeholder` produces throwaway values used to move owned items out of the
+/// old state (for `Block`, pass `|| Block::HotkeyInfo`).
+pub fn rebuild_with_new<T>(
+    state: &mut State<T>,
+    new_item: T,
+    mut placeholder: impl FnMut() -> T,
+) -> RebuildInfo {
+    let old_order = panes_in_spatial_order(state);
+
+    let mut items: Vec<T> = Vec::with_capacity(old_order.len() + 1);
+    for &pane in &old_order {
+        let slot = state.get_mut(pane).expect("pane from layout must exist");
+        items.push(std::mem::replace(slot, placeholder()));
+    }
+    items.push(new_item);
+
+    *state = State::with_configuration(build_grid_config(items));
+
+    let new_order = panes_in_spatial_order(state);
+    let remap = old_order
+        .iter()
+        .copied()
+        .zip(new_order.iter().copied())
+        .collect();
+    let new_pane = *new_order.last().expect("rebuilt grid has at least one pane");
+
+    RebuildInfo { remap, new_pane }
 }
 
 /// Combine `configs` along `axis` into one `Configuration` with even ratios,
@@ -124,6 +181,40 @@ mod tests {
             let items: Vec<u32> = (0..n as u32).collect();
             let cfg = build_grid_config(items.clone());
             assert_eq!(leaves(&cfg), items, "row-major order broken for n={n}");
+        }
+    }
+
+    /// Spatially-ordered contents of a State<u32>.
+    fn ordered_contents(state: &State<u32>) -> Vec<u32> {
+        panes_in_spatial_order(state)
+            .iter()
+            .map(|p| *state.get(*p).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn rebuild_appends_and_preserves_order() {
+        // Start with a single window holding 10.
+        let (mut state, _first) = State::new(10u32);
+        // Add 20, 30, 40 one at a time.
+        for v in [20u32, 30, 40] {
+            rebuild_with_new(&mut state, v, || 0u32);
+        }
+        assert_eq!(state.len(), 4);
+        assert_eq!(ordered_contents(&state), vec![10, 20, 30, 40]);
+    }
+
+    #[test]
+    fn rebuild_reports_new_pane_and_remap() {
+        let (mut state, _first) = State::new(1u32);
+        let info = rebuild_with_new(&mut state, 2u32, || 0u32);
+        // One pre-existing window -> one remap pair.
+        assert_eq!(info.remap.len(), 1);
+        // new_pane holds the new item.
+        assert_eq!(*state.get(info.new_pane).unwrap(), 2);
+        // Each remap target still exists in the new state.
+        for (_old, new) in &info.remap {
+            assert!(state.get(*new).is_some());
         }
     }
 }
