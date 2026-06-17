@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "alterm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ai",
  "alterm-config",

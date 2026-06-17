@@ -584,8 +584,11 @@ impl Alterm {
             Action::OpenSettings => self.update(Message::OpenSettings),
             Action::ToggleAIChat => self.update(Message::ToggleAIChat),
             Action::Copy => {
-                log::debug!("Copy — not yet implemented");
-                Task::none()
+                if self.last_selection.is_empty() {
+                    Task::none()
+                } else {
+                    iced::clipboard::write(self.last_selection.clone())
+                }
             }
             Action::Paste => {
                 iced::clipboard::read().map(Message::ClipboardContent)
@@ -1082,8 +1085,14 @@ impl Alterm {
                 return iced::clipboard::write(content);
             }
             Message::TerminalSelected(text) => {
+                // Always remember the latest selection so Ctrl+Shift+C and the
+                // right-click menu's Copy can act on it. Only auto-write to
+                // the system clipboard when the user has opted in via the
+                // `terminal.copy_on_select` config (xterm-style behavior).
                 self.last_selection = text.clone();
-                return iced::clipboard::write(text);
+                if self.config.terminal.copy_on_select {
+                    return iced::clipboard::write(text);
+                }
             }
             Message::ContextMenuOpen(pane, position) => {
                 self.active_tab_mut().focus = Some(pane);
