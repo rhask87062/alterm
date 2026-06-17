@@ -23,6 +23,10 @@ pub struct SelectionState {
     current: Option<(usize, usize)>,
     /// True while the left button is held down.
     active: bool,
+    /// True once the cursor has moved to a different cell than `start` during
+    /// this press. A bare click leaves this `false`, so no highlight is drawn
+    /// and no clipboard message is published on release.
+    dragged: bool,
     /// The grid's display_offset at the time the selection started.
     /// Used to discard the highlight when the user scrolls away.
     display_offset: usize,
@@ -90,9 +94,13 @@ impl TerminalView {
     /// `on_select` is called with the selected text when the user completes
     /// a mouse-drag selection. The returned message is dispatched to the app
     /// and can be used to copy the text to the clipboard.
+    ///
+    /// `on_context_menu` is called with the absolute cursor position when the
+    /// user right-clicks inside the canvas.
     pub fn view<M: 'static>(
         self,
         on_select: impl Fn(String) -> M + 'static,
+        on_context_menu: impl Fn(Point) -> M + 'static,
     ) -> Element<'static, M> {
         let program = TerminalCanvas {
             grid: self.grid,
@@ -101,6 +109,7 @@ impl TerminalView {
             cell_height: self.cell_height,
             font: self.font,
             on_select: Box::new(on_select),
+            on_context_menu: Box::new(on_context_menu),
             _msg: std::marker::PhantomData,
         };
 
@@ -123,6 +132,7 @@ struct TerminalCanvas<M> {
     cell_height: f32,
     font: Font,
     on_select: Box<dyn Fn(String) -> M + 'static>,
+    on_context_menu: Box<dyn Fn(Point) -> M + 'static>,
     _msg: std::marker::PhantomData<M>,
 }
 
@@ -143,6 +153,7 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
                     state.start = Some(cell);
                     state.current = Some(cell);
                     state.active = true;
+                    state.dragged = false;
                     state.display_offset = self.grid.display_offset;
                     Some(canvas::Action::request_redraw().and_capture())
                 } else {
@@ -151,8 +162,23 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 if state.active {
-                    state.current = cursor_to_cell_clamped(cursor, bounds, self.cell_width, self.cell_height, self.grid.rows, self.grid.cols);
+                    let new_cell = cursor_to_cell_clamped(cursor, bounds, self.cell_width, self.cell_height, self.grid.rows, self.grid.cols);
+                    if new_cell != state.start {
+                        state.dragged = true;
+                    }
+                    state.current = new_cell;
                     Some(canvas::Action::request_redraw())
+                } else {
+                    None
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                if let Some(pos) = cursor.position_in(bounds) {
+                    let absolute = Point::new(bounds.x + pos.x, bounds.y + pos.y);
+                    Some(
+                        canvas::Action::publish((self.on_context_menu)(absolute))
+                            .and_capture(),
+                    )
                 } else {
                     None
                 }
@@ -160,15 +186,22 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if state.active {
                     state.active = false;
-                    if let (Some(start), Some(end)) = (state.start, state.current) {
-                        let text = extract_text(&self.grid, start, end);
-                        if !text.is_empty() {
-                            return Some(
-                                canvas::Action::publish((self.on_select)(text)).and_capture(),
-                            );
+                    if state.dragged {
+                        if let (Some(start), Some(end)) = (state.start, state.current) {
+                            let text = extract_text(&self.grid, start, end);
+                            if !text.is_empty() {
+                                return Some(
+                                    canvas::Action::publish((self.on_select)(text)).and_capture(),
+                                );
+                            }
                         }
+                        Some(canvas::Action::request_redraw())
+                    } else {
+                        // Bare click — clear any prior selection so the highlight goes away.
+                        state.start = None;
+                        state.current = None;
+                        Some(canvas::Action::request_redraw())
                     }
-                    Some(canvas::Action::request_redraw())
                 } else {
                     None
                 }
@@ -205,10 +238,11 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
         let cw = self.cell_width;
         let ch = self.cell_height;
 
-        // Normalize selection range, but only if the scroll position hasn't
-        // changed since the selection was made — otherwise the highlight would
-        // drift over the wrong content as the user scrolls.
-        let sel_range = if self.grid.display_offset == state.display_offset {
+        // Normalize selection range, but only after real drag motion and only
+        // if the scroll position hasn't changed since the selection was made —
+        // otherwise the highlight would drift over the wrong content as the
+        // user scrolls, and a bare click would leave a stray one-cell mark.
+        let sel_range = if state.dragged && self.grid.display_offset == state.display_offset {
             normalized_selection(state)
         } else {
             None

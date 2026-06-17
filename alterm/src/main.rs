@@ -4,12 +4,12 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, opaque, pane_grid, pick_list, row, scrollable, slider, stack, text,
-    text_input, toggler, Column, Id as WidgetId,
+    button, column, container, mouse_area, opaque, pane_grid, pick_list, row, scrollable, slider,
+    stack, text, text_input, toggler, Column, Id as WidgetId,
 };
 use iced::widget::operation::focus as widget_focus;
 use iced::window;
-use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Subscription, Task, Theme};
+use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Point, Subscription, Task, Theme};
 
 use gpu_renderer::widget::TerminalView;
 use workspace::{
@@ -159,6 +159,18 @@ struct Alterm {
     /// Leaked font family name for use with iced's `Font::Family::Name(&'static str)`.
     /// Updated when settings are saved.
     terminal_font_family: &'static str,
+    /// State of the right-click context menu, if any.
+    context_menu: Option<ContextMenuState>,
+    /// Most recent text selection finalized in a terminal pane. Empty if none.
+    last_selection: String,
+}
+
+#[derive(Clone, Copy)]
+struct ContextMenuState {
+    /// Absolute window-relative position where the menu should anchor its
+    /// top-left corner. The right-clicked pane is identified separately via
+    /// `Alterm::active_tab().focus`, which `ContextMenuOpen` sets.
+    position: Point,
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +216,13 @@ enum Message {
     AIModelsFetched(pane_grid::Pane, Vec<String>),
     AICopyMessage(String),
     TerminalSelected(String),
+    // Right-click context menu on a terminal pane.
+    ContextMenuOpen(pane_grid::Pane, Point),
+    ContextMenuClose,
+    ContextMenuCopy,
+    ContextMenuPaste,
+    ContextMenuSelectAll,
+    ContextMenuClear,
     ToggleAIChat,
     // Settings panel
     OpenSettings,
@@ -283,6 +302,8 @@ impl Alterm {
             parent_xid: None,
             available_fonts,
             terminal_font_family,
+            context_menu: None,
+            last_selection: String::new(),
         };
 
         // Request the native window handle from iced — fires WindowHandleReady.
@@ -1052,7 +1073,58 @@ impl Alterm {
                 return iced::clipboard::write(content);
             }
             Message::TerminalSelected(text) => {
+                self.last_selection = text.clone();
                 return iced::clipboard::write(text);
+            }
+            Message::ContextMenuOpen(pane, position) => {
+                self.active_tab_mut().focus = Some(pane);
+                self.context_menu = Some(ContextMenuState { position });
+            }
+            Message::ContextMenuClose => {
+                self.context_menu = None;
+            }
+            Message::ContextMenuCopy => {
+                self.context_menu = None;
+                if !self.last_selection.is_empty() {
+                    return iced::clipboard::write(self.last_selection.clone());
+                }
+            }
+            Message::ContextMenuPaste => {
+                self.context_menu = None;
+                return iced::clipboard::read().map(Message::ClipboardContent);
+            }
+            Message::ContextMenuSelectAll => {
+                self.context_menu = None;
+                // Copy the entire visible terminal buffer to the clipboard.
+                let light_mode = is_config_light_theme(&self.config.appearance.theme);
+                let tab = self.active_tab();
+                if let Some(focused) = tab.focus {
+                    if let Some(block) = tab.panes.get(focused) {
+                        let grid = block.render_grid(light_mode);
+                        let mut buf = String::new();
+                        for row in &grid.cells {
+                            let line: String = row.iter().map(|c| c.c).collect();
+                            buf.push_str(line.trim_end());
+                            buf.push('\n');
+                        }
+                        let text = buf.trim_end_matches('\n').to_string();
+                        if !text.is_empty() {
+                            self.last_selection = text.clone();
+                            return iced::clipboard::write(text);
+                        }
+                    }
+                }
+            }
+            Message::ContextMenuClear => {
+                self.context_menu = None;
+                // Send Ctrl+L to the focused terminal — readline interprets this
+                // as clear-screen, the standard shortcut every shell understands.
+                let tab = self.active_tab_mut();
+                if let Some(focused) = tab.focus {
+                    if let Some(block) = tab.panes.get_mut(focused) {
+                        block.write_input(&[0x0c]);
+                    }
+                }
             }
             Message::AIModelsFetched(pane, models) => {
                 let tab = self.active_tab_mut();
@@ -1401,6 +1473,7 @@ impl Alterm {
                             paste_bytes.extend_from_slice(text.as_bytes());
                             paste_bytes.extend_from_slice(b"\x1b[201~");
                             block.write_input(&paste_bytes);
+                            block.reset_cursor_blink();
                         }
                     }
                 }
@@ -1465,7 +1538,10 @@ impl Alterm {
                         let terminal_view = TerminalView::new(grid)
                             .with_font_size(self.config.appearance.font_size)
                             .with_font_family(self.terminal_font_family);
-                        terminal_view.view(Message::TerminalSelected)
+                        terminal_view.view(
+                            Message::TerminalSelected,
+                            move |pos| Message::ContextMenuOpen(pane, pos),
+                        )
                     }
                     Block::AIChat { state } => {
                         ai_chat_view(pane, state, has_terminal_context)
@@ -1535,13 +1611,105 @@ impl Alterm {
             .height(Fill)
             .into();
 
-        // Command palette overlay
+        // Overlays: command palette and context menu can stack on top of base.
+        let mut layered = base;
+        if let Some(menu) = self.context_menu {
+            let overlay = self.context_menu_overlay(menu);
+            layered = stack![layered, opaque(overlay)].into();
+        }
         if self.palette.visible {
             let overlay = self.palette_overlay();
-            stack![base, opaque(overlay)].into()
-        } else {
-            base
+            layered = stack![layered, opaque(overlay)].into();
         }
+        layered
+    }
+
+    /// Build the right-click context menu overlay.
+    fn context_menu_overlay(&self, menu: ContextMenuState) -> Element<'_, Message> {
+        let has_selection = !self.last_selection.is_empty();
+
+        let item = |label: &str, message: Option<Message>| -> Element<'_, Message> {
+            let enabled = message.is_some();
+            let btn = button(
+                text(label.to_string())
+                    .size(13)
+                    .color(if enabled {
+                        Color::from_rgb(0.92, 0.92, 0.94)
+                    } else {
+                        Color::from_rgb(0.50, 0.50, 0.55)
+                    }),
+            )
+            .width(Fill)
+            .padding(Padding { top: 5.0, right: 10.0, bottom: 5.0, left: 10.0 })
+            .style(|_theme: &Theme, status| iced::widget::button::Style {
+                background: Some(Background::Color(match status {
+                    iced::widget::button::Status::Hovered => Color::from_rgb(0.22, 0.28, 0.42),
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: Color::from_rgb(0.92, 0.92, 0.94),
+                border: Border {
+                    radius: 3.0.into(),
+                    ..Border::default()
+                },
+                ..iced::widget::button::Style::default()
+            });
+            let btn = if let Some(msg) = message {
+                btn.on_press(msg)
+            } else {
+                btn
+            };
+            btn.into()
+        };
+
+        let menu_items = column![
+            item("Copy", has_selection.then_some(Message::ContextMenuCopy)),
+            item("Paste", Some(Message::ContextMenuPaste)),
+            item("Select All", Some(Message::ContextMenuSelectAll)),
+            item("Clear", Some(Message::ContextMenuClear)),
+        ]
+        .spacing(1)
+        .width(Length::Fixed(150.0));
+
+        let menu_box = container(menu_items)
+            .padding(4)
+            .style(|_theme: &Theme| iced::widget::container::Style {
+                background: Some(Background::Color(Color::from_rgb(0.13, 0.14, 0.18))),
+                border: Border {
+                    color: Color::from_rgb(0.30, 0.34, 0.45),
+                    width: 1.0,
+                    radius: 5.0.into(),
+                },
+                ..Default::default()
+            });
+
+        // Clamp the menu position so it stays within the window. The menu is
+        // roughly 150 px wide and a few rows tall; using 160 / 140 as a
+        // conservative footprint keeps it on-screen near right/bottom edges.
+        let menu_w = 160.0_f32;
+        let menu_h = 140.0_f32;
+        let left = menu
+            .position
+            .x
+            .min((self.window_width - menu_w).max(0.0))
+            .max(0.0);
+        let top = menu
+            .position
+            .y
+            .min((self.window_height - menu_h).max(0.0))
+            .max(0.0);
+
+        let positioned = container(menu_box)
+            .padding(Padding { top, left, right: 0.0, bottom: 0.0 });
+
+        // Wrap in a Fill mouse_area so any click outside the menu closes it.
+        // The button widgets inside still receive their own clicks first.
+        mouse_area(
+            container(positioned)
+                .width(Fill)
+                .height(Fill),
+        )
+        .on_press(Message::ContextMenuClose)
+        .into()
     }
 
     /// Build the command palette overlay widget.
