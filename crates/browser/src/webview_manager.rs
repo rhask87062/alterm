@@ -196,6 +196,74 @@ pub fn go_forward(pane_id: u64) {
     });
 }
 
+/// Re-key live webviews when pane ids change (e.g. after a layout rebuild).
+///
+/// `mapping` is a list of `(old_pane_id, new_pane_id)` pairs. Done in two phases
+/// (remove all sources, then insert at targets) so overlapping ids can't clobber.
+pub fn remap(mapping: &[(u64, u64)]) {
+    WEBVIEWS.with(|wvs| {
+        remap_map(&mut wvs.borrow_mut(), mapping);
+    });
+}
+
+/// Pure two-phase key remap, extracted for testing.
+fn remap_map<V>(map: &mut HashMap<u64, V>, mapping: &[(u64, u64)]) {
+    // Phase 1: remove every source (skip identity / missing).
+    let mut moved: Vec<(u64, V)> = Vec::new();
+    for &(old, new) in mapping {
+        if old == new {
+            continue;
+        }
+        if let Some(v) = map.remove(&old) {
+            moved.push((new, v));
+        }
+    }
+    // Phase 2: insert each value at its new key.
+    for (new, v) in moved {
+        map.insert(new, v);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remap_map;
+    use std::collections::HashMap;
+
+    #[test]
+    fn remap_moves_values_to_new_keys() {
+        let mut m: HashMap<u64, u32> = HashMap::new();
+        m.insert(5, 105);
+        m.insert(8, 108);
+        // 5 -> 0, 8 -> 2
+        remap_map(&mut m, &[(5, 0), (8, 2)]);
+        assert_eq!(m.get(&0), Some(&105));
+        assert_eq!(m.get(&2), Some(&108));
+        assert_eq!(m.get(&5), None);
+        assert_eq!(m.get(&8), None);
+    }
+
+    #[test]
+    fn remap_handles_swaps_without_clobbering() {
+        let mut m: HashMap<u64, u32> = HashMap::new();
+        m.insert(0, 100);
+        m.insert(1, 101);
+        // swap 0 <-> 1
+        remap_map(&mut m, &[(0, 1), (1, 0)]);
+        assert_eq!(m.get(&0), Some(&101));
+        assert_eq!(m.get(&1), Some(&100));
+    }
+
+    #[test]
+    fn remap_ignores_missing_and_identity() {
+        let mut m: HashMap<u64, u32> = HashMap::new();
+        m.insert(3, 103);
+        remap_map(&mut m, &[(3, 3), (9, 4)]); // identity + missing source
+        assert_eq!(m.get(&3), Some(&103));
+        assert_eq!(m.get(&4), None);
+        assert_eq!(m.len(), 1);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Platform-specific parent window handle wrappers
 // ---------------------------------------------------------------------------
