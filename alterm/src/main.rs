@@ -17,6 +17,7 @@ use workspace::{
     CommandPalette, PreviewState, SettingsField, SettingsSection, SidebarAction, Tab, TabBarAction,
     CELL_HEIGHT,
 };
+use workspace::grid;
 
 // ---------------------------------------------------------------------------
 // Theme helpers
@@ -410,6 +411,33 @@ impl Alterm {
         }
     }
 
+    /// Add a new window (pane) to the active tab as a wide-first balanced grid.
+    ///
+    /// Rebuilds the active tab's layout from its existing windows plus `block`,
+    /// re-keys any browser webviews to their new pane ids, focuses the new
+    /// window, and returns its pane. All "new window" actions funnel through here.
+    fn add_window(&mut self, block: Block) -> pane_grid::Pane {
+        let tab = self.active_tab_mut();
+        // Compute the grid against the full layout, not a maximized view.
+        if tab.panes.maximized().is_some() {
+            tab.panes.restore();
+        }
+
+        let info = grid::rebuild_with_new(&mut tab.panes, block, || Block::HotkeyInfo);
+        tab.focus = Some(info.new_pane);
+
+        // Carry existing webviews across to their new pane ids.
+        let remap_ids: Vec<(u64, u64)> = info
+            .remap
+            .iter()
+            .map(|(old, new)| (pane_to_id(*old), pane_to_id(*new)))
+            .collect();
+        webview_manager::remap(&remap_ids);
+
+        self.resize_all_panes();
+        info.new_pane
+    }
+
     /// Create a real wry webview for a browser pane.
     fn create_browser_webview(&self, pane: pane_grid::Pane, url: &str) {
         let Some(xid) = self.parent_xid else {
@@ -673,54 +701,11 @@ impl Alterm {
                 self.window_height = height;
                 self.resize_all_panes();
             }
-            Message::SplitHorizontal => {
-                let tab = self.active_tab_mut();
-                if let Some(focused) = tab.focus {
-                    // Halve cols for a vertical-axis split (left|right).
-                    // Non-terminal panes return (0,0) — clamp to safe defaults.
-                    let (rows, cols) = {
-                        let (r, c) = tab.panes.get(focused)
-                            .map(|b| b.dimensions()).unwrap_or((24, 80));
-                        (r.max(24), c.max(80))
-                    };
-                    let half_cols = (cols / 2).max(20);
-                    if let Ok(block) = Block::new_terminal(rows, half_cols) {
-                        if let Some((new_pane, _split)) =
-                            tab.panes.split(pane_grid::Axis::Vertical, focused, block)
-                        {
-                            // Resize the original pane too.
-                            if let Some(old_block) = tab.panes.get_mut(focused) {
-                                old_block.resize(rows, half_cols);
-                            }
-                            tab.focus = Some(new_pane);
-                        }
-                    }
+            // Split Right / Split Down now both add a window to the balanced grid.
+            Message::SplitHorizontal | Message::SplitVertical => {
+                if let Ok(block) = Block::new_terminal(24, 80) {
+                    self.add_window(block);
                 }
-                self.resize_all_panes();
-            }
-            Message::SplitVertical => {
-                let tab = self.active_tab_mut();
-                if let Some(focused) = tab.focus {
-                    // Halve rows for a horizontal-axis split (top/bottom).
-                    // Non-terminal panes return (0,0) — clamp to safe defaults.
-                    let (rows, cols) = {
-                        let (r, c) = tab.panes.get(focused)
-                            .map(|b| b.dimensions()).unwrap_or((24, 80));
-                        (r.max(24), c.max(80))
-                    };
-                    let half_rows = (rows / 2).max(4);
-                    if let Ok(block) = Block::new_terminal(half_rows, cols) {
-                        if let Some((new_pane, _split)) =
-                            tab.panes.split(pane_grid::Axis::Horizontal, focused, block)
-                        {
-                            if let Some(old_block) = tab.panes.get_mut(focused) {
-                                old_block.resize(half_rows, cols);
-                            }
-                            tab.focus = Some(new_pane);
-                        }
-                    }
-                }
-                self.resize_all_panes();
             }
             Message::ClosePane => {
                 let tab = self.active_tab_mut();
@@ -760,46 +745,11 @@ impl Alterm {
                 self.resize_all_panes();
             }
 
-            // Per-pane title bar controls (operate on a specific pane)
-            Message::SplitPaneRight(pane) => {
-                let tab = self.active_tab_mut();
-                let (rows, cols) = {
-                    let (r, c) = tab.panes.get(pane)
-                        .map(|b| b.dimensions()).unwrap_or((24, 80));
-                    (r.max(24), c.max(80))
-                };
-                let half_cols = (cols / 2).max(20);
-                if let Ok(block) = Block::new_terminal(rows, half_cols) {
-                    if let Some((new_pane, _split)) =
-                        tab.panes.split(pane_grid::Axis::Vertical, pane, block)
-                    {
-                        if let Some(old_block) = tab.panes.get_mut(pane) {
-                            old_block.resize(rows, half_cols);
-                        }
-                        tab.focus = Some(new_pane);
-                    }
+            // Per-pane title-bar split buttons also add a window to the grid.
+            Message::SplitPaneRight(_) | Message::SplitPaneDown(_) => {
+                if let Ok(block) = Block::new_terminal(24, 80) {
+                    self.add_window(block);
                 }
-                self.resize_all_panes();
-            }
-            Message::SplitPaneDown(pane) => {
-                let tab = self.active_tab_mut();
-                let (rows, cols) = {
-                    let (r, c) = tab.panes.get(pane)
-                        .map(|b| b.dimensions()).unwrap_or((24, 80));
-                    (r.max(24), c.max(80))
-                };
-                let half_rows = (rows / 2).max(4);
-                if let Ok(block) = Block::new_terminal(half_rows, cols) {
-                    if let Some((new_pane, _split)) =
-                        tab.panes.split(pane_grid::Axis::Horizontal, pane, block)
-                    {
-                        if let Some(old_block) = tab.panes.get_mut(pane) {
-                            old_block.resize(half_rows, cols);
-                        }
-                        tab.focus = Some(new_pane);
-                    }
-                }
-                self.resize_all_panes();
             }
             Message::ClosePaneId(pane) => {
                 // Destroy any webview associated with this pane before removing it.
@@ -925,22 +875,12 @@ impl Alterm {
                 };
 
                 let block = Block::new_ai_chat(provider_name, model_name);
-                let tab = self.active_tab_mut();
-                if let Some(focused) = tab.focus {
-                    if let Some((new_pane, _split)) =
-                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
-                    {
-                        tab.focus = Some(new_pane);
-                        // Auto-focus the text_input and fetch models.
-                        self.resize_all_panes();
-                        let focus_task = widget_focus(WidgetId::from(
-                            format!("ai-chat-input-{:?}", new_pane),
-                        ));
-                        let fetch_task = self.update(Message::AIFetchModels(new_pane));
-                        return Task::batch([focus_task, fetch_task]);
-                    }
-                }
-                self.resize_all_panes();
+                let new_pane = self.add_window(block);
+                let focus_task = widget_focus(WidgetId::from(
+                    format!("ai-chat-input-{:?}", new_pane),
+                ));
+                let fetch_task = self.update(Message::AIFetchModels(new_pane));
+                return Task::batch([focus_task, fetch_task]);
             }
 
             Message::AIInputChanged(pane, value) => {
@@ -1167,15 +1107,7 @@ impl Alterm {
                 }
                 // Open a new settings pane.
                 let block = Block::new_settings(self.config.clone());
-                let tab = self.active_tab_mut();
-                if let Some(focused) = tab.focus {
-                    if let Some((new_pane, _split)) =
-                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
-                    {
-                        tab.focus = Some(new_pane);
-                    }
-                }
-                self.resize_all_panes();
+                self.add_window(block);
             }
             Message::SettingsChanged(pane, field) => {
                 let tab = self.active_tab_mut();
@@ -1221,26 +1153,14 @@ impl Alterm {
             Message::OpenBrowser => {
                 let url = "https://www.google.com";
                 let block = Block::new_browser(url);
-                let tab = self.active_tab_mut();
-                if let Some(focused) = tab.focus {
-                    if let Some((new_pane, _split)) =
-                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
-                    {
-                        tab.focus = Some(new_pane);
-                        // Resize first so pane_regions are up to date, then create webview.
-                        self.resize_all_panes();
-                        self.create_browser_webview(new_pane, url);
-                        // Pump GTK immediately so the webview starts rendering.
-                        webview_manager::pump_gtk_events();
-                        // Resize again to ensure webview bounds match final layout.
-                        self.resize_all_panes();
-
-                        return widget_focus(WidgetId::from(
-                            format!("browser-url-input-{:?}", new_pane),
-                        ));
-                    }
-                }
+                let new_pane = self.add_window(block);
+                // Create the webview against the final (post-rebuild) pane id.
+                self.create_browser_webview(new_pane, url);
+                webview_manager::pump_gtk_events();
                 self.resize_all_panes();
+                return widget_focus(WidgetId::from(
+                    format!("browser-url-input-{:?}", new_pane),
+                ));
             }
             Message::BrowserNavigate(pane, url) => {
                 let tab = self.active_tab_mut();
@@ -1286,15 +1206,7 @@ impl Alterm {
                     .unwrap_or_else(|| std::path::PathBuf::from("/"));
                 let path_str = start_path.to_string_lossy().to_string();
                 let block = Block::new_preview(&path_str);
-                let tab = self.active_tab_mut();
-                if let Some(focused) = tab.focus {
-                    if let Some((new_pane, _split)) =
-                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
-                    {
-                        tab.focus = Some(new_pane);
-                    }
-                }
-                self.resize_all_panes();
+                self.add_window(block);
             }
             Message::PreviewNavigate(pane, path) => {
                 let tab = self.active_tab_mut();
@@ -1391,15 +1303,7 @@ impl Alterm {
                 }
                 // Open a new hotkey info pane.
                 let block = Block::new_hotkey_info();
-                let tab = self.active_tab_mut();
-                if let Some(focused) = tab.focus {
-                    if let Some((new_pane, _split)) =
-                        tab.panes.split(pane_grid::Axis::Vertical, focused, block)
-                    {
-                        tab.focus = Some(new_pane);
-                    }
-                }
-                self.resize_all_panes();
+                self.add_window(block);
             }
 
             // Command palette messages
