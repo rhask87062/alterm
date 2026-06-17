@@ -28,6 +28,12 @@ pub enum Action {
     CommandPalette,
     OpenSettings,
     ToggleAIChat,
+    NewTerminal,
+    NewBrowser,
+    NewPreview,
+    ShowHotkeyInfo,
+    ToggleTheme,
+    Search,
     Copy,
     Paste,
     ScrollUp,
@@ -57,6 +63,12 @@ impl Action {
             Action::CommandPalette => "Command Palette",
             Action::OpenSettings => "Open Settings",
             Action::ToggleAIChat => "Toggle AI Chat",
+            Action::NewTerminal => "New Terminal",
+            Action::NewBrowser => "New Browser",
+            Action::NewPreview => "New File Preview",
+            Action::ShowHotkeyInfo => "Keyboard Shortcuts",
+            Action::ToggleTheme => "Toggle Theme",
+            Action::Search => "Search",
             Action::Copy => "Copy",
             Action::Paste => "Paste",
             Action::ScrollUp => "Scroll Up",
@@ -86,6 +98,12 @@ impl Action {
             Action::CommandPalette => "Ctrl+Shift+P",
             Action::OpenSettings => "Ctrl+Shift+,",
             Action::ToggleAIChat => "Ctrl+Shift+A",
+            Action::NewTerminal => "Ctrl+Shift+N",
+            Action::NewBrowser => "Ctrl+Shift+B",
+            Action::NewPreview => "Ctrl+Shift+O",
+            Action::ShowHotkeyInfo => "Ctrl+Shift+H",
+            Action::ToggleTheme => "Ctrl+Shift+L",
+            Action::Search => "Ctrl+Shift+F",
             Action::Copy => "Ctrl+Shift+C",
             Action::Paste => "Ctrl+Shift+V",
             Action::ScrollUp => "Shift+Up",
@@ -155,6 +173,12 @@ pub fn match_shortcut(key: &Key, mods: &Modifiers) -> Option<Action> {
                 "z" => return Some(Action::MaximizeToggle),
                 "p" => return Some(Action::CommandPalette),
                 "a" => return Some(Action::ToggleAIChat),
+                "n" => return Some(Action::NewTerminal),
+                "b" => return Some(Action::NewBrowser),
+                "o" => return Some(Action::NewPreview),
+                "h" => return Some(Action::ShowHotkeyInfo),
+                "l" => return Some(Action::ToggleTheme),
+                "f" => return Some(Action::Search),
                 "c" => return Some(Action::Copy),
                 "v" => return Some(Action::Paste),
                 "," => return Some(Action::OpenSettings),
@@ -198,9 +222,68 @@ pub fn all_palette_actions() -> Vec<Action> {
         Action::CommandPalette,
         Action::OpenSettings,
         Action::ToggleAIChat,
+        Action::NewTerminal,
+        Action::NewBrowser,
+        Action::NewPreview,
+        Action::ShowHotkeyInfo,
+        Action::ToggleTheme,
+        Action::Search,
         Action::Copy,
         Action::Paste,
         Action::ScrollPageUp,
         Action::ScrollPageDown,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctrl_shift(ch: &str) -> Option<Action> {
+        let key = Key::Character(ch.into());
+        let mods = Modifiers::CTRL | Modifiers::SHIFT;
+        match_shortcut(&key, &mods)
+    }
+
+    #[test]
+    fn new_window_shortcuts_match() {
+        assert_eq!(ctrl_shift("n"), Some(Action::NewTerminal));
+        assert_eq!(ctrl_shift("b"), Some(Action::NewBrowser));
+        assert_eq!(ctrl_shift("o"), Some(Action::NewPreview));
+        assert_eq!(ctrl_shift("h"), Some(Action::ShowHotkeyInfo));
+        assert_eq!(ctrl_shift("l"), Some(Action::ToggleTheme));
+        assert_eq!(ctrl_shift("f"), Some(Action::Search));
+    }
+
+    #[test]
+    fn new_actions_have_hints_and_labels() {
+        for action in [
+            Action::NewTerminal,
+            Action::NewBrowser,
+            Action::NewPreview,
+            Action::ShowHotkeyInfo,
+            Action::ToggleTheme,
+            Action::Search,
+        ] {
+            assert!(!action.shortcut_hint().is_empty());
+            assert!(!action.label().is_empty());
+        }
+        assert_eq!(Action::NewPreview.shortcut_hint(), "Ctrl+Shift+O");
+        assert_eq!(Action::Search.shortcut_hint(), "Ctrl+Shift+F");
+    }
+
+    #[test]
+    fn new_actions_are_in_palette() {
+        let actions = all_palette_actions();
+        for a in [
+            Action::NewTerminal,
+            Action::NewBrowser,
+            Action::NewPreview,
+            Action::ShowHotkeyInfo,
+            Action::ToggleTheme,
+            Action::Search,
+        ] {
+            assert!(actions.contains(&a), "missing {a:?} in palette actions");
+        }
+    }
 }
