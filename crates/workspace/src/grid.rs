@@ -216,5 +216,31 @@ mod tests {
         for (_old, new) in &info.remap {
             assert!(state.get(*new).is_some());
         }
+        // Verify the remap target holds the pre-existing content.
+        assert_eq!(*state.get(info.remap[0].1).unwrap(), 1);
+        // Verify the remap target is distinct from the new pane.
+        assert_ne!(info.remap[0].1, info.new_pane);
+    }
+
+    #[test]
+    fn rebuild_remap_targets_hold_preexisting_content() {
+        let (mut state, _first) = State::new(1u32);
+        // Add window 2.
+        rebuild_with_new(&mut state, 2u32, || 0u32);
+        // Add window 3 and capture the remap info.
+        let info = rebuild_with_new(&mut state, 3u32, || 0u32);
+        // Two pre-existing windows: holding 1 and 2.
+        assert_eq!(info.remap.len(), 2);
+        // Remap targets hold pre-existing content in order [1, 2].
+        let remap_contents: Vec<u32> = info
+            .remap
+            .iter()
+            .map(|(_, new)| *state.get(*new).unwrap())
+            .collect();
+        assert_eq!(remap_contents, vec![1, 2]);
+        // new_pane holds the newly added window 3.
+        assert_eq!(*state.get(info.new_pane).unwrap(), 3);
+        // Final state has all three windows in order.
+        assert_eq!(ordered_contents(&state), vec![1, 2, 3]);
     }
 }
