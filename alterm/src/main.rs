@@ -590,6 +590,15 @@ impl Alterm {
                 self.scroll_focused(-rows);
                 Task::none()
             }
+            Action::NewTerminal => self.update(Message::SidebarNewTerminal),
+            Action::NewBrowser => self.update(Message::OpenBrowser),
+            Action::NewPreview => self.update(Message::OpenPreview),
+            Action::ShowHotkeyInfo => self.update(Message::ShowHotkeyInfo),
+            Action::ToggleTheme => self.update(Message::ToggleTheme),
+            Action::Search => {
+                log::debug!("Search — not yet implemented");
+                Task::none()
+            }
         }
     }
 
