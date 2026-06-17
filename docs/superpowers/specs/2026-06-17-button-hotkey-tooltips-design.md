@@ -33,10 +33,17 @@ get new bindings so every tooltip can show a real hotkey.
    | Terminal      | `SidebarNewTerminal`           | —               | `Ctrl+Shift+N` |
    | AI            | `ToggleAIChat`                 | `Ctrl+Shift+A`  | (unchanged)    |
    | Browser       | `OpenBrowser`                  | —               | `Ctrl+Shift+B` |
-   | Preview       | `OpenPreview`                  | —               | `Ctrl+Shift+F` |
+   | Preview       | `OpenPreview`                  | —               | `Ctrl+Shift+O` |
    | Settings      | `OpenSettings`                 | `Ctrl+Shift+,`  | (unchanged)    |
    | Info          | `ShowHotkeyInfo`               | —               | `Ctrl+Shift+H` |
    | Theme         | `ToggleTheme`                  | —               | `Ctrl+Shift+L` |
+
+5. **Reserve `Ctrl+Shift+F` for terminal search.** Add an `Action::Search`
+   variant bound to `Ctrl+Shift+F` and routed to a no-op stub (matching the
+   existing `Copy`/`RenameTab` "not yet implemented" pattern). It appears in the
+   command palette and Info pane but has **no sidebar button / tooltip**. The
+   real search feature (find bar, scrollback match, next/prev navigation) is
+   deferred to its own spec.
 
 3. **Tooltip content:** name + shortcut on a single line, e.g.
    `New Terminal  (Ctrl+Shift+N)`.
@@ -48,16 +55,19 @@ get new bindings so every tooltip can show a real hotkey.
 
 ### Keybindings (`crates/workspace/src/keybindings.rs`)
 
-Add five variants to `Action`:
-`NewTerminal`, `NewBrowser`, `NewPreview`, `ShowHotkeyInfo`, `ToggleTheme`.
+Add six variants to `Action`:
+`NewTerminal`, `NewBrowser`, `NewPreview`, `ShowHotkeyInfo`, `ToggleTheme`, and
+`Search` (reserved stub).
 
 Extend each of the existing match arms:
 - `label()` — human-readable names ("New Terminal", "New Browser", "New File
-  Preview", "Keyboard Shortcuts", "Toggle Theme").
-- `shortcut_hint()` — the strings from the table above.
+  Preview", "Keyboard Shortcuts", "Toggle Theme", "Search").
+- `shortcut_hint()` — the strings from the table above plus `Search →
+  "Ctrl+Shift+F"`.
 - `match_shortcut()` — in the `Ctrl+Shift` letter block add `n → NewTerminal`,
-  `b → NewBrowser`, `f → NewPreview`, `h → ShowHotkeyInfo`, `l → ToggleTheme`.
-- `all_palette_actions()` — include the five new actions so they appear in the
+  `b → NewBrowser`, `o → NewPreview`, `h → ShowHotkeyInfo`, `l → ToggleTheme`,
+  `f → Search`.
+- `all_palette_actions()` — include all six new actions so they appear in the
   command palette and hotkey-reference pane (keeping a single source of truth).
 
 ### Dispatch (`alterm/src/main.rs::dispatch_action`)
@@ -68,15 +78,19 @@ Add arms routing the new actions to the same Messages the sidebar already emits:
 - `Action::NewPreview => self.update(Message::OpenPreview)`
 - `Action::ShowHotkeyInfo => self.update(Message::ShowHotkeyInfo)`
 - `Action::ToggleTheme => self.update(Message::ToggleTheme)`
+- `Action::Search => { log::debug!("Search — not yet implemented"); Task::none() }`
+  (no-op stub, same pattern as `Copy`/`RenameTab`)
 
 ### Hotkey reference pane (`alterm/src/main.rs::hotkey_info_view`)
 
 Add a new `WINDOWS` category section listing the five new-window actions
 (`NewTerminal`, `NewBrowser`, `NewPreview`, `ShowHotkeyInfo`, `ToggleTheme`) so
 the in-app shortcut list stays accurate. The existing `ToggleAIChat` and
-`OpenSettings` rows stay in the `TOOLS` section. Because rows are built from a
-filtered list + `shortcut_hint()`, this means adding a `windows_actions`
-`matches!` filter and one more `build_section("WINDOWS", ...)` call.
+`OpenSettings` rows stay in the `TOOLS` section. The reserved `Search` action is
+added to the existing `TERMINAL` section (alongside Copy/Paste/Scroll). Because
+rows are built from a filtered list + `shortcut_hint()`, this means adding a
+`windows_actions` `matches!` filter and one more `build_section("WINDOWS", ...)`
+call, plus adding `Search` to the terminal-actions filter.
 
 ### Sidebar tooltips (`crates/workspace/src/sidebar.rs`)
 
@@ -108,7 +122,7 @@ before. Tooltips render only on hover and have no failure modes.
 
 - `cargo build` / `cargo clippy` clean.
 - Unit test in `keybindings.rs`: assert `match_shortcut` returns the correct new
-  `Action` for each of `Ctrl+Shift+{N,B,F,H,L}`, and that `shortcut_hint()` for
+  `Action` for each of `Ctrl+Shift+{N,B,O,H,L,F}`, and that `shortcut_hint()` for
   each new action is non-empty and matches the documented string.
 - Manual verification: hover each sidebar button → tooltip shows the right text
   to the left of the button; press each new hotkey → the corresponding window
@@ -116,6 +130,9 @@ before. Tooltips render only on hover and have no failure modes.
 
 ## Out of Scope (YAGNI)
 
+- The real terminal **search** feature (find bar, scrollback matching, match
+  highlight, next/prev navigation). Only the `Ctrl+Shift+F` binding and stub are
+  added here; the feature gets its own spec.
 - User-configurable / remappable keybindings.
 - Tooltips on pane title-bar or other buttons.
 - Animating or delaying tooltip appearance beyond iced defaults.
