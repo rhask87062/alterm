@@ -1468,11 +1468,17 @@ impl Alterm {
                     let tab = self.active_tab_mut();
                     if let Some(focused) = tab.focus {
                         if let Some(block) = tab.panes.get_mut(focused) {
-                            let mut paste_bytes = Vec::new();
-                            paste_bytes.extend_from_slice(b"\x1b[200~");
-                            paste_bytes.extend_from_slice(text.as_bytes());
-                            paste_bytes.extend_from_slice(b"\x1b[201~");
-                            block.write_input(&paste_bytes);
+                            // Send raw text directly. Wrapping with bracketed-
+                            // paste markers (\x1b[200~ … \x1b[201~) causes bash
+                            // to insert the text but defer redrawing the prompt
+                            // until the next input event, so the paste appears
+                            // invisible until the user hits a key. Sending raw
+                            // bytes makes the paste show up immediately.
+                            //
+                            // Caveat: multi-line pastes will execute each line
+                            // as a separate command (legacy pre-bracketed-paste
+                            // behavior).
+                            block.write_input(text.as_bytes());
                             block.reset_cursor_blink();
                         }
                     }
