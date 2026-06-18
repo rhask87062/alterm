@@ -3,9 +3,10 @@
 /// `AIChatState` holds the message history, input buffer, and streaming state
 /// for a single AI chat session. It is embedded inside `Block::AIChat`.
 use ai::{ChatMessage, Role};
+use serde::{Serialize, Deserialize};
 
 /// A single message in the chat display.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DisplayMessage {
     /// `"user"`, `"assistant"`, or `"error"`.
     pub role: String,
