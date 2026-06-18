@@ -1,0 +1,346 @@
+/* ============================================================================
+   Alterm website — global design system
+   Aesthetic: "Living Terminal" — deep violet-black canvas, neon-magenta accents,
+   gradient chrome, scanlines + grain atmosphere.
+   ========================================================================== */
+
+:root {
+  /* ---- Brand palette (sampled from the app icon) ---- */
+  --bg: #0d0814;
+  --bg-elev: #160e22;
+  --bg-elev-2: #1d1430;
+  --purple-deep: #280056;
+  --purple-core: #56008d;
+  --purple-mid: #a021d6;
+  --orchid: #d450fc;
+  --accent: #f977ff;
+  --accent-dim: #c45cf0;
+
+  --text: #ece6f5;
+  --text-muted: #9a8fb0;
+  --text-faint: #6c6285;
+
+  --line: #2a1f3d;
+  --line-bright: #3d2c57;
+
+  /* ANSI-ish accents for the terminal demo */
+  --term-green: #5ef2b0;
+  --term-cyan: #6fdfff;
+  --term-yellow: #ffd56b;
+  --term-red: #ff6b9d;
+
+  /* ---- Signature gradients ---- */
+  --grad-brand: linear-gradient(135deg, var(--purple-core), var(--purple-mid) 55%, var(--orchid));
+  --grad-text: linear-gradient(120deg, #e9b6ff 0%, var(--accent) 40%, var(--orchid) 75%, #b06bff 100%);
+  --grad-chrome: linear-gradient(135deg, var(--purple-core), var(--orchid));
+
+  /* ---- Type ---- */
+  --font-display: "Syne Variable", "Syne", system-ui, sans-serif;
+  --font-body: "Hanken Grotesk Variable", "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+
+  /* ---- Spacing / shape ---- */
+  --radius: 16px;
+  --radius-sm: 10px;
+  --maxw: 1180px;
+  --glow: 0 0 0 1px rgba(249, 119, 255, 0.25), 0 0 32px -6px rgba(249, 119, 255, 0.55);
+}
+
+/* ---- Reset ---- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+* {
+  margin: 0;
+}
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  font-size: 17px;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+/* ---- Atmospheric background layers (fixed, behind everything) ---- */
+.fx {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.fx-mesh {
+  background:
+    radial-gradient(60% 50% at 82% -5%, rgba(212, 80, 252, 0.18), transparent 70%),
+    radial-gradient(55% 45% at 8% 12%, rgba(86, 0, 141, 0.32), transparent 70%),
+    radial-gradient(70% 60% at 50% 115%, rgba(160, 33, 214, 0.18), transparent 70%);
+}
+.fx-grid {
+  background-image:
+    linear-gradient(rgba(124, 98, 133, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 98, 133, 0.06) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(circle at 50% 0%, black, transparent 75%);
+}
+.fx-scan {
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.012) 0px,
+    rgba(255, 255, 255, 0.012) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+.fx-grain {
+  opacity: 0.05;
+  mix-blend-mode: screen;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---- Layout ---- */
+.container {
+  width: 100%;
+  max-width: var(--maxw);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+section {
+  position: relative;
+  padding-block: clamp(64px, 9vw, 128px);
+}
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+}
+.eyebrow::before {
+  content: ">";
+  color: var(--text-faint);
+}
+
+/* ---- Headings ---- */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+}
+.h-section {
+  font-size: clamp(2rem, 4.5vw, 3.25rem);
+  margin-block: 0.4em 0.5em;
+  max-width: 18ch;
+}
+.gradient-text {
+  background: var(--grad-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.lead {
+  color: var(--text-muted);
+  font-size: clamp(1.02rem, 1.6vw, 1.2rem);
+  max-width: 56ch;
+}
+
+/* ---- Buttons ---- */
+.btn {
+  --btn-bg: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0.85em 1.4em;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-bright);
+  background: var(--btn-bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.25s ease, border-color 0.25s ease,
+    background 0.25s ease;
+  will-change: transform;
+}
+.btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+.btn-primary {
+  border: none;
+  background: var(--grad-chrome);
+  color: #faf3ff;
+  box-shadow: 0 8px 30px -10px rgba(212, 80, 252, 0.7);
+}
+.btn-primary:hover {
+  box-shadow: 0 12px 38px -8px rgba(249, 119, 255, 0.85);
+}
+.btn-ghost:hover {
+  background: rgba(249, 119, 255, 0.08);
+  box-shadow: var(--glow);
+}
+.btn svg {
+  width: 1.05em;
+  height: 1.05em;
+}
+
+/* ---- Recolorable mask icons (sidebar SVGs are stroke-art) ---- */
+.icon {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+/* ---- Cards ---- */
+.card {
+  position: relative;
+  background: linear-gradient(180deg, var(--bg-elev), var(--bg));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 26px;
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.3s ease;
+  overflow: hidden;
+}
+.card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--grad-brand);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 50px -28px rgba(212, 80, 252, 0.6);
+}
+.card:hover::after {
+  opacity: 0.9;
+}
+
+/* tag pill (e.g. "planned") */
+.tag {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2em 0.6em;
+  border-radius: 999px;
+  border: 1px solid var(--line-bright);
+  color: var(--text-muted);
+}
+.tag-planned {
+  color: var(--term-yellow);
+  border-color: rgba(255, 213, 107, 0.35);
+}
+.tag-live {
+  color: var(--term-green);
+  border-color: rgba(94, 242, 176, 0.35);
+}
+
+/* ---- Scroll reveal ---- */
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* blinking cursor */
+.cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.05em;
+  margin-left: 0.1em;
+  translate: 0 0.16em;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  animation: blink 1.05s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* divider */
+.rule {
+  height: 1px;
+  border: 0;
+  background: linear-gradient(90deg, transparent, var(--line-bright), transparent);
+}
+
+/* ---- Accessibility: honor reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: rgba(249, 119, 255, 0.3);
+  color: #fff;
+}

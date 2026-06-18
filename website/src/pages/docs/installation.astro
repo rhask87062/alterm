@@ -1,0 +1,62 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout
+  title="Installation"
+  description="Build Alterm from source with Cargo, or package a release for Linux, macOS, or Windows."
+>
+  <p>
+    Alterm is currently distributed as source. Building it takes one Cargo command. Packaged
+    installers (<code>.deb</code>, <code>.rpm</code>, Homebrew, Winget) are on the roadmap.
+  </p>
+
+  <h2>Build from source</h2>
+  <p>Requires <strong>Rust 1.80+</strong>. Clone the repository and install the binary:</p>
+  <pre><code>git clone https://github.com/rhask87062/alterm.git
+cd alterm
+cargo build --release
+cargo install --path alterm</code></pre>
+  <p>
+    The <code>alterm</code> binary is then available on your <code>PATH</code> (under
+    <code>~/.cargo/bin</code>).
+  </p>
+
+  <div class="note">
+    <p>
+      First launch creates <code>~/.config/alterm/config.toml</code> from the defaults. See
+      <a href="../configuration">Configuration</a> for what you can change.
+    </p>
+  </div>
+
+  <h2>Packaging a release</h2>
+  <p>The <code>packaging/</code> scripts produce native bundles per platform.</p>
+
+  <h3>Linux</h3>
+  <pre><code>./packaging/build-release.sh linux</code></pre>
+  <p>Produces:</p>
+  <ul>
+    <li><code>dist/alterm_&lt;version&gt;_&lt;arch&gt;.deb</code></li>
+    <li><code>dist/alterm-&lt;version&gt;-linux-&lt;arch&gt;.tar.gz</code></li>
+  </ul>
+
+  <h3>macOS</h3>
+  <pre><code>./packaging/build-release.sh macos</code></pre>
+  <p>Produces <code>dist/Alterm.app</code> and <code>dist/alterm-&lt;version&gt;-macos-&lt;arch&gt;.pkg</code>.
+    Requires Apple <code>pkgbuild</code>.</p>
+
+  <h3>Windows</h3>
+  <pre><code>pwsh -File .\packaging\windows\build-installer.ps1</code></pre>
+  <p>
+    Produces <code>dist\alterm-&lt;version&gt;-windows-x64-setup.exe</code>. Requires Inno Setup
+    (<code>ISCC.exe</code>) on your <code>PATH</code>.
+  </p>
+
+  <h2>Planned distribution</h2>
+  <ul>
+    <li><code>.deb</code> (Debian / Ubuntu) and <code>.rpm</code> (Fedora / RHEL)</li>
+    <li>Homebrew formula (macOS)</li>
+    <li>Winget / MSIX (Windows)</li>
+    <li>Flatpak (cross-distro Linux)</li>
+  </ul>
+</DocsLayout>

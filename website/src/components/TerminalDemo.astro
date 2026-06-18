@@ -1,0 +1,443 @@
+---
+import { url } from "../lib/site";
+
+const sideIcons = [
+  { key: "terminal", label: "Terminal", active: true },
+  { key: "folder", label: "Files" },
+  { key: "browser", label: "Browser" },
+  { key: "info", label: "Info" },
+  { key: "settings", label: "Settings" },
+];
+const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
+---
+
+<div class="demo reveal" role="img" aria-label="Stylized preview of the Alterm terminal workspace: a tiling split with a shell on the left and an AI chat pane on the right.">
+  <div class="window">
+    <div class="titlebar">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span class="tabs">
+        <span class="tab active">zsh</span>
+        <span class="tab">server</span>
+        <span class="tab">ai</span>
+        <span class="tab plus">+</span>
+      </span>
+    </div>
+
+    <div class="body">
+      <aside class="sidebar" aria-hidden="true">
+        {
+          sideIcons.map((s) => (
+            <span class={`side-btn ${s.active ? "is-active" : ""}`} title={s.label}>
+              <span
+                class="icon"
+                style={`-webkit-mask-image:url(${iconUrl(s.key)});mask-image:url(${iconUrl(s.key)})`}
+              />
+            </span>
+          ))
+        }
+        <span class="side-spacer"></span>
+        <span class="side-btn">
+          <span
+            class="icon"
+            style={`-webkit-mask-image:url(${iconUrl("darkmode")});mask-image:url(${iconUrl("darkmode")})`}
+          ></span>
+        </span>
+      </aside>
+
+      <div class="panes">
+        <section class="pane term" aria-hidden="true">
+          <div class="pane-tag">~/dev/alterm</div>
+          <pre id="term-out" class="term-out"></pre>
+        </section>
+
+        <div class="divider" aria-hidden="true"></div>
+
+        <section class="pane aside-pane" aria-hidden="true">
+          <div class="pane-tag accent-tag">AI · claude</div>
+          <div class="chat">
+            <div class="msg user">why is the release build slow?</div>
+            <div class="msg bot">
+              <p>Your <code>opt-level</code> is fine — the cost is debug symbols. Add to
+                <code>Cargo.toml</code>:</p>
+              <pre class="snippet"><span class="c-sect">[profile.release]</span>
+<span class="c-key">strip</span> = <span class="c-val">true</span>
+<span class="c-key">lto</span>   = <span class="c-val">"thin"</span></pre>
+              <p class="hint">Want me to run <code>cargo build --release</code> and time it?</p>
+              <div class="actions">
+                <span class="chip ok">Run</span><span class="chip">Dismiss</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+  <div class="demo-caption">A stylized preview — the real app is in active development.</div>
+</div>
+
+<script>
+  type Line = { txt: string; cls?: string };
+  type Step = { prompt: string; cmd: string; out: Line[] };
+
+  const steps: Step[] = [
+    {
+      prompt: "❯",
+      cmd: "cargo build --release",
+      out: [
+        { txt: "   Compiling alterm v0.1.0", cls: "c-cyan" },
+        { txt: "    Finished `release` profile [optimized] in 9.41s", cls: "c-green" },
+      ],
+    },
+    {
+      prompt: "❯",
+      cmd: "alterm",
+      out: [
+        { txt: "▸ wgpu: vulkan · 60fps · cold start 0.62s · 41MB", cls: "c-dim" },
+        { txt: "▸ workspace ready — drag a block header to split", cls: "c-dim" },
+      ],
+    },
+    {
+      prompt: "❯",
+      cmd: "git status -sb",
+      out: [
+        { txt: "## main...origin/main", cls: "c-dim" },
+        { txt: " M crates/gpu-renderer/src/atlas.rs", cls: "c-yellow" },
+        { txt: "?? website/", cls: "c-red" },
+      ],
+    },
+  ];
+
+  const out = document.getElementById("term-out");
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  function renderStatic() {
+    if (!out) return;
+    let html = "";
+    for (const s of steps) {
+      html += `<span class="ps1">${esc(s.prompt)}</span> ${esc(s.cmd)}\n`;
+      for (const l of s.out) html += `<span class="${l.cls ?? ""}">${esc(l.txt)}</span>\n`;
+    }
+    html += `<span class="ps1">❯</span> <span class="cursor"></span>`;
+    out.innerHTML = html;
+  }
+
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  async function run() {
+    if (!out) return;
+    if (reduce) {
+      renderStatic();
+      return;
+    }
+    // loop forever
+    for (;;) {
+      out.innerHTML = "";
+      for (const s of steps) {
+        const ps = document.createElement("span");
+        ps.innerHTML = `<span class="ps1">${esc(s.prompt)}</span> `;
+        out.appendChild(ps);
+        const typed = document.createElement("span");
+        out.appendChild(typed);
+        const cur = document.createElement("span");
+        cur.className = "cursor";
+        out.appendChild(cur);
+
+        for (const ch of s.cmd) {
+          typed.textContent += ch;
+          await wait(38 + Math.random() * 45);
+        }
+        await wait(260);
+        cur.remove();
+        out.appendChild(document.createTextNode("\n"));
+        for (const l of s.out) {
+          const span = document.createElement("span");
+          span.className = l.cls ?? "";
+          span.textContent = l.txt + "\n";
+          out.appendChild(span);
+          await wait(120);
+        }
+        await wait(520);
+      }
+      const idle = document.createElement("span");
+      idle.innerHTML = `<span class="ps1">❯</span> <span class="cursor"></span>`;
+      out.appendChild(idle);
+      await wait(2600);
+    }
+  }
+
+  run();
+</script>
+
+<style>
+  .demo {
+    width: 100%;
+    perspective: 1600px;
+  }
+  .window {
+    border-radius: 14px;
+    overflow: hidden;
+    background: #120b1d;
+    border: 1px solid var(--line-bright);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 40px 90px -40px rgba(212, 80, 252, 0.55),
+      0 0 0 1px rgba(249, 119, 255, 0.08);
+    transform: rotateX(3deg) rotateY(-3deg);
+    transition: transform 0.5s ease;
+  }
+  .demo:hover .window {
+    transform: rotateX(0deg) rotateY(0deg);
+  }
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    height: 38px;
+    padding-inline: 14px;
+    background: var(--grad-chrome);
+    position: relative;
+  }
+  .titlebar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 40%);
+  }
+  .dots {
+    display: inline-flex;
+    gap: 7px;
+    z-index: 1;
+  }
+  .dots i {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.55);
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.25) inset;
+  }
+  .tabs {
+    display: inline-flex;
+    gap: 6px;
+    z-index: 1;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+  }
+  .tab {
+    padding: 0.2em 0.7em;
+    border-radius: 6px 6px 0 0;
+    color: rgba(255, 255, 255, 0.78);
+    background: rgba(0, 0, 0, 0.14);
+  }
+  .tab.active {
+    background: #120b1d;
+    color: var(--text);
+  }
+  .tab.plus {
+    background: transparent;
+  }
+
+  .body {
+    display: flex;
+    height: 340px;
+  }
+  .sidebar {
+    width: 50px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 0;
+    background: #0e0818;
+    border-right: 1px solid var(--line);
+  }
+  .side-btn {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    color: var(--text-faint);
+    transition: color 0.2s ease, background 0.2s ease;
+  }
+  .side-btn:hover {
+    color: var(--accent);
+    background: rgba(249, 119, 255, 0.08);
+  }
+  .side-btn.is-active {
+    color: var(--accent);
+    background: rgba(249, 119, 255, 0.12);
+    box-shadow: var(--glow);
+  }
+  .side-btn .icon {
+    width: 19px;
+    height: 19px;
+  }
+  .side-spacer {
+    flex: 1;
+  }
+
+  .panes {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+  }
+  .pane {
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .pane.term {
+    flex: 1.35;
+    padding: 26px 14px 14px;
+  }
+  .pane.aside-pane {
+    flex: 1;
+    padding: 26px 14px 14px;
+    background: #0f0a1a;
+  }
+  .pane-tag {
+    position: absolute;
+    top: 8px;
+    left: 14px;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+  }
+  .accent-tag {
+    color: var(--accent);
+  }
+  .divider {
+    width: 1px;
+    background: var(--grad-brand);
+    opacity: 0.6;
+    flex: none;
+  }
+  .term-out {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+  }
+  :global(.term-out .ps1) {
+    color: var(--accent);
+  }
+  :global(.term-out .c-green) {
+    color: var(--term-green);
+  }
+  :global(.term-out .c-cyan) {
+    color: var(--term-cyan);
+  }
+  :global(.term-out .c-yellow) {
+    color: var(--term-yellow);
+  }
+  :global(.term-out .c-red) {
+    color: var(--term-red);
+  }
+  :global(.term-out .c-dim) {
+    color: var(--text-muted);
+  }
+
+  /* AI chat mock */
+  .chat {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-size: 0.78rem;
+  }
+  .msg {
+    border-radius: 10px;
+    padding: 9px 11px;
+    line-height: 1.5;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: rgba(249, 119, 255, 0.12);
+    border: 1px solid rgba(249, 119, 255, 0.28);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+  }
+  .msg.bot {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    color: var(--text-muted);
+  }
+  .msg.bot code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    color: var(--orchid);
+  }
+  .snippet {
+    margin: 8px 0;
+    padding: 9px 11px;
+    background: #0a0613;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .c-sect {
+    color: var(--term-cyan);
+  }
+  .c-key {
+    color: var(--accent);
+  }
+  .c-val {
+    color: var(--term-green);
+  }
+  .hint {
+    margin-top: 6px;
+    color: var(--text-faint);
+  }
+  .actions {
+    display: flex;
+    gap: 7px;
+    margin-top: 9px;
+  }
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    padding: 0.25em 0.7em;
+    border-radius: 999px;
+    border: 1px solid var(--line-bright);
+    color: var(--text-muted);
+  }
+  .chip.ok {
+    color: var(--term-green);
+    border-color: rgba(94, 242, 176, 0.4);
+  }
+  .demo-caption {
+    text-align: center;
+    margin-top: 14px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-faint);
+  }
+
+  @media (max-width: 560px) {
+    .sidebar {
+      width: 42px;
+    }
+    .aside-pane {
+      display: none;
+    }
+    .divider {
+      display: none;
+    }
+    .body {
+      height: 300px;
+    }
+  }
+</style>

@@ -1,0 +1,114 @@
+---
+import { SITE, NAV, url } from "../lib/site";
+---
+
+<header class="site-header">
+  <div class="container bar">
+    <a class="brand" href={url("/")} aria-label={`${SITE.name} home`}>
+      <span class="brand-mark" aria-hidden="true">
+        <img src={url("/brand/alterm.png")} alt="" width="28" height="28" />
+      </span>
+      <span class="brand-name">alterm</span>
+    </a>
+
+    <nav class="nav" aria-label="Primary">
+      {NAV.map((item) => <a href={url(item.href)}>{item.label}</a>)}
+    </nav>
+
+    <div class="header-cta">
+      <a class="btn btn-ghost star" href={SITE.repo} target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"
+          ><path
+            d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"
+          ></path></svg
+        >
+        Star
+      </a>
+    </div>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(14px) saturate(120%);
+    background: rgba(13, 8, 20, 0.62);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    height: 64px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55em;
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+  }
+  .brand-mark img {
+    border-radius: 7px;
+    box-shadow: 0 0 18px -4px rgba(212, 80, 252, 0.7);
+  }
+  .brand-name {
+    background: var(--grad-text);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .nav {
+    display: flex;
+    gap: 26px;
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.86rem;
+  }
+  .nav a {
+    color: var(--text-muted);
+    position: relative;
+    transition: color 0.2s ease;
+  }
+  .nav a::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -6px;
+    height: 1px;
+    width: 0;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    transition: width 0.25s ease;
+  }
+  .nav a:hover {
+    color: var(--text);
+  }
+  .nav a:hover::after {
+    width: 100%;
+  }
+  .header-cta {
+    display: flex;
+  }
+  .star {
+    padding: 0.5em 0.95em;
+    font-size: 0.84rem;
+  }
+  .star svg {
+    width: 0.95em;
+    height: 0.95em;
+    color: var(--term-yellow);
+  }
+  @media (max-width: 760px) {
+    .nav {
+      display: none;
+    }
+    .header-cta {
+      margin-left: auto;
+    }
+  }
+</style>
