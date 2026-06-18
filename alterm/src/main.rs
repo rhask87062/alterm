@@ -18,6 +18,7 @@ use workspace::{
     CELL_HEIGHT,
 };
 use workspace::grid;
+use workspace::session;
 
 // ---------------------------------------------------------------------------
 // Theme helpers
@@ -100,6 +101,7 @@ fn main() -> iced::Result {
             ..window::Settings::default()
         })
         .subscription(Alterm::subscription)
+        .exit_on_close_request(false)
         .run()
 }
 
@@ -267,6 +269,9 @@ enum Message {
     ToggleTheme,
     // Window handle (X11 XID) ready
     WindowHandleReady(u64),
+    // Session persistence
+    SaveSession,
+    WindowCloseRequested,
 }
 
 impl Alterm {
@@ -291,14 +296,33 @@ impl Alterm {
             Err(e) => log::warn!("Failed to load hooks.lua: {e}"),
         }
 
-        // Initial size estimate for a single-pane tab at launch.
-        // resize_all_panes() will correct this once the window opens.
-        let grid_width = (window_width - SIDEBAR_WIDTH).max(80.0);
-        let grid_height = (window_height - TAB_BAR_HEIGHT).max(40.0);
-        let content_height = (grid_height - PANE_TITLE_BAR_HEIGHT).max(CELL_HEIGHT * 2.0);
-
-        let first_tab = Tab::new_with_size(grid_width, content_height)
-            .expect("Failed to create initial tab");
+        // Restore session or build a default tab.
+        let (tabs, active_tab, window_width, window_height) = {
+            let default_session = || {
+                // Initial size estimate for a single-pane tab at launch.
+                // resize_all_panes() will correct this once the window opens.
+                let grid_width = (window_width - SIDEBAR_WIDTH).max(80.0);
+                let grid_height = (window_height - TAB_BAR_HEIGHT).max(40.0);
+                let content_height = (grid_height - PANE_TITLE_BAR_HEIGHT).max(CELL_HEIGHT * 2.0);
+                let first_tab = Tab::new_with_size(grid_width, content_height)
+                    .expect("Failed to create initial tab");
+                (vec![first_tab], 0usize, window_width, window_height)
+            };
+            let restored = if config.session.restore {
+                session::load_from_path(&session::session_path())
+                    .map(|state| session::restore(state, &config))
+                    .filter(|r| !r.tabs.is_empty())
+            } else {
+                None
+            };
+            match restored {
+                Some(r) => {
+                    let active = r.active_tab.min(r.tabs.len() - 1); // clamp to valid range
+                    (r.tabs, active, r.window.width, r.window.height)
+                }
+                None => default_session(),
+            }
+        };
 
         // Enumerate available monospace fonts for the settings dropdown.
         let available_fonts = enumerate_monospace_fonts();
@@ -308,8 +332,8 @@ impl Alterm {
             Box::leak(config.appearance.font_family.clone().into_boxed_str());
 
         let app = Alterm {
-            tabs: vec![first_tab],
-            active_tab: 0,
+            tabs,
+            active_tab,
             palette: CommandPalette::new(),
             scroll_accumulator: 0.0,
             window_width,
@@ -505,6 +529,80 @@ impl Alterm {
                 }
             }
         }
+    }
+
+    /// Save the current session to disk.
+    fn save_session(&self) {
+        let window = session::WindowState { width: self.window_width, height: self.window_height };
+        let state = session::capture(&self.tabs, self.active_tab, window);
+        if let Err(e) = session::save_to_path(&state, &session::session_path()) {
+            log::warn!("Failed to save session: {e}");
+        }
+    }
+
+    /// Create a webview for a browser pane in any tab, keyed by the explicit tab id.
+    /// Non-active tabs' panes won't appear in the active layout so fall back to default bounds.
+    fn create_browser_webview_for(&self, tab_id: u64, pane: pane_grid::Pane, url: &str) {
+        let Some(xid) = self.parent_xid else {
+            log::warn!("Cannot create webview: parent XID not yet available");
+            return;
+        };
+
+        let pane_id = webview_key(tab_id, pane);
+
+        // Try to get real bounds from the pane layout (works for active tab panes).
+        use iced::Size;
+        let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
+        let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
+        let bounds = Size::new(grid_width, grid_height);
+
+        // Find the tab by id to look up its pane layout.
+        let regions = self.tabs.iter()
+            .find(|t| t.id == tab_id)
+            .map(|t| t.panes.layout().pane_regions(PANE_GRID_SPACING, PANE_GRID_MIN_SIZE, bounds));
+
+        let (x, y, w, h) = if let Some(regions) = regions {
+            if let Some(rect) = regions.get(&pane) {
+                let wv_x = rect.x as f64;
+                let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+                let wv_w = rect.width as f64;
+                let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
+                (wv_x, wv_y, wv_w, wv_h)
+            } else {
+                // Non-active tab pane — use default bounds; resize_all_panes() corrects when tab is selected.
+                (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0)
+            }
+        } else {
+            (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0)
+        };
+
+        if let Err(e) = webview_manager::create_webview(pane_id, xid, url, (x, y, w, h)) {
+            log::error!("Failed to create webview for pane {pane_id}: {e}");
+        }
+    }
+
+    /// Create webviews for all browser panes across all tabs that don't yet have one.
+    /// Called once parent_xid becomes available (WindowHandleReady). Idempotent.
+    fn ensure_browser_webviews(&mut self) {
+        // Collect tab/pane/url tuples to avoid borrow conflicts.
+        let browser_panes: Vec<(u64, pane_grid::Pane, String)> = self.tabs.iter()
+            .flat_map(|tab| {
+                let tab_id = tab.id;
+                tab.panes.iter().filter_map(move |(pane, block)| {
+                    if let Block::Browser { state } = block {
+                        if !webview_manager::exists(webview_key(tab_id, *pane)) {
+                            return Some((tab_id, *pane, state.url.clone()));
+                        }
+                    }
+                    None
+                })
+            })
+            .collect();
+
+        for (tab_id, pane, url) in browser_panes {
+            self.create_browser_webview_for(tab_id, pane, &url);
+        }
+        self.update_webview_visibility();
     }
 
     /// Scroll the focused pane by the given number of lines.
@@ -1469,6 +1567,21 @@ impl Alterm {
             Message::WindowHandleReady(xid) => {
                 eprintln!("[WINDOW] Got raw window ID: {xid} (hex: {xid:#x})");
                 self.parent_xid = Some(xid);
+                // Create any browser webviews for restored panes now that the XID is available.
+                self.ensure_browser_webviews();
+            }
+
+            // -- Session persistence --
+            Message::SaveSession => {
+                if self.config.session.restore {
+                    self.save_session();
+                }
+            }
+            Message::WindowCloseRequested => {
+                if self.config.session.restore {
+                    self.save_session();
+                }
+                return iced::exit();
             }
         }
         Task::none()
@@ -1793,6 +1906,8 @@ impl Alterm {
     fn subscription(&self) -> Subscription<Message> {
         let tick = iced::time::every(Duration::from_millis(8)).map(|_| Message::Tick);
 
+        let save = iced::time::every(Duration::from_secs(30)).map(|_| Message::SaveSession);
+
         let events =
             iced::event::listen_with(|event, status, _window: window::Id| {
                 match &event {
@@ -1807,6 +1922,9 @@ impl Alterm {
                     }
                     Event::Window(iced::window::Event::Resized(size)) => {
                         return Some(Message::WindowResized(size.width, size.height));
+                    }
+                    Event::Window(iced::window::Event::CloseRequested) => {
+                        return Some(Message::WindowCloseRequested);
                     }
                     _ => {}
                 }
@@ -1825,7 +1943,7 @@ impl Alterm {
                 }
             });
 
-        Subscription::batch([tick, events])
+        Subscription::batch([tick, events, save])
     }
 }
 
