@@ -112,6 +112,39 @@ impl Block {
         Block::HotkeyInfo
     }
 
+    /// Reconstruct a block from its persisted state. `config` is needed to
+    /// rebuild a `Settings` pane.
+    pub fn from_state(bs: &crate::session::BlockState, config: &alterm_config::AppConfig) -> Block {
+        use crate::session::BlockState;
+        match bs {
+            BlockState::Terminal { rows, cols, .. } => {
+                Block::new_terminal((*rows).max(1), (*cols).max(1))
+                    .unwrap_or_else(|_| Block::new_hotkey_info())
+            }
+            BlockState::Browser { url, history, history_index } => {
+                let mut block = Block::new_browser(url);
+                if let Block::Browser { state } = &mut block {
+                    if !history.is_empty() {
+                        state.history = history.clone();
+                        state.history_index = (*history_index).min(history.len() - 1);
+                    }
+                }
+                block
+            }
+            BlockState::AiChat { provider, model, messages, input } => {
+                let mut block = Block::new_ai_chat(provider.clone(), model.clone());
+                if let Block::AIChat { state } = &mut block {
+                    state.messages = messages.clone();
+                    state.input = input.clone();
+                }
+                block
+            }
+            BlockState::Preview { path } => Block::new_preview(&path.to_string_lossy()),
+            BlockState::Settings => Block::new_settings(config.clone()),
+            BlockState::HotkeyInfo => Block::new_hotkey_info(),
+        }
+    }
+
     /// Whether this block is a hotkey info pane.
     pub fn is_hotkey_info(&self) -> bool {
         matches!(self, Block::HotkeyInfo)

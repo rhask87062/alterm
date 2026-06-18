@@ -59,6 +59,16 @@ impl Tab {
     pub fn pane_count(&self) -> usize {
         self.panes.len()
     }
+
+    /// Build a Tab from already-constructed parts (used by session restore).
+    pub fn from_parts(title: String, panes: pane_grid::State<Block>, focus: Option<pane_grid::Pane>) -> Self {
+        Tab {
+            id: NEXT_TAB_ID.fetch_add(1, Ordering::Relaxed),
+            title,
+            panes,
+            focus,
+        }
+    }
 }
 
 #[cfg(test)]

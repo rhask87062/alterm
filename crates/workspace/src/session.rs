@@ -161,6 +161,36 @@ fn capture_tab(tab: &Tab) -> TabState {
     TabState { title: tab.title.clone(), focus, maximized, layout }
 }
 
+pub struct RestoredSession {
+    pub tabs: Vec<Tab>,
+    pub active_tab: usize,
+    pub window: WindowState,
+}
+
+/// Rebuild live tabs from a SessionState. `config` is needed to reconstruct
+/// Settings panes.
+pub fn restore(state: SessionState, config: &alterm_config::AppConfig) -> RestoredSession {
+    let tabs = state.tabs.into_iter().map(|ts| restore_tab(ts, config)).collect();
+    RestoredSession { tabs, active_tab: state.active_tab, window: state.window }
+}
+
+fn restore_tab(ts: TabState, config: &alterm_config::AppConfig) -> Tab {
+    let mut make_leaf = |bs: &BlockState| Block::from_state(bs, config);
+    let cfg = build_configuration(&ts.layout, &mut make_leaf);
+    let panes = pane_grid::State::with_configuration(cfg);
+
+    let order = panes_in_spatial_order(&panes);
+    let focus = ts.focus.and_then(|i| order.get(i).copied());
+
+    let mut tab = Tab::from_parts(ts.title, panes, focus);
+    if let Some(i) = ts.maximized {
+        if let Some(p) = order.get(i).copied() {
+            tab.panes.maximize(p);
+        }
+    }
+    tab
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +302,34 @@ mod tests {
             }
             other => panic!("expected browser leaf, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn restore_rebuilds_tabs_and_focus() {
+        let s = SessionState {
+            version: SESSION_VERSION,
+            window: WindowState { width: 1000.0, height: 700.0 },
+            active_tab: 0,
+            tabs: vec![TabState {
+                title: "restored".into(),
+                focus: Some(1),
+                maximized: None,
+                layout: PaneNode::Split {
+                    axis: SerAxis::Vertical, ratio: 0.5,
+                    a: Box::new(PaneNode::Leaf(BlockState::Preview { path: "/tmp".into() })),
+                    b: Box::new(PaneNode::Leaf(BlockState::HotkeyInfo)),
+                },
+            }],
+        };
+        let restored = restore(s, &alterm_config::AppConfig::default());
+        assert_eq!(restored.active_tab, 0);
+        assert_eq!(restored.window.width, 1000.0);
+        assert_eq!(restored.tabs.len(), 1);
+        let tab = &restored.tabs[0];
+        assert_eq!(tab.title, "restored");
+        assert_eq!(tab.panes.len(), 2);
+        // focus index 1 maps to the second pane in spatial order.
+        let order = crate::grid::panes_in_spatial_order(&tab.panes);
+        assert_eq!(tab.focus, Some(order[1]));
     }
 }
