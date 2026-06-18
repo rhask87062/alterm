@@ -1,0 +1,71 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout
+  title="Configuration"
+  description="Configure Alterm through the settings GUI, config.toml, or optional Lua hooks."
+>
+  <p>Alterm configures in three layers, from beginner-friendly to fully scriptable:</p>
+  <ol>
+    <li><strong>Settings panel (GUI)</strong> — click to change font, theme, keybindings, and AI provider. Writes to <code>config.toml</code> under the hood.</li>
+    <li><strong><code>config.toml</code></strong> — every static setting, edited directly by power users.</li>
+    <li><strong><code>hooks.lua</code></strong> — optional Lua 5.4 scripting for dynamic behavior. Expert-only.</li>
+  </ol>
+
+  <h2>File locations</h2>
+  <pre><code>~/.config/alterm/
+├── config.toml      # Main configuration
+├── hooks.lua        # Optional Lua hooks
+├── themes/          # Custom theme files
+└── bookmarks.toml   # Browser bookmarks</code></pre>
+
+  <h2>config.toml reference</h2>
+  <p>All values below are the built-in defaults. Remove or comment out any entry to keep the default.</p>
+
+  <h3>General</h3>
+  <pre><code>[general]
+# Shell to launch for each terminal tab.
+# Unset means "use the $SHELL environment variable".
+# default_shell = "/bin/zsh"</code></pre>
+
+  <h3>Appearance</h3>
+  <pre><code>[appearance]
+font_size   = 14.0
+font_family = "monospace"   # or "JetBrains Mono", "Fira Code", …
+theme       = "dark"        # built-in: "dark", "light"</code></pre>
+
+  <h3>Terminal</h3>
+  <pre><code>[terminal]
+scrollback_lines = 10000
+cursor_blink     = true
+copy_on_select   = false</code></pre>
+
+  <h3>AI</h3>
+  <pre><code>[ai]
+default_provider = "ollama"   # must match a key under [ai.providers]
+max_tokens       = 4096
+temperature      = 0.7
+system_prompt    = "You are a helpful terminal assistant. You can see the user's terminal output for context."</code></pre>
+
+  <div class="note">
+    <p>
+      Provider blocks live under <code>[ai.providers.&lt;name&gt;]</code>. See
+      <a href="../ai">AI providers</a> for the full list and example credentials.
+    </p>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Area</th><th>Keys</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Appearance</td><td>font family / size, color scheme, window opacity, tab bar position</td></tr>
+      <tr><td>Terminal</td><td>scrollback, cursor style / blink, copy-on-select, bell behavior</td></tr>
+      <tr><td>Keybindings</td><td>full remapping, leader key, chord sequences</td></tr>
+      <tr><td>AI</td><td>provider, API keys, default model, context settings</td></tr>
+      <tr><td>Browser</td><td>default URL, search engine, bookmarks</td></tr>
+      <tr><td>Window</td><td>default size, startup behavior, tile gap</td></tr>
+    </tbody>
+  </table>
+</DocsLayout>

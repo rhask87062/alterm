@@ -1,0 +1,87 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+
+const groups = [
+  {
+    title: "Window management",
+    rows: [
+      ["Ctrl+Shift+T", "New tab"],
+      ["Ctrl+Shift+W", "Close tab"],
+      ["Ctrl+Shift+N", "New window"],
+      ["Ctrl+Tab", "Next tab"],
+      ["Ctrl+Shift+Tab", "Previous tab"],
+      ["Ctrl+1–9", "Jump to tab N"],
+    ],
+  },
+  {
+    title: "Splits & blocks",
+    rows: [
+      ["Ctrl+Shift+D", "Split horizontal (new block right)"],
+      ["Ctrl+Shift+E", "Split vertical (new block below)"],
+      ["Ctrl+Shift+Arrow", "Navigate between blocks"],
+      ["Ctrl+Shift+Alt+Arrow", "Resize blocks"],
+      ["Ctrl+Shift+Z", "Toggle block zoom"],
+      ["Ctrl+Shift+X", "Close current block"],
+    ],
+  },
+  {
+    title: "Terminal",
+    rows: [
+      ["Ctrl+Shift+C", "Copy"],
+      ["Ctrl+Shift+V", "Paste"],
+      ["Ctrl+Shift+F", "Find in terminal"],
+      ["Ctrl+Shift+K", "Clear scrollback"],
+      ["Shift+PageUp / PageDown", "Scroll"],
+    ],
+  },
+  {
+    title: "AI",
+    rows: [
+      ["Ctrl+Shift+A", "Toggle AI chat panel"],
+      ["Ctrl+Shift+0", "Focus AI input"],
+    ],
+  },
+  {
+    title: "General",
+    rows: [
+      ["Ctrl+Shift+P", "Command palette"],
+      ["Ctrl+Shift+,", "Open settings"],
+      ["F2", "Rename current tab"],
+    ],
+  },
+];
+---
+
+<DocsLayout
+  title="Keybindings"
+  description="The full default keymap for Alterm — windows, splits, terminal, and AI."
+>
+  <p>
+    These are the built-in defaults. Every binding is remappable in <code>config.toml</code>,
+    including leader-key and chord sequences and context-dependent bindings (terminal vs. AI chat).
+  </p>
+
+  {
+    groups.map((g) => (
+      <>
+        <h2>{g.title}</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Shortcut</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {g.rows.map(([key, action]) => (
+              <tr>
+                <td><kbd>{key}</kbd></td>
+                <td>{action}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </>
+    ))
+  }
+</DocsLayout>

@@ -1,0 +1,94 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { url } from "../../lib/site";
+
+const cards = [
+  {
+    title: "Installation",
+    href: "/docs/installation",
+    body: "Build Alterm from source with Cargo, or grab a packaged release for your platform.",
+  },
+  {
+    title: "Configuration",
+    href: "/docs/configuration",
+    body: "Every option in config.toml — appearance, terminal behavior, AI providers, and more.",
+  },
+  {
+    title: "Keybindings",
+    href: "/docs/keybindings",
+    body: "The full default keymap for windows, splits, the terminal, and AI.",
+  },
+  {
+    title: "AI providers",
+    href: "/docs/ai",
+    body: "Connect OpenAI, Anthropic, Gemini, Grok, or a local model, and learn the context model.",
+  },
+];
+---
+
+<DocsLayout title="Overview" description="Documentation for Alterm, the GPU-accelerated terminal workspace.">
+  <p>
+    Alterm is a GPU-accelerated, cross-platform terminal workspace built in Rust. It is in active
+    <strong>Phase&nbsp;1</strong> development — these docs cover what exists today and the configuration
+    surface as it lands. Expect them to grow alongside the app.
+  </p>
+
+  <div class="doc-cards">
+    {
+      cards.map((c) => (
+        <a class="doc-card" href={url(c.href)}>
+          <h3>{c.title}</h3>
+          <p>{c.body}</p>
+          <span class="go">Read &rarr;</span>
+        </a>
+      ))
+    }
+  </div>
+
+  <h2>Requirements</h2>
+  <ul>
+    <li><strong>Rust 1.80+</strong> to build from source.</li>
+    <li>A GPU with Vulkan, Metal, or DX12 support (virtually all modern hardware).</li>
+    <li>Linux (X11 or Wayland), macOS, or Windows.</li>
+  </ul>
+</DocsLayout>
+
+<style>
+  .doc-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 1.8em 0;
+  }
+  .doc-card {
+    display: block;
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--bg-elev), var(--bg));
+    transition: transform 0.2s ease, border-color 0.2s ease;
+    text-decoration: none !important;
+  }
+  .doc-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--accent);
+  }
+  .doc-card h3 {
+    margin: 0 0 0.3em !important;
+    color: var(--text);
+  }
+  .doc-card p {
+    margin: 0 0 0.8em !important;
+    font-size: 0.92rem;
+  }
+  .go {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--accent);
+  }
+  @media (max-width: 560px) {
+    .doc-cards {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

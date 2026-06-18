@@ -1,0 +1,698 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import TerminalDemo from "../components/TerminalDemo.astro";
+import {
+  SITE,
+  STATS,
+  FEATURES,
+  AUDIENCES,
+  PROVIDERS,
+  AI_CONTEXT,
+  ROADMAP,
+  url,
+} from "../lib/site";
+
+const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
+---
+
+<BaseLayout>
+  <!-- ================= HERO ================= -->
+  <section class="hero">
+    <div class="container hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow reveal">GPU terminal workspace · built in Rust</p>
+        <h1 class="reveal" data-delay="60">
+          The <span class="gradient-text">alternative</span> terminal.
+        </h1>
+        <p class="lead reveal" data-delay="120">
+          Alterm pairs the workspace UX of WaveTerm — tiling blocks, AI chat, an embedded
+          browser — with the raw, GPU-rendered speed of WezTerm.
+          <strong>Without the Electron bloat.</strong>
+        </p>
+        <div class="hero-cta reveal" data-delay="180">
+          <a class="btn btn-primary" href={url("/docs/installation")}>
+            Get started
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"
+              ><path d="M3 8h10M9 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"
+              ></path></svg
+            >
+          </a>
+          <a class="btn btn-ghost" href={SITE.repo} target="_blank" rel="noopener">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"
+              ><path
+                d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.52.56.83 1.28.83 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"
+              ></path></svg
+            >
+            View on GitHub
+          </a>
+        </div>
+        <p class="hero-meta reveal" data-delay="240">
+          <span class="dotpulse"></span> v{SITE.version} · early access · Linux · macOS · Windows
+        </p>
+      </div>
+
+      <div class="hero-demo">
+        <TerminalDemo />
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= STATS ================= -->
+  <div class="stats-wrap">
+    <div class="container stats reveal">
+      {
+        STATS.map((s) => (
+          <div class="stat">
+            <span class="stat-value">{s.value}</span>
+            <span class="stat-label">{s.label}</span>
+            {s.note && <span class="stat-note">{s.note}</span>}
+          </div>
+        ))
+      }
+    </div>
+  </div>
+
+  <!-- ================= FEATURES ================= -->
+  <section id="features">
+    <div class="container">
+      <header class="sec-head reveal">
+        <p class="eyebrow">Everything in one workspace</p>
+        <h2 class="h-section">A terminal that <span class="gradient-text">grows with you</span>.</h2>
+        <p class="lead">
+          From a first clickable split to a scripted, AI-assisted power setup — Alterm meets
+          beginners, intermediates, and experts where they are.
+        </p>
+      </header>
+
+      <div class="feat-grid">
+        {
+          FEATURES.map((f, i) => (
+            <article class="card feat reveal" data-delay={(i % 3) * 80}>
+              <div class="feat-top">
+                <span class="feat-icon">
+                  {f.icon ? (
+                    <span
+                      class="icon"
+                      style={`-webkit-mask-image:url(${iconUrl(f.icon)});mask-image:url(${iconUrl(f.icon)})`}
+                    />
+                  ) : (
+                    <span class="glyph" />
+                  )}
+                </span>
+                {f.status === "planned" ? (
+                  <span class="tag tag-planned">planned</span>
+                ) : (
+                  <span class="tag tag-live">core</span>
+                )}
+              </div>
+              <h3 class="feat-title">{f.title}</h3>
+              <p class="feat-body">{f.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= AUDIENCES ================= -->
+  <section class="audiences">
+    <div class="container">
+      <header class="sec-head center reveal">
+        <p class="eyebrow">For every level</p>
+        <h2 class="h-section">Three users, <span class="gradient-text">one workspace</span>.</h2>
+      </header>
+      <div class="aud-grid">
+        {
+          AUDIENCES.map((a, i) => (
+            <article class="card aud reveal" data-delay={i * 90}>
+              <span class="aud-num">0{i + 1}</span>
+              <h3>{a.key}</h3>
+              <p>{a.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= AI ================= -->
+  <section id="ai" class="ai">
+    <div class="container ai-grid">
+      <div class="ai-copy reveal">
+        <p class="eyebrow">Intelligence, in context</p>
+        <h2 class="h-section">AI that can <span class="gradient-text">see your terminal</span>.</h2>
+        <p class="lead">
+          The chat block reads your panes' output, so help is grounded in what's actually on
+          screen — not a guess. Proposed actions always wait for your confirmation.
+        </p>
+        <ul class="ai-context">
+          {
+            AI_CONTEXT.map((c) => (
+              <li>
+                <span class="ai-prompt">&gt;</span>
+                <div>
+                  <strong>{c.title}</strong>
+                  <p>{c.body}</p>
+                </div>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <aside class="ai-providers reveal" data-delay="120">
+        <p class="prov-head">Bring your own provider</p>
+        <div class="prov-list">
+          {
+            PROVIDERS.map((p) => (
+              <span class={`prov ${p.kind}`}>
+                <span class="prov-dot" />
+                {p.name}
+                <span class="prov-kind">{p.kind}</span>
+              </span>
+            ))
+          }
+        </div>
+        <p class="prov-note">
+          …or any OpenAI-compatible endpoint. Keys stay in your local config — never on a server.
+        </p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================= GALLERY (placeholder until screenshots) ================= -->
+  <section class="gallery">
+    <div class="container">
+      <header class="sec-head center reveal">
+        <p class="eyebrow">See it in motion</p>
+        <h2 class="h-section">Screenshots, <span class="gradient-text">incoming</span>.</h2>
+        <p class="lead">
+          Alterm is in active Phase&nbsp;1 development. Real captures of the workspace land here as
+          features ship — the preview above is a faithful, stylized mock.
+        </p>
+      </header>
+      <div class="shots">
+        {
+          ["Terminal", "Tiling split", "AI chat", "Browser pane"].map((label, i) => (
+            <figure class={`shot reveal shot-${i}`} data-delay={(i % 2) * 80}>
+              <div class="shot-inner">
+                <span class="shot-scan" />
+                <span class="shot-label">{label}</span>
+                <span class="shot-soon">coming soon</span>
+              </div>
+            </figure>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ROADMAP ================= -->
+  <section id="roadmap" class="roadmap">
+    <div class="container">
+      <header class="sec-head reveal">
+        <p class="eyebrow">Where it's going</p>
+        <h2 class="h-section">A clear <span class="gradient-text">five-phase</span> path.</h2>
+      </header>
+      <ol class="timeline">
+        {
+          ROADMAP.map((r, i) => (
+            <li class={`tl-item reveal ${r.current ? "current" : ""}`} data-delay={i * 70}>
+              <span class="tl-node" />
+              <div class="tl-card">
+                <div class="tl-head">
+                  <span class="tl-phase">{r.phase}</span>
+                  {r.current && <span class="tag tag-live">in progress</span>}
+                </div>
+                <h3>{r.name}</h3>
+                <p>{r.body}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <!-- ================= FINAL CTA ================= -->
+  <section class="final">
+    <div class="container final-inner reveal">
+      <h2>Build it from source today.</h2>
+      <p class="lead">
+        Alterm is MIT-licensed and open. Clone it, <code>cargo install</code>, and shape the
+        alternative terminal with us.
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href={url("/docs/installation")}>Installation guide</a>
+        <a class="btn btn-ghost" href={SITE.repo} target="_blank" rel="noopener">
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* ---------- Hero ---------- */
+  .hero {
+    padding-top: clamp(48px, 7vw, 92px);
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.05fr;
+    gap: clamp(32px, 5vw, 72px);
+    align-items: center;
+  }
+  .hero h1 {
+    font-size: clamp(2.7rem, 6.2vw, 4.9rem);
+    margin: 0.25em 0 0.35em;
+  }
+  .hero-cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 30px;
+  }
+  .hero-cta svg {
+    width: 1.05em;
+    height: 1.05em;
+  }
+  .hero-meta {
+    margin-top: 22px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-faint);
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+  }
+  .dotpulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--term-green);
+    box-shadow: 0 0 0 0 rgba(94, 242, 176, 0.6);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    70% {
+      box-shadow: 0 0 0 7px rgba(94, 242, 176, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(94, 242, 176, 0);
+    }
+  }
+
+  /* ---------- Stats ---------- */
+  .stats-wrap {
+    border-block: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(86, 0, 141, 0.06), transparent);
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 18px;
+    padding-block: 30px;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: center;
+    position: relative;
+  }
+  .stat + .stat::before {
+    content: "";
+    position: absolute;
+    left: -9px;
+    top: 12%;
+    height: 76%;
+    width: 1px;
+    background: var(--line);
+  }
+  .stat-value {
+    font-family: var(--font-mono);
+    font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+    font-weight: 700;
+    background: var(--grad-text);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .stat-label {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+  }
+  .stat-note {
+    font-size: 0.68rem;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+  }
+
+  /* ---------- Section heads ---------- */
+  .sec-head {
+    margin-bottom: 48px;
+    max-width: 60ch;
+  }
+  .sec-head.center {
+    margin-inline: auto;
+    text-align: center;
+  }
+  .sec-head.center .lead {
+    margin-inline: auto;
+  }
+
+  /* ---------- Features ---------- */
+  .feat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+  .feat-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .feat-icon {
+    width: 46px;
+    height: 46px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    background: rgba(249, 119, 255, 0.08);
+    border: 1px solid var(--line-bright);
+    color: var(--accent);
+  }
+  .feat-icon .icon {
+    width: 24px;
+    height: 24px;
+  }
+  .glyph {
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    background: var(--grad-chrome);
+    box-shadow: 0 0 14px -2px var(--accent);
+  }
+  .feat-title {
+    font-size: 1.18rem;
+    margin-bottom: 0.5em;
+  }
+  .feat-body {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+  }
+
+  /* ---------- Audiences ---------- */
+  .aud-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+  .aud-num {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--accent);
+  }
+  .aud h3 {
+    font-size: 1.5rem;
+    margin: 0.3em 0 0.5em;
+  }
+  .aud p {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+  }
+
+  /* ---------- AI ---------- */
+  .ai-grid {
+    display: grid;
+    grid-template-columns: 1.25fr 0.95fr;
+    gap: clamp(28px, 5vw, 64px);
+    align-items: center;
+  }
+  .ai-context {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    margin-top: 32px;
+  }
+  .ai-context li {
+    display: flex;
+    gap: 14px;
+  }
+  .ai-prompt {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-weight: 700;
+    line-height: 1.5;
+  }
+  .ai-context strong {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+  }
+  .ai-context p {
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    margin-top: 2px;
+  }
+  .ai-providers {
+    background: linear-gradient(180deg, var(--bg-elev), var(--bg));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 26px;
+  }
+  .prov-head {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 16px;
+  }
+  .prov-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .prov {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    background: var(--bg);
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .prov:hover {
+    border-color: var(--accent);
+    transform: translateX(3px);
+  }
+  .prov-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+  .prov.local .prov-dot {
+    background: var(--term-green);
+    box-shadow: 0 0 8px var(--term-green);
+  }
+  .prov-kind {
+    margin-left: auto;
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+  }
+  .prov-note {
+    margin-top: 16px;
+    font-size: 0.82rem;
+    color: var(--text-faint);
+  }
+
+  /* ---------- Gallery ---------- */
+  .shots {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 18px;
+  }
+  .shot {
+    aspect-ratio: 16 / 10;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: linear-gradient(135deg, var(--bg-elev), var(--bg));
+    overflow: hidden;
+    position: relative;
+  }
+  .shot-inner {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    gap: 6px;
+    text-align: center;
+  }
+  .shot-scan {
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(249, 119, 255, 0.04) 0px,
+      rgba(249, 119, 255, 0.04) 1px,
+      transparent 1px,
+      transparent 6px
+    );
+    mask-image: radial-gradient(circle at 50% 50%, black, transparent 75%);
+  }
+  .shot-label {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.3rem;
+    color: var(--text);
+  }
+  .shot-soon {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  /* ---------- Roadmap ---------- */
+  .timeline {
+    position: relative;
+    display: grid;
+    gap: 14px;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 7px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: linear-gradient(180deg, var(--purple-core), var(--orchid), transparent);
+  }
+  .tl-item {
+    position: relative;
+    padding-left: 40px;
+  }
+  .tl-node {
+    position: absolute;
+    left: 0;
+    top: 22px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--line-bright);
+  }
+  .tl-item.current .tl-node {
+    border-color: var(--accent);
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(249, 119, 255, 0.18), 0 0 16px var(--accent);
+  }
+  .tl-card {
+    background: linear-gradient(180deg, var(--bg-elev), var(--bg));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+  }
+  .tl-item.current .tl-card {
+    border-color: rgba(249, 119, 255, 0.3);
+  }
+  .tl-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .tl-phase {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .tl-card h3 {
+    font-size: 1.3rem;
+    margin: 0.25em 0 0.3em;
+  }
+  .tl-card p {
+    color: var(--text-muted);
+    font-size: 0.94rem;
+    max-width: 70ch;
+  }
+
+  /* ---------- Final CTA ---------- */
+  .final {
+    text-align: center;
+  }
+  .final-inner {
+    max-width: 720px;
+    margin-inline: auto;
+    background:
+      radial-gradient(120% 140% at 50% 0%, rgba(212, 80, 252, 0.12), transparent 60%),
+      linear-gradient(180deg, var(--bg-elev), var(--bg));
+    border: 1px solid var(--line-bright);
+    border-radius: 24px;
+    padding: clamp(36px, 5vw, 64px);
+    box-shadow: 0 40px 90px -50px rgba(212, 80, 252, 0.6);
+  }
+  .final h2 {
+    font-size: clamp(1.8rem, 4vw, 2.8rem);
+  }
+  .final .lead {
+    margin: 0.7em auto 0;
+  }
+  .final code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    color: var(--orchid);
+  }
+  .final .hero-cta {
+    justify-content: center;
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 900px) {
+    .hero-grid {
+      grid-template-columns: 1fr;
+    }
+    .hero-demo {
+      order: -1;
+    }
+    .feat-grid,
+    .aud-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .ai-grid {
+      grid-template-columns: 1fr;
+    }
+    .stats {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px 12px;
+    }
+    .stat:nth-child(4)::before,
+    .stat:nth-child(n + 4)::before {
+      display: none;
+    }
+  }
+  @media (max-width: 560px) {
+    .feat-grid,
+    .aud-grid,
+    .shots {
+      grid-template-columns: 1fr;
+    }
+    .stats {
+      grid-template-columns: 1fr 1fr;
+    }
+    .stat::before {
+      display: none !important;
+    }
+  }
+</style>

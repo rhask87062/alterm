@@ -1,0 +1,78 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout
+  title="AI providers"
+  description="Connect cloud or local AI models to Alterm, and understand the terminal-aware context model."
+>
+  <p>
+    Alterm's AI chat block speaks to providers through a single provider abstraction, so any
+    OpenAI-compatible endpoint works. Cloud keys live in your local config — never on a server.
+  </p>
+
+  <h2>Supported providers</h2>
+  <ul>
+    <li><strong>OpenAI</strong> — <code>gpt-4o</code> and others</li>
+    <li><strong>Anthropic</strong> — Claude models</li>
+    <li><strong>Google Gemini</strong></li>
+    <li><strong>xAI Grok</strong></li>
+    <li><strong>Ollama</strong> — local, no API key required (the default)</li>
+    <li><strong>LM Studio</strong> and any other OpenAI-compatible local server</li>
+  </ul>
+
+  <h2>Configuring a provider</h2>
+  <p>
+    Each provider is a block under <code>[ai.providers]</code>. <code>base_url</code> can be omitted
+    to use the provider's canonical endpoint; <code>api_key</code> is not needed for local
+    providers.
+  </p>
+  <pre><code># Local Ollama (default — no key required)
+[ai.providers.ollama]
+model    = "llama3.2"
+base_url = "http://localhost:11434/v1"
+
+# OpenAI
+[ai.providers.openai]
+api_key = "sk-..."
+model   = "gpt-4o"
+
+# Anthropic
+[ai.providers.anthropic]
+api_key = "sk-ant-..."
+model   = "claude-opus-4-5"</code></pre>
+
+  <p>
+    Set the active default in the <code>[ai]</code> block with
+    <code>default_provider = "&lt;name&gt;"</code>.
+  </p>
+
+  <h2>The context model</h2>
+  <p>The chat block can read terminal output three ways:</p>
+  <ol>
+    <li>
+      <strong>Active pane (default)</strong> — the AI sees whichever terminal pane is focused.
+      Switch focus and its context follows.
+    </li>
+    <li>
+      <strong>Pinned panes</strong> — pin specific panes so they stay in the AI's view regardless
+      of focus. Ideal for watching build output and server logs while you work elsewhere.
+    </li>
+    <li>
+      <strong>@ mentions</strong> — type <code>@pane:2</code> or <code>@tab:ssh-prod</code> to
+      reference a pane's output in one message without pinning it.
+    </li>
+  </ol>
+
+  <h2>AI actions</h2>
+  <p>The AI can propose actions, each behind a confirmation prompt — it proposes, you approve:</p>
+  <ul>
+    <li>Open a new terminal pane and run a command</li>
+    <li>Split the current view</li>
+    <li>Open a browser pane to show documentation</li>
+  </ul>
+
+  <div class="note">
+    <p>Much of the AI surface lands in <strong>Phase&nbsp;3</strong>. This page documents the intended design.</p>
+  </div>
+</DocsLayout>
