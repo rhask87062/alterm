@@ -140,6 +140,22 @@ fn pane_to_id(pane: pane_grid::Pane) -> u64 {
         .unwrap_or(0)
 }
 
+/// Compose a tab-unique webview map key from a tab id and a pane index.
+///
+/// Pane ids restart at 0 in every tab, so the bare pane id collides across
+/// tabs; namespacing with the (stable) tab id keeps webview keys unique.
+fn compose_key(tab_id: u64, pane_index: u64) -> u64 {
+    (tab_id << 32) | (pane_index & 0xFFFF_FFFF)
+}
+
+/// Compose a tab-unique webview map key from a tab id and a pane.
+///
+/// Pane ids restart at 0 in every tab, so the bare pane id collides across
+/// tabs; namespacing with the (stable) tab id keeps webview keys unique.
+fn webview_key(tab_id: u64, pane: pane_grid::Pane) -> u64 {
+    compose_key(tab_id, pane_to_id(pane))
+}
+
 struct Alterm {
     tabs: Vec<Tab>,
     active_tab: usize,
@@ -351,6 +367,7 @@ impl Alterm {
         let bounds = Size::new(grid_width, grid_height);
 
         let tab = self.active_tab_mut();
+        let tab_id = tab.id;
         let maximized_pane = tab.panes.maximized();
 
         // When maximized, the focused pane gets the full grid area.
@@ -376,7 +393,7 @@ impl Alterm {
                 // Hide its webview if it's a browser.
                 if let Some(block) = tab.panes.get(*pane) {
                     if block.is_browser() {
-                        webview_manager::set_visible(pane_to_id(*pane), false);
+                        webview_manager::set_visible(webview_key(tab_id, *pane), false);
                     }
                 }
                 continue;
@@ -397,7 +414,7 @@ impl Alterm {
                 }
 
                 if block.is_browser() {
-                    let pane_id = pane_to_id(*pane);
+                    let pane_id = webview_key(tab_id, *pane);
                     if webview_manager::exists(pane_id) {
                         let wv_x = rect.x as f64;
                         let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
@@ -418,6 +435,7 @@ impl Alterm {
     /// window, and returns its pane. All "new window" actions funnel through here.
     fn add_window(&mut self, block: Block) -> pane_grid::Pane {
         let tab = self.active_tab_mut();
+        let tab_id = tab.id;
         // Compute the grid against the full layout, not a maximized view.
         if tab.panes.maximized().is_some() {
             tab.panes.restore();
@@ -430,7 +448,7 @@ impl Alterm {
         let remap_ids: Vec<(u64, u64)> = info
             .remap
             .iter()
-            .map(|(old, new)| (pane_to_id(*old), pane_to_id(*new)))
+            .map(|(old, new)| (webview_key(tab_id, *old), webview_key(tab_id, *new)))
             .collect();
         webview_manager::remap(&remap_ids);
 
@@ -445,7 +463,8 @@ impl Alterm {
             return;
         };
 
-        let pane_id = pane_to_id(pane);
+        let tab_id = self.active_tab().id;
+        let pane_id = webview_key(tab_id, pane);
 
         // Calculate initial bounds for this pane.
         use iced::Size;
@@ -482,7 +501,7 @@ impl Alterm {
             let is_active = tab_idx == self.active_tab;
             for (pane, block) in tab.panes.iter() {
                 if block.is_browser() {
-                    webview_manager::set_visible(pane_to_id(*pane), is_active);
+                    webview_manager::set_visible(webview_key(tab.id, *pane), is_active);
                 }
             }
         }
@@ -709,9 +728,10 @@ impl Alterm {
             }
             Message::ClosePane => {
                 let tab = self.active_tab_mut();
+                let tab_id = tab.id;
                 if let Some(focused) = tab.focus {
                     // Destroy any webview associated with this pane.
-                    webview_manager::destroy(pane_to_id(focused));
+                    webview_manager::destroy(webview_key(tab_id, focused));
 
                     if tab.panes.len() > 1 {
                         if let Some((_closed_block, sibling)) = tab.panes.close(focused) {
@@ -723,20 +743,21 @@ impl Alterm {
             }
             Message::MaximizeToggle => {
                 let tab = self.active_tab_mut();
+                let tab_id = tab.id;
                 if let Some(focused) = tab.focus {
                     if tab.panes.maximized().is_some() {
                         tab.panes.restore();
                         // Show all browser webviews in this tab.
                         for (pane, block) in tab.panes.iter() {
                             if block.is_browser() {
-                                webview_manager::set_visible(pane_to_id(*pane), true);
+                                webview_manager::set_visible(webview_key(tab_id, *pane), true);
                             }
                         }
                     } else {
                         // Hide all non-focused browser webviews before maximizing.
                         for (pane, block) in tab.panes.iter() {
                             if block.is_browser() && *pane != focused {
-                                webview_manager::set_visible(pane_to_id(*pane), false);
+                                webview_manager::set_visible(webview_key(tab_id, *pane), false);
                             }
                         }
                         tab.panes.maximize(focused);
@@ -753,7 +774,8 @@ impl Alterm {
             }
             Message::ClosePaneId(pane) => {
                 // Destroy any webview associated with this pane before removing it.
-                webview_manager::destroy(pane_to_id(pane));
+                let tab_id = self.active_tab().id;
+                webview_manager::destroy(webview_key(tab_id, pane));
 
                 let tab = self.active_tab_mut();
                 if tab.panes.len() > 1 {
@@ -765,19 +787,20 @@ impl Alterm {
             }
             Message::MaximizeTogglePane(pane) => {
                 let tab = self.active_tab_mut();
+                let tab_id = tab.id;
                 if tab.panes.maximized().is_some() {
                     tab.panes.restore();
                     // Show all browser webviews in this tab.
                     for (p, block) in tab.panes.iter() {
                         if block.is_browser() {
-                            webview_manager::set_visible(pane_to_id(*p), true);
+                            webview_manager::set_visible(webview_key(tab_id, *p), true);
                         }
                     }
                 } else {
                     // Hide non-target browser webviews.
                     for (p, block) in tab.panes.iter() {
                         if block.is_browser() && *p != pane {
-                            webview_manager::set_visible(pane_to_id(*p), false);
+                            webview_manager::set_visible(webview_key(tab_id, *p), false);
                         }
                     }
                     tab.panes.maximize(pane);
@@ -795,9 +818,10 @@ impl Alterm {
             Message::CloseTab(index) => {
                 if self.tabs.len() > 1 && index < self.tabs.len() {
                     // Destroy all webviews in the tab being closed.
+                    let closing_tab_id = self.tabs[index].id;
                     for (pane, block) in self.tabs[index].panes.iter() {
                         if block.is_browser() {
-                            webview_manager::destroy(pane_to_id(*pane));
+                            webview_manager::destroy(webview_key(closing_tab_id, *pane));
                         }
                     }
 
@@ -1163,32 +1187,40 @@ impl Alterm {
                 ));
             }
             Message::BrowserNavigate(pane, url) => {
+                let tab_id = self.active_tab().id;
+                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.navigate(&url);
                     // Also navigate the real webview.
-                    webview_manager::navigate(pane_to_id(pane), &state.url);
+                    webview_manager::navigate(pane_id, &state.url);
                 }
             }
             Message::BrowserBack(pane) => {
+                let tab_id = self.active_tab().id;
+                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.go_back();
-                    webview_manager::navigate(pane_to_id(pane), &state.url);
+                    webview_manager::navigate(pane_id, &state.url);
                 }
             }
             Message::BrowserForward(pane) => {
+                let tab_id = self.active_tab().id;
+                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.go_forward();
-                    webview_manager::navigate(pane_to_id(pane), &state.url);
+                    webview_manager::navigate(pane_id, &state.url);
                 }
             }
             Message::BrowserReload(pane) => {
+                let tab_id = self.active_tab().id;
+                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.reload();
-                    webview_manager::reload(pane_to_id(pane));
+                    webview_manager::reload(pane_id);
                 }
             }
             Message::BrowserUrlChanged(pane, url) => {
@@ -3530,5 +3562,20 @@ fn extract_native_window_handle(w: &dyn iced::window::Window) -> u64 {
             log::warn!("Failed to get native window handle: {e}");
             0
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compose_key;
+
+    #[test]
+    fn same_pane_index_distinct_across_tabs() {
+        // Pane(0) in tab 0 vs tab 1 must not collide.
+        assert_ne!(compose_key(0, 0), compose_key(1, 0));
+        // Distinct panes within a tab stay distinct.
+        assert_ne!(compose_key(7, 0), compose_key(7, 1));
+        // Low bits preserve the pane index.
+        assert_eq!(compose_key(3, 5) & 0xFFFF_FFFF, 5);
     }
 }
