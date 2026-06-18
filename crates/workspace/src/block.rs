@@ -18,6 +18,9 @@ use crate::settings_panel::SettingsState;
 /// How many ticks before the cursor blink state toggles.
 const BLINK_TICKS: u32 = 30;
 
+/// Max scrollback lines to persist across session restore.
+pub const SCROLLBACK_PERSIST_LINES: usize = 1000;
+
 /// Font size used for terminal rendering (logical pixels).
 pub const FONT_SIZE: f32 = 14.0;
 /// Cell width = font_size * 0.6 (monospace approximation).
@@ -142,10 +145,18 @@ impl Block {
     pub fn from_state(bs: &crate::session::BlockState, config: &alterm_config::AppConfig) -> Block {
         use crate::session::BlockState;
         match bs {
-            BlockState::Terminal { cwd, rows, cols, .. } => {
+            BlockState::Terminal { cwd, rows, cols, scrollback_ansi } => {
                 let dir = cwd.as_deref();
-                Block::new_terminal_in((*rows).max(1), (*cols).max(1), dir)
-                    .unwrap_or_else(|_| Block::new_hotkey_info())
+                let mut block = Block::new_terminal_in((*rows).max(1), (*cols).max(1), dir)
+                    .unwrap_or_else(|_| Block::new_hotkey_info());
+                if !scrollback_ansi.is_empty() {
+                    if let Block::Terminal { state, .. } = &mut block {
+                        state.process_output(scrollback_ansi.as_bytes());
+                        // Separate restored history from the live shell prompt.
+                        state.process_output(b"\r\n");
+                    }
+                }
+                block
             }
             BlockState::Browser { url, history, history_index } => {
                 let mut block = Block::new_browser(url);
@@ -458,7 +469,7 @@ impl Block {
         match self {
             Block::Terminal { state, .. } => BlockState::Terminal {
                 cwd: self.working_dir(),
-                scrollback_ansi: String::new(), // filled in Phase C
+                scrollback_ansi: state.scrollback_ansi(SCROLLBACK_PERSIST_LINES),
                 rows: state.rows() as u16,
                 cols: state.cols() as u16,
             },
