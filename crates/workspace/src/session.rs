@@ -1,6 +1,6 @@
 //! Serializable session model + capture/restore for persistence.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use iced::widget::pane_grid::{self, Configuration};
 use serde::{Deserialize, Serialize};
@@ -110,6 +110,38 @@ fn capture_node(
     }
 }
 
+/// Path to the session file: `<config_dir>/session.json`.
+pub fn session_path() -> PathBuf {
+    alterm_config::AppConfig::config_dir().join("session.json")
+}
+
+/// Write the session atomically (temp file + rename).
+pub fn save_to_path(state: &SessionState, path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(state)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json.as_bytes())?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Load the session. Returns `None` (and backs up the file to `*.bak`) on a
+/// missing file, parse error, or version mismatch.
+pub fn load_from_path(path: &Path) -> Option<SessionState> {
+    let bytes = std::fs::read(path).ok()?;
+    match serde_json::from_slice::<SessionState>(&bytes) {
+        Ok(state) if state.version == SESSION_VERSION => Some(state),
+        _ => {
+            let bak = path.with_extension("json.bak");
+            let _ = std::fs::rename(path, &bak);
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +199,40 @@ mod tests {
             }
             _ => panic!("expected split"),
         }
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let dir = std::env::temp_dir().join(format!("alterm-sess-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        let s = sample();
+        save_to_path(&s, &path).unwrap();
+        let back = load_from_path(&path).expect("loadable");
+        assert_eq!(s, back);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_file_returns_none_and_backs_up() {
+        let dir = std::env::temp_dir().join(format!("alterm-sess-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        std::fs::write(&path, b"{ not valid json").unwrap();
+        assert!(load_from_path(&path).is_none());
+        assert!(dir.join("session.json.bak").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn version_mismatch_returns_none() {
+        let dir = std::env::temp_dir().join(format!("alterm-sess-ver-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.json");
+        let mut s = sample();
+        s.version = 999;
+        save_to_path(&s, &path).unwrap();
+        assert!(load_from_path(&path).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
