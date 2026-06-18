@@ -1,10 +1,24 @@
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tokio::sync::mpsc;
 
 use crate::event::TerminalEvent;
+
+/// Read a process's current working directory via `/proc/<pid>/cwd` (Linux only).
+pub fn read_proc_cwd(pid: u32) -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
 
 /// Channel buffer size for PTY events.
 const EVENT_CHANNEL_SIZE: usize = 1024;
@@ -32,6 +46,13 @@ impl PtyHandle {
     ///
     /// Returns the handle and the receiving end of the event channel.
     pub fn spawn(rows: u16, cols: u16) -> Result<(Self, mpsc::Receiver<TerminalEvent>), String> {
+        Self::spawn_in(rows, cols, None)
+    }
+
+    /// Like `spawn`, but optionally start the shell in `cwd` (if given and valid).
+    pub fn spawn_in(rows: u16, cols: u16, cwd: Option<&Path>)
+        -> Result<(Self, mpsc::Receiver<TerminalEvent>), String>
+    {
         let pty_system = native_pty_system();
 
         let size = PtySize {
@@ -49,6 +70,11 @@ impl PtyHandle {
         let mut cmd = CommandBuilder::new(&shell);
         cmd.env("TERM", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string()));
         cmd.env("SHELL", &shell);
+        if let Some(dir) = cwd {
+            if dir.is_dir() {
+                cmd.cwd(dir);
+            }
+        }
 
         let child = pair
             .slave
@@ -143,6 +169,25 @@ impl PtyHandle {
             Ok(Some(_)) => false,    // exited
             Err(_) => false,         // error querying — treat as dead
         }
+    }
+
+    /// PID of the child shell, if available.
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child.process_id()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn read_proc_cwd_of_self_matches_current_dir() {
+        let pid = std::process::id();
+        let cwd = read_proc_cwd(pid).expect("own cwd readable");
+        let expected = std::env::current_dir().unwrap().canonicalize().unwrap();
+        assert_eq!(cwd.canonicalize().unwrap(), expected);
     }
 }
 

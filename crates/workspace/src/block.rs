@@ -18,6 +18,9 @@ use crate::settings_panel::SettingsState;
 /// How many ticks before the cursor blink state toggles.
 const BLINK_TICKS: u32 = 30;
 
+/// Max scrollback lines to persist across session restore.
+pub const SCROLLBACK_PERSIST_LINES: usize = 1000;
+
 /// Font size used for terminal rendering (logical pixels).
 pub const FONT_SIZE: f32 = 14.0;
 /// Cell width = font_size * 0.6 (monospace approximation).
@@ -79,6 +82,31 @@ impl Block {
         })
     }
 
+    /// Create a terminal whose shell starts in `cwd` (if given and valid).
+    pub fn new_terminal_in(rows: u16, cols: u16, cwd: Option<&std::path::Path>) -> Result<Self, String> {
+        let (pty, events) = PtyHandle::spawn_in(rows, cols, cwd)?;
+        let state = TerminalState::new(rows as usize, cols as usize);
+        let palette = AnsiPalette::default();
+        Ok(Block::Terminal {
+            state,
+            pty,
+            events,
+            palette,
+            cursor_visible: true,
+            blink_count: 0,
+            dirty: true,
+            cached_grid: None,
+        })
+    }
+
+    /// The terminal's current working directory, if determinable.
+    pub fn working_dir(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Block::Terminal { pty, .. } => pty.child_pid().and_then(terminal::read_proc_cwd),
+            _ => None,
+        }
+    }
+
     /// Create a new AI chat block for the given provider and model.
     pub fn new_ai_chat(provider: String, model: String) -> Self {
         Block::AIChat {
@@ -110,6 +138,48 @@ impl Block {
     /// Create a new hotkey info reference pane (no state needed).
     pub fn new_hotkey_info() -> Self {
         Block::HotkeyInfo
+    }
+
+    /// Reconstruct a block from its persisted state. `config` is needed to
+    /// rebuild a `Settings` pane.
+    pub fn from_state(bs: &crate::session::BlockState, config: &alterm_config::AppConfig) -> Block {
+        use crate::session::BlockState;
+        match bs {
+            BlockState::Terminal { cwd, rows, cols, scrollback_ansi } => {
+                let dir = cwd.as_deref();
+                let mut block = Block::new_terminal_in((*rows).max(1), (*cols).max(1), dir)
+                    .unwrap_or_else(|_| Block::new_hotkey_info());
+                if !scrollback_ansi.is_empty() {
+                    if let Block::Terminal { state, .. } = &mut block {
+                        state.process_output(scrollback_ansi.as_bytes());
+                        // Separate restored history from the live shell prompt.
+                        state.process_output(b"\r\n");
+                    }
+                }
+                block
+            }
+            BlockState::Browser { url, history, history_index } => {
+                let mut block = Block::new_browser(url);
+                if let Block::Browser { state } = &mut block {
+                    if !history.is_empty() {
+                        state.history = history.clone();
+                        state.history_index = (*history_index).min(history.len() - 1);
+                    }
+                }
+                block
+            }
+            BlockState::AiChat { provider, model, messages, input } => {
+                let mut block = Block::new_ai_chat(provider.clone(), model.clone());
+                if let Block::AIChat { state } = &mut block {
+                    state.messages = messages.clone();
+                    state.input = input.clone();
+                }
+                block
+            }
+            BlockState::Preview { path } => Block::new_preview(&path.to_string_lossy()),
+            BlockState::Settings => Block::new_settings(config.clone()),
+            BlockState::HotkeyInfo => Block::new_hotkey_info(),
+        }
     }
 
     /// Whether this block is a hotkey info pane.
@@ -390,6 +460,33 @@ impl Block {
                 }
             }
             Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => None,
+        }
+    }
+
+    /// Snapshot this block's restorable state for session persistence.
+    pub fn to_block_state(&self) -> crate::session::BlockState {
+        use crate::session::BlockState;
+        match self {
+            Block::Terminal { state, .. } => BlockState::Terminal {
+                cwd: self.working_dir(),
+                scrollback_ansi: state.scrollback_ansi(SCROLLBACK_PERSIST_LINES),
+                rows: state.rows() as u16,
+                cols: state.cols() as u16,
+            },
+            Block::Browser { state } => BlockState::Browser {
+                url: state.url.clone(),
+                history: state.history.clone(),
+                history_index: state.history_index,
+            },
+            Block::AIChat { state } => BlockState::AiChat {
+                provider: state.provider_name.clone(),
+                model: state.model_name.clone(),
+                messages: state.messages.clone(),
+                input: state.input.clone(),
+            },
+            Block::Preview { state } => BlockState::Preview { path: state.path.clone() },
+            Block::Settings { .. } => BlockState::Settings,
+            Block::HotkeyInfo => BlockState::HotkeyInfo,
         }
     }
 }

@@ -90,3 +90,8 @@ cursor_blink = true
 
 # Automatically copy selected text to the system clipboard.
 copy_on_select = false
+
+# ── Session ──────────────────────────────────────────────────────────────────
+[session]
+# Restore the previous session on launch.
+restore = true

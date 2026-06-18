@@ -7,6 +7,7 @@ pub mod block;
 pub mod command_palette;
 pub mod grid;
 pub mod keybindings;
+pub mod session;
 pub mod settings_panel;
 pub mod sidebar;
 pub mod tab;

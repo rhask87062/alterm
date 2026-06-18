@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub ai: AIConfig,
     pub appearance: AppearanceConfig,
     pub terminal: TerminalConfig,
+    #[serde(default)]
+    pub session: SessionConfig,
 }
 
 impl Default for AppConfig {
@@ -23,6 +25,7 @@ impl Default for AppConfig {
             ai: AIConfig::default(),
             appearance: AppearanceConfig::default(),
             terminal: TerminalConfig::default(),
+            session: SessionConfig::default(),
         }
     }
 }
@@ -286,6 +289,25 @@ impl Default for TerminalConfig {
     }
 }
 
+// ── SessionConfig ──────────────────────────────────────────────────────────
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfig {
+    /// Restore the previous session on launch.
+    #[serde(default = "default_true")]
+    pub restore: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        SessionConfig { restore: true }
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -337,5 +359,54 @@ max_tokens = 2048
             Some("http://localhost:11434/v1")
         );
         assert_eq!(default_base_url("unknown"), None);
+    }
+
+    #[test]
+    fn session_defaults_to_restore_true_when_absent() {
+        // A config TOML with no [session] section must still parse, restore = true.
+        let toml = r#"
+            [general]
+            [ai]
+            default_provider = "openai"
+            max_tokens = 1024
+            temperature = 0.7
+            system_prompt = ""
+            [ai.providers]
+            [appearance]
+            font_size = 14.0
+            font_family = "monospace"
+            theme = "dark"
+            [terminal]
+            scrollback_lines = 10000
+            cursor_blink = true
+            copy_on_select = false
+        "#;
+        let cfg: AppConfig = toml::from_str(toml).expect("parse");
+        assert!(cfg.session.restore);
+    }
+
+    #[test]
+    fn session_restore_can_be_disabled() {
+        let toml = r#"
+            [general]
+            [ai]
+            default_provider = "openai"
+            max_tokens = 1024
+            temperature = 0.7
+            system_prompt = ""
+            [ai.providers]
+            [appearance]
+            font_size = 14.0
+            font_family = "monospace"
+            theme = "dark"
+            [terminal]
+            scrollback_lines = 10000
+            cursor_blink = true
+            copy_on_select = false
+            [session]
+            restore = false
+        "#;
+        let cfg: AppConfig = toml::from_str(toml).expect("parse");
+        assert!(!cfg.session.restore);
     }
 }

@@ -6,7 +6,7 @@ pub mod pty;
 pub mod term;
 
 pub use event::TerminalEvent;
-pub use pty::PtyHandle;
+pub use pty::{read_proc_cwd, PtyHandle};
 pub use term::TerminalState;
 
 /// Re-export alacritty_terminal events so consumers don't need a direct dependency.
