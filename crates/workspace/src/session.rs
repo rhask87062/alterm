@@ -142,9 +142,29 @@ pub fn load_from_path(path: &Path) -> Option<SessionState> {
     }
 }
 
+use crate::grid::panes_in_spatial_order;
+use crate::Tab;
+
+/// Snapshot all tabs into a SessionState.
+pub fn capture(tabs: &[Tab], active_tab: usize, window: WindowState) -> SessionState {
+    let tab_states = tabs.iter().map(capture_tab).collect();
+    SessionState { version: SESSION_VERSION, window, active_tab, tabs: tab_states }
+}
+
+fn capture_tab(tab: &Tab) -> TabState {
+    let order = panes_in_spatial_order(&tab.panes);
+    let index_of = |p: pane_grid::Pane| order.iter().position(|q| *q == p);
+    let focus = tab.focus.and_then(index_of);
+    let maximized = tab.panes.maximized().and_then(index_of);
+    let mut capture_leaf = |block: &Block| block.to_block_state();
+    let layout = capture_pane_node(&tab.panes, &mut capture_leaf);
+    TabState { title: tab.title.clone(), focus, maximized, layout }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Tab;
 
     fn sample() -> SessionState {
         SessionState {
@@ -234,5 +254,23 @@ mod tests {
         save_to_path(&s, &path).unwrap();
         assert!(load_from_path(&path).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn capture_reads_browser_and_preview_blocks() {
+        // Build a tab whose single pane is a browser, then capture.
+        let mut tab = Tab::new().unwrap();
+        // Replace the single pane's block with a browser.
+        let pane = *tab.panes.iter().next().unwrap().0;
+        *tab.panes.get_mut(pane).unwrap() = Block::new_browser("https://example.com");
+        let session = capture(&[tab], 0, WindowState { width: 800.0, height: 600.0 });
+        assert_eq!(session.version, SESSION_VERSION);
+        assert_eq!(session.tabs.len(), 1);
+        match &session.tabs[0].layout {
+            PaneNode::Leaf(BlockState::Browser { url, .. }) => {
+                assert!(url.contains("example.com"));
+            }
+            other => panic!("expected browser leaf, got {other:?}"),
+        }
     }
 }

@@ -392,4 +392,31 @@ impl Block {
             Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => None,
         }
     }
+
+    /// Snapshot this block's restorable state for session persistence.
+    pub fn to_block_state(&self) -> crate::session::BlockState {
+        use crate::session::BlockState;
+        match self {
+            Block::Terminal { state, .. } => BlockState::Terminal {
+                cwd: None,                      // filled in Phase B
+                scrollback_ansi: String::new(), // filled in Phase C
+                rows: state.rows() as u16,
+                cols: state.cols() as u16,
+            },
+            Block::Browser { state } => BlockState::Browser {
+                url: state.url.clone(),
+                history: state.history.clone(),
+                history_index: state.history_index,
+            },
+            Block::AIChat { state } => BlockState::AiChat {
+                provider: state.provider_name.clone(),
+                model: state.model_name.clone(),
+                messages: state.messages.clone(),
+                input: state.input.clone(),
+            },
+            Block::Preview { state } => BlockState::Preview { path: state.path.clone() },
+            Block::Settings { .. } => BlockState::Settings,
+            Block::HotkeyInfo => BlockState::HotkeyInfo,
+        }
+    }
 }
