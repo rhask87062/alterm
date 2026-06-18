@@ -3,11 +3,16 @@
 /// Each tab owns a `pane_grid::State<Block>` so tabs have completely
 /// independent tiling arrangements.
 use iced::widget::pane_grid;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::Block;
 
+static NEXT_TAB_ID: AtomicU64 = AtomicU64::new(0);
+
 /// A single tab in the tab bar.
 pub struct Tab {
+    /// Stable unique id for this tab (used to namespace per-tab resources like webviews).
+    pub id: u64,
     /// Human-readable title shown on the tab button.
     pub title: String,
     /// The pane-grid state that holds all blocks (panes) in this tab.
@@ -28,6 +33,7 @@ impl Tab {
         let (panes, first_pane) = pane_grid::State::new(block);
 
         Ok(Tab {
+            id: NEXT_TAB_ID.fetch_add(1, Ordering::Relaxed),
             title: "Terminal".to_string(),
             panes,
             focus: Some(first_pane),
@@ -52,5 +58,17 @@ impl Tab {
     /// Number of panes in this tab.
     pub fn pane_count(&self) -> usize {
         self.panes.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tabs_get_distinct_ids() {
+        let a = Tab::new_with_size(800.0, 600.0).unwrap();
+        let b = Tab::new_with_size(800.0, 600.0).unwrap();
+        assert_ne!(a.id, b.id);
     }
 }

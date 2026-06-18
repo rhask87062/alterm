@@ -5,6 +5,7 @@
 pub mod ai_chat;
 pub mod block;
 pub mod command_palette;
+pub mod grid;
 pub mod keybindings;
 pub mod settings_panel;
 pub mod sidebar;
@@ -16,6 +17,7 @@ pub use block::{Block, CELL_HEIGHT, CELL_WIDTH};
 pub use browser::BrowserState;
 pub use preview::PreviewState;
 pub use command_palette::CommandPalette;
+pub use grid::grid_dims;
 pub use keybindings::{all_palette_actions, match_shortcut, Action};
 pub use settings_panel::{SettingsField, SettingsSection, SettingsState};
 pub use sidebar::{sidebar_view, SidebarAction};
