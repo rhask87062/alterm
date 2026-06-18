@@ -1565,7 +1565,7 @@ impl Alterm {
 
             // -- Window handle --
             Message::WindowHandleReady(xid) => {
-                eprintln!("[WINDOW] Got raw window ID: {xid} (hex: {xid:#x})");
+                log::debug!("[WINDOW] Got raw window ID: {xid} (hex: {xid:#x})");
                 self.parent_xid = Some(xid);
                 // Create any browser webviews for restored panes now that the XID is available.
                 self.ensure_browser_webviews();

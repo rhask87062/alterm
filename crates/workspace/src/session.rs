@@ -283,6 +283,7 @@ mod tests {
         s.version = 999;
         save_to_path(&s, &path).unwrap();
         assert!(load_from_path(&path).is_none());
+        assert!(dir.join("session.json.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
