@@ -79,6 +79,31 @@ impl Block {
         })
     }
 
+    /// Create a terminal whose shell starts in `cwd` (if given and valid).
+    pub fn new_terminal_in(rows: u16, cols: u16, cwd: Option<&std::path::Path>) -> Result<Self, String> {
+        let (pty, events) = PtyHandle::spawn_in(rows, cols, cwd)?;
+        let state = TerminalState::new(rows as usize, cols as usize);
+        let palette = AnsiPalette::default();
+        Ok(Block::Terminal {
+            state,
+            pty,
+            events,
+            palette,
+            cursor_visible: true,
+            blink_count: 0,
+            dirty: true,
+            cached_grid: None,
+        })
+    }
+
+    /// The terminal's current working directory, if determinable.
+    pub fn working_dir(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Block::Terminal { pty, .. } => pty.child_pid().and_then(terminal::read_proc_cwd),
+            _ => None,
+        }
+    }
+
     /// Create a new AI chat block for the given provider and model.
     pub fn new_ai_chat(provider: String, model: String) -> Self {
         Block::AIChat {
@@ -117,8 +142,9 @@ impl Block {
     pub fn from_state(bs: &crate::session::BlockState, config: &alterm_config::AppConfig) -> Block {
         use crate::session::BlockState;
         match bs {
-            BlockState::Terminal { rows, cols, .. } => {
-                Block::new_terminal((*rows).max(1), (*cols).max(1))
+            BlockState::Terminal { cwd, rows, cols, .. } => {
+                let dir = cwd.as_deref();
+                Block::new_terminal_in((*rows).max(1), (*cols).max(1), dir)
                     .unwrap_or_else(|_| Block::new_hotkey_info())
             }
             BlockState::Browser { url, history, history_index } => {
@@ -431,7 +457,7 @@ impl Block {
         use crate::session::BlockState;
         match self {
             Block::Terminal { state, .. } => BlockState::Terminal {
-                cwd: None,                      // filled in Phase B
+                cwd: self.working_dir(),
                 scrollback_ansi: String::new(), // filled in Phase C
                 rows: state.rows() as u16,
                 cols: state.cols() as u16,
