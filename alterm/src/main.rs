@@ -2371,6 +2371,13 @@ fn settings_appearance_section<'a>(
     available_fonts: &[String],
 ) -> Element<'a, Message> {
     // Text colors are inherited from the iced theme (Light/Dark) automatically.
+    // App version (compiled in via CARGO_PKG_VERSION) shown muted at the top.
+    let version_line = text(format!("Alterm v{}", env!("CARGO_PKG_VERSION")))
+        .size(11)
+        .style(|_theme: &iced::Theme| iced::widget::text::Style {
+            color: Some(Color::from_rgb(0.55, 0.55, 0.60)),
+        });
+
     let heading = text("Appearance").size(14);
 
     // Font size
@@ -2417,6 +2424,8 @@ fn settings_appearance_section<'a>(
     .width(Length::Fixed(250.0));
 
     column![
+        version_line,
+        iced::widget::space().height(Length::Fixed(6.0)),
         heading,
         iced::widget::space().height(Length::Fixed(12.0)),
         font_size_label,
