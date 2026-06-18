@@ -182,4 +182,138 @@ impl TerminalState {
     pub fn term_mut(&mut self) -> &mut Term<EventProxy> {
         &mut self.term
     }
+
+    /// Encode up to `max_lines` of scrollback (history + visible) as ANSI text
+    /// for session persistence. Preserves fg/bg colors and bold/italic/underline.
+    pub fn scrollback_ansi(&self, max_lines: usize) -> String {
+        use alacritty_terminal::term::cell::Flags;
+        use alacritty_terminal::vte::ansi::Color;
+
+        /// Return the SGR numeric fragment for a color (e.g. "31", "38;5;200",
+        /// "38;2;255;0;0", or "" for terminal default).
+        fn sgr_color(color: Color, is_fg: bool) -> String {
+            match color {
+                Color::Named(named) => {
+                    let idx = named as usize;
+                    if idx < 8 {
+                        // Normal colors: fg 30-37, bg 40-47
+                        let base = if is_fg { 30 } else { 40 };
+                        format!("{}", base + idx)
+                    } else if idx < 16 {
+                        // Bright colors: fg 90-97, bg 100-107
+                        let base = if is_fg { 90 } else { 100 };
+                        format!("{}", base + (idx - 8))
+                    } else {
+                        // Sentinel values (Foreground=256, Background=257, Cursor=258,
+                        // Dim*, BrightForeground, DimForeground) — use terminal default
+                        if is_fg { "39".to_string() } else { "49".to_string() }
+                    }
+                }
+                Color::Indexed(i) => {
+                    if is_fg {
+                        format!("38;5;{}", i)
+                    } else {
+                        format!("48;5;{}", i)
+                    }
+                }
+                Color::Spec(rgb) => {
+                    if is_fg {
+                        format!("38;2;{};{};{}", rgb.r, rgb.g, rgb.b)
+                    } else {
+                        format!("48;2;{};{};{}", rgb.r, rgb.g, rgb.b)
+                    }
+                }
+            }
+        }
+
+        /// Assemble a full `\x1b[<codes>m` SGR sequence from style components.
+        /// Returns an empty string when all style elements are default.
+        fn sgr_seq(fg: &str, bg: &str, bold: bool, italic: bool, underline: bool) -> String {
+            let mut codes: Vec<String> = Vec::new();
+            if bold      { codes.push("1".to_string()); }
+            if italic    { codes.push("3".to_string()); }
+            if underline { codes.push("4".to_string()); }
+            // Only emit fg/bg when not default
+            if fg != "39" { codes.push(fg.to_string()); }
+            if bg != "49" { codes.push(bg.to_string()); }
+            if codes.is_empty() {
+                String::new()
+            } else {
+                format!("\x1b[{}m", codes.join(";"))
+            }
+        }
+
+        let grid = self.term.grid();
+        let total = grid.total_lines();
+        let screen = grid.screen_lines();
+        // Topmost line index is -(history); bottom is screen-1.
+        let history = total.saturating_sub(screen);
+        let first = -(history as i32);
+        let last = screen as i32 - 1;
+        let start = (last - (max_lines as i32) + 1).max(first);
+
+        let cols = grid.columns();
+        let mut out = String::new();
+        for line in start..=last {
+            let mut last_fg = "39".to_string();
+            let mut last_bg = "49".to_string();
+            let mut last_bold = false;
+            let mut last_italic = false;
+            let mut last_underline = false;
+            let mut line_buf = String::new();
+            let mut last_nonblank = 0usize;
+
+            for col in 0..cols {
+                let cell = &grid[Point::new(Line(line), Column(col))];
+                let fg = sgr_color(cell.fg, true);
+                let bg = sgr_color(cell.bg, false);
+                let bold = cell.flags.contains(Flags::BOLD);
+                let italic = cell.flags.contains(Flags::ITALIC);
+                let underline = cell.flags.intersects(Flags::ALL_UNDERLINES);
+
+                if fg != last_fg || bg != last_bg || bold != last_bold
+                    || italic != last_italic || underline != last_underline
+                {
+                    line_buf.push_str("\x1b[0m");
+                    let seq = sgr_seq(&fg, &bg, bold, italic, underline);
+                    line_buf.push_str(&seq);
+                    last_fg = fg;
+                    last_bg = bg;
+                    last_bold = bold;
+                    last_italic = italic;
+                    last_underline = underline;
+                }
+                line_buf.push(cell.c);
+                if cell.c != ' ' {
+                    last_nonblank = line_buf.len();
+                }
+            }
+            // Trim trailing blank cells; end with reset + CRLF
+            line_buf.truncate(last_nonblank);
+            line_buf.push_str("\x1b[0m");
+            out.push_str(&line_buf);
+            out.push_str("\r\n");
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod scrollback_tests {
+    use super::*;
+
+    #[test]
+    fn scrollback_ansi_captures_text_and_caps_lines() {
+        let mut t = TerminalState::new(24, 80);
+        // Write red "hello", reset, newline, then "world".
+        t.process_output(b"\x1b[31mhello\x1b[0m\r\nworld\r\n");
+        let out = t.scrollback_ansi(1000);
+        assert!(out.contains("hello"));
+        assert!(out.contains("world"));
+        // Contains an SGR color escape for the red text.
+        assert!(out.contains("\x1b[") && out.contains("31"));
+        // Line cap is respected.
+        let capped = t.scrollback_ansi(1);
+        assert!(capped.lines().count() <= 1 + 1); // allow trailing newline
+    }
 }
