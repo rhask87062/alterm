@@ -260,8 +260,12 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
 
                 let selected = sel_range.map_or(false, |(a, b)| cell_in_range(row_idx, col_idx, a, b));
 
-                // Determine fg/bg: selection overrides cursor which overrides normal.
-                let (fg_color, bg_color) = if selected {
+                // Determine fg/bg. Precedence: search highlight > selection >
+                // cursor > normal.
+                let hl = crate::grid::highlight_colors(cell.highlight, self.grid.light_mode);
+                let (fg_color, bg_color) = if let Some((bg, fg)) = hl {
+                    (rgba_to_color(&fg), rgba_to_color(&bg))
+                } else if selected {
                     (sel_fg, sel_bg)
                 } else if cell.is_cursor {
                     let fg = rgba_to_color(&cell.fg);
@@ -272,8 +276,8 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
                 };
 
                 // Draw cell background if it differs from the default bg
-                // (or always for cursor/selected cells).
-                if selected || cell.is_cursor || !colors_approx_equal(bg_color, default_bg) {
+                // (or always for highlighted/cursor/selected cells).
+                if hl.is_some() || selected || cell.is_cursor || !colors_approx_equal(bg_color, default_bg) {
                     frame.fill_rectangle(top_left, cell_size, bg_color);
                 }
 
