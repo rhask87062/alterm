@@ -314,14 +314,19 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
         if self.grid.total_history > 0 {
             let scrollbar_width = 6.0_f32;
             let track_x = bounds.width - scrollbar_width - 2.0;
-            let track_height = bounds.height;
+            // Inset the track from the top and bottom so it doesn't run past the
+            // pane's rounded bottom corners (it would otherwise poke out of the
+            // rounded edge).
+            let track_inset = PANE_CORNER_RADIUS;
+            let track_top = track_inset;
+            let track_height = (bounds.height - track_inset * 2.0).max(0.0);
 
             // Scrollbar base color: dark scrollbar on light bg, light on dark bg.
             let sb_base = if self.grid.light_mode { 0.0_f32 } else { 1.0_f32 };
 
             // Track background (subtle)
             frame.fill_rectangle(
-                Point::new(track_x, 0.0),
+                Point::new(track_x, track_top),
                 Size::new(scrollbar_width, track_height),
                 Color::from_rgba(sb_base, sb_base, sb_base, 0.05),
             );
@@ -339,7 +344,7 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
                 0.0
             };
             // scroll_fraction=0 → thumb at bottom, =1 → thumb at top
-            let thumb_y = (1.0 - scroll_fraction) * (track_height - thumb_height);
+            let thumb_y = track_top + (1.0 - scroll_fraction) * (track_height - thumb_height);
 
             let thumb_color = if self.grid.display_offset > 0 {
                 Color::from_rgba(sb_base, sb_base, sb_base, 0.35) // brighter when scrolled
