@@ -1,5 +1,8 @@
 use std::sync::LazyLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// Max delay between two clicks on the same tab to count as a double-click.
+const TAB_DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 use iced::event::Status;
 use iced::keyboard::key::Named;
@@ -225,6 +228,26 @@ struct Alterm {
     context_menu: Option<ContextMenuState>,
     /// Most recent text selection finalized in a terminal pane. Empty if none.
     last_selection: String,
+    /// In-progress inline rename of a tab or pane title, if any.
+    rename: Option<RenameTarget>,
+    /// Live text of the in-progress rename field.
+    rename_buffer: String,
+    /// Last (tab index, time) a tab was clicked, for double-click rename detection.
+    last_tab_click: Option<(usize, Instant)>,
+    /// Last (pane, time) a pane title was clicked, for double-click rename detection.
+    last_pane_click: Option<(pane_grid::Pane, Instant)>,
+}
+
+/// What an in-progress inline rename is targeting.
+#[derive(Clone, Copy)]
+enum RenameTarget {
+    Tab(usize),
+    Pane(pane_grid::Pane),
+}
+
+/// Widget id of the inline rename text field, so it can be focused on open.
+fn rename_input_id() -> WidgetId {
+    WidgetId::from("tab-pane-rename-input".to_string())
 }
 
 #[derive(Clone, Copy)]
@@ -258,6 +281,12 @@ enum Message {
     CloseTab(usize),
     SelectTab(usize),
     TabBarAction(TabBarAction),
+    // Inline rename of tab / pane titles
+    PaneTitleClicked(pane_grid::Pane),
+    BeginPaneRename(pane_grid::Pane),
+    RenameInputChanged(String),
+    RenameCommit,
+    RenameCancel,
     // Sidebar
     SidebarAction(SidebarAction),
     SidebarNewTerminal,
@@ -388,6 +417,10 @@ impl Alterm {
             terminal_font_family,
             context_menu: None,
             last_selection: String::new(),
+            rename: None,
+            rename_buffer: String::new(),
+            last_tab_click: None,
+            last_pane_click: None,
         };
 
         // Request the native window handle from iced — fires WindowHandleReady.
@@ -572,6 +605,12 @@ impl Alterm {
                 }
             }
         }
+    }
+
+    /// Abandon any in-progress inline rename without applying it.
+    fn cancel_rename(&mut self) {
+        self.rename = None;
+        self.rename_buffer.clear();
     }
 
     /// Save the current session to disk.
@@ -919,10 +958,14 @@ impl Alterm {
                 webview_manager::destroy(webview_key(tab_id, pane));
 
                 let tab = self.active_tab_mut();
+                tab.pane_labels.remove(&pane);
                 if tab.panes.len() > 1 {
                     if let Some((_closed_block, sibling)) = tab.panes.close(pane) {
                         tab.focus = Some(sibling);
                     }
+                }
+                if matches!(self.rename, Some(RenameTarget::Pane(p)) if p == pane) {
+                    self.cancel_rename();
                 }
                 self.resize_all_panes();
             }
@@ -986,10 +1029,87 @@ impl Alterm {
                 }
             }
             Message::TabBarAction(action) => match action {
-                TabBarAction::Select(i) => return self.update(Message::SelectTab(i)),
-                TabBarAction::Close(i) => return self.update(Message::CloseTab(i)),
-                TabBarAction::New => return self.update(Message::NewTab),
+                TabBarAction::Select(i) => {
+                    // A quick second click on the same tab renames it.
+                    let now = Instant::now();
+                    let double = matches!(
+                        self.last_tab_click,
+                        Some((j, t)) if j == i && now.duration_since(t) < TAB_DOUBLE_CLICK
+                    );
+                    self.last_tab_click = Some((i, now));
+                    if double {
+                        if let Some(tab) = self.tabs.get(i) {
+                            self.rename = Some(RenameTarget::Tab(i));
+                            self.rename_buffer = tab.title.clone();
+                            return widget_focus(rename_input_id());
+                        }
+                    }
+                    self.cancel_rename();
+                    return self.update(Message::SelectTab(i));
+                }
+                TabBarAction::Close(i) => {
+                    self.cancel_rename();
+                    return self.update(Message::CloseTab(i));
+                }
+                TabBarAction::New => {
+                    self.cancel_rename();
+                    return self.update(Message::NewTab);
+                }
+                TabBarAction::RenameInput(s) => self.rename_buffer = s,
+                TabBarAction::RenameSubmit => return self.update(Message::RenameCommit),
             },
+            Message::PaneTitleClicked(pane) => {
+                // Single click focuses the pane; a quick second click renames it.
+                let now = Instant::now();
+                let double = matches!(
+                    self.last_pane_click,
+                    Some((p, t)) if p == pane && now.duration_since(t) < TAB_DOUBLE_CLICK
+                );
+                self.last_pane_click = Some((pane, now));
+                self.active_tab_mut().focus = Some(pane);
+                if double {
+                    return self.update(Message::BeginPaneRename(pane));
+                }
+            }
+            Message::BeginPaneRename(pane) => {
+                let tab = self.active_tab();
+                let current = tab
+                    .pane_labels
+                    .get(&pane)
+                    .cloned()
+                    .or_else(|| tab.panes.get(pane).map(|b| b.title()))
+                    .unwrap_or_default();
+                self.rename = Some(RenameTarget::Pane(pane));
+                self.rename_buffer = current;
+                return widget_focus(rename_input_id());
+            }
+            Message::RenameInputChanged(s) => self.rename_buffer = s,
+            Message::RenameCommit => {
+                if let Some(target) = self.rename.take() {
+                    let value = self.rename_buffer.trim().to_string();
+                    match target {
+                        RenameTarget::Tab(i) => {
+                            if let Some(tab) = self.tabs.get_mut(i) {
+                                if !value.is_empty() {
+                                    tab.title = value;
+                                }
+                            }
+                        }
+                        RenameTarget::Pane(pane) => {
+                            let tab = self.active_tab_mut();
+                            if value.is_empty() {
+                                // Empty label reverts the pane to its default title.
+                                tab.pane_labels.remove(&pane);
+                            } else {
+                                tab.pane_labels.insert(pane, value);
+                            }
+                        }
+                    }
+                    self.rename_buffer.clear();
+                    self.save_session();
+                }
+            }
+            Message::RenameCancel => self.cancel_rename(),
             Message::SidebarAction(action) => match action {
                 SidebarAction::NewTerminal => {
                     return self.update(Message::SidebarNewTerminal);
@@ -1490,6 +1610,16 @@ impl Alterm {
             }
 
             Message::KeyboardInput(key, modified_key, modifiers) => {
+                // While an inline rename is active, the text field owns the
+                // keyboard: Escape cancels, everything else goes to the field
+                // (don't run shortcuts or forward to a PTY).
+                if self.rename.is_some() {
+                    if matches!(key, Key::Named(Named::Escape)) {
+                        return self.update(Message::RenameCancel);
+                    }
+                    return Task::none();
+                }
+
                 // When the palette is open, intercept navigation keys.
                 if self.palette.visible {
                     match &key {
@@ -1637,12 +1767,31 @@ impl Alterm {
 
         // Tab bar
         let titles: Vec<String> = self.tabs.iter().map(|t| t.title.clone()).collect();
-        let tab_bar = tab_bar_view(&titles, self.active_tab, Message::TabBarAction);
+        let editing_tab = match self.rename {
+            Some(RenameTarget::Tab(i)) => Some(i),
+            _ => None,
+        };
+        let tab_bar = tab_bar_view(
+            &titles,
+            self.active_tab,
+            editing_tab,
+            &self.rename_buffer,
+            rename_input_id(),
+            Message::TabBarAction,
+        );
 
         // Pane grid for the active tab
         let light_mode = is_config_light_theme(&self.config.appearance.theme);
         let is_maximized = tab.panes.maximized().is_some();
         let has_terminal_context = self.terminal_context(1).is_some();
+        // Inline pane-rename state captured for the pane-grid closure below.
+        let editing_pane = match self.rename {
+            Some(RenameTarget::Pane(p)) => Some(p),
+            _ => None,
+        };
+        let rename_buffer = self.rename_buffer.as_str();
+        let pane_labels = &tab.pane_labels;
+        let rename_id = rename_input_id();
         let pane_grid_widget =
             pane_grid::PaneGrid::new(&tab.panes, |pane, block, _maximized| {
                 let is_focused = focus == Some(pane);
@@ -1676,8 +1825,42 @@ impl Alterm {
                     }
                 };
 
-                // Title bar with control buttons (no label).
-                let title = text("").size(12);
+                // Title bar label: a custom pane label if set, otherwise the
+                // block's default title (e.g. "Terminal"). Double-click to edit;
+                // while editing this pane, show an inline text field instead.
+                let title: Element<'_, Message> = if editing_pane == Some(pane) {
+                    text_input("", rename_buffer)
+                        .id(rename_id.clone())
+                        .on_input(Message::RenameInputChanged)
+                        .on_submit(Message::RenameCommit)
+                        .size(12)
+                        .padding(Padding::from([2, 6]))
+                        .width(Length::Fixed(180.0))
+                        .into()
+                } else {
+                    let label = pane_labels
+                        .get(&pane)
+                        .cloned()
+                        .unwrap_or_else(|| block.title());
+                    // A flat button (rather than a plain label) so it captures
+                    // the press — otherwise the pane-grid title bar treats the
+                    // area as a drag handle and the click never registers. The
+                    // app turns a quick second click into a rename.
+                    button(text(label).size(12))
+                        .padding(Padding::from([0, 2]))
+                        .on_press(Message::PaneTitleClicked(pane))
+                        .style(move |theme: &Theme, _status| iced::widget::button::Style {
+                            background: None,
+                            text_color: if is_focused {
+                                chrome::accent_text(theme)
+                            } else {
+                                chrome::text_muted(theme)
+                            },
+                            border: Border::default(),
+                            ..Default::default()
+                        })
+                        .into()
+                };
 
                 // Build control buttons row
                 let split_right_btn = title_bar_button("|", Message::SplitPaneRight(pane));
