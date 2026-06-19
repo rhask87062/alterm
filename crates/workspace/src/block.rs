@@ -411,6 +411,32 @@ impl Block {
         }
     }
 
+    /// Find all search matches in this block's terminal (empty for non-terminals).
+    /// `Err` only on invalid regex pattern.
+    pub fn search(&self, pattern: &str) -> Result<Vec<terminal::term::SearchMatch>, String> {
+        match self {
+            Block::Terminal { state, .. } => state.search_all(pattern),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// Scroll this terminal so the given match is visible (no-op for non-terminals).
+    pub fn scroll_to_search_match(&mut self, m: &terminal::term::SearchMatch) {
+        if let Block::Terminal { state, dirty, .. } = self {
+            state.scroll_to_line(m.start_line);
+            *dirty = true;
+        }
+        self.refresh_cache();
+    }
+
+    /// Current scroll offset of this terminal (0 for non-terminals).
+    pub fn display_offset(&self) -> usize {
+        match self {
+            Block::Terminal { state, .. } => state.display_offset(),
+            _ => 0,
+        }
+    }
+
     /// Scroll the terminal viewport by the given number of lines.
     ///
     /// Positive = scroll up (toward history), negative = scroll down.
@@ -488,5 +514,27 @@ impl Block {
             Block::Settings { .. } => BlockState::Settings,
             Block::HotkeyInfo => BlockState::HotkeyInfo,
         }
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_block_search_finds_matches() {
+        let mut b = Block::new_terminal(24, 80).unwrap();
+        if let Block::Terminal { state, .. } = &mut b {
+            state.process_output(b"hello world\n");
+        }
+        let pat = terminal::term::build_search_pattern("world", false, true);
+        let matches = b.search(&pat).unwrap();
+        assert_eq!(matches.len(), 1);
+    }
+
+    #[test]
+    fn non_terminal_block_search_is_empty() {
+        let b = Block::new_hotkey_info();
+        assert!(b.search("anything").unwrap().is_empty());
     }
 }
