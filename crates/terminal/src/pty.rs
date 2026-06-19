@@ -201,16 +201,63 @@ mod tests {
 /// Sourced from `assets/ascii_logo.txt` at the repository root.
 const ASCII_LOGO: &str = include_str!("../../../assets/ascii_logo.txt");
 
-/// Build the startup banner bytes for a fresh terminal: the ASCII logo with
-/// CRLF line endings (so each line returns to column 0 on a raw PTY) followed
-/// by a blank line to separate it from the shell prompt.
+/// Left-to-right color stops for the logo gradient, all from the Alterm
+/// palette: a dark theme purple, through orchid, to a light near-white.
+const LOGO_GRADIENT: [(u8, u8, u8); 3] = [
+    (0x56, 0x00, 0x8d), // --purple-core (dark)
+    (0xd4, 0x50, 0xfc), // --orchid (mid)
+    (0xfa, 0xf3, 0xff), // near-white (light)
+];
+
+/// Interpolate [`LOGO_GRADIENT`] at position `t` in `0.0..=1.0`.
+fn logo_gradient(t: f32) -> (u8, u8, u8) {
+    let t = t.clamp(0.0, 1.0);
+    let segments = (LOGO_GRADIENT.len() - 1) as f32;
+    let scaled = t * segments;
+    let i = (scaled.floor() as usize).min(LOGO_GRADIENT.len() - 2);
+    let f = scaled - i as f32;
+    let (r0, g0, b0) = LOGO_GRADIENT[i];
+    let (r1, g1, b1) = LOGO_GRADIENT[i + 1];
+    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * f).round() as u8;
+    (lerp(r0, r1), lerp(g0, g1), lerp(b0, b1))
+}
+
+/// Build the startup banner bytes for a fresh terminal: the ASCII logo painted
+/// with a left→right dark-to-light gradient (24-bit ANSI color — one shade per
+/// column), CRLF line endings so each line returns to column 0 on a raw PTY,
+/// and a trailing blank line before the shell prompt.
 fn startup_banner() -> Vec<u8> {
-    let mut s = ASCII_LOGO.replace("\r\n", "\n").replace('\n', "\r\n");
-    if !s.ends_with("\r\n") {
-        s.push_str("\r\n");
+    let logo = ASCII_LOGO.replace("\r\n", "\n");
+    let lines: Vec<&str> = logo.lines().collect();
+    let max_cols = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let mut out = String::new();
+    for line in &lines {
+        let mut last: Option<(u8, u8, u8)> = None;
+        for (col, ch) in line.chars().enumerate() {
+            let t = if max_cols <= 1 {
+                0.0
+            } else {
+                col as f32 / (max_cols - 1) as f32
+            };
+            let rgb = logo_gradient(t);
+            if last != Some(rgb) {
+                let (r, g, b) = rgb;
+                out.push_str(&format!("\x1b[38;2;{r};{g};{b}m"));
+                last = Some(rgb);
+            }
+            out.push(ch);
+        }
+        // Reset the color and return to column 0 before the next line.
+        out.push_str("\x1b[0m\r\n");
     }
-    s.push_str("\r\n");
-    s.into_bytes()
+    out.push_str("\r\n");
+    out.into_bytes()
 }
 
 fn default_shell() -> String {
