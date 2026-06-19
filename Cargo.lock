@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "ai"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "eventsource-stream",
  "futures-util",
@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "alterm"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "ai",
  "alterm-config",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "alterm-config"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dirs",
  "log",
@@ -605,7 +605,7 @@ dependencies = [
 
 [[package]]
 name = "browser"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "gtk",
  "log",
@@ -4470,7 +4470,7 @@ dependencies = [
 
 [[package]]
 name = "preview"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "quick-xml 0.37.5",

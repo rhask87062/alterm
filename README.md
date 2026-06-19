@@ -20,6 +20,7 @@ terminal, an AI chat, a browser, a file preview, or a settings panel.
 - **Embedded browser** — open web pages in a pane via the system webview (`wry`).
 - **File preview** — preview panes for code (syntax highlighting), images, and PowerPoint files.
 - **Command palette** — `Ctrl+Shift+P` to fuzzy-find and run any action.
+- **Terminal search** — `Ctrl+Shift+F` opens a find bar over the focused terminal: substring by default with regex and case toggles, live highlighting across scrollback, and next/prev navigation.
 - **Settings GUI + TOML config** — edit appearance, AI providers, and terminal settings in-app, or hand-edit `~/.config/alterm/config.toml`.
 - **Themes** — dark/light themes with theme-aware chrome and a theme-adaptive keyboard-shortcut help panel. Toggle with `Ctrl+Shift+L`.
 - **Session persistence** — your tabs, panes, and window are restored on next launch.
@@ -28,7 +29,7 @@ terminal, an AI chat, a browser, a file preview, or a settings panel.
 
 ### Experimental
 
-- **Lua hooks** — Alterm loads `~/.config/alterm/hooks.lua` at startup (Lua 5.4 via `mlua`). The scripting host is wired in, but hook trigger points are still being added.
+- **Lua hooks** — Alterm runs `~/.config/alterm/hooks.lua` at startup (Lua 5.4 via `mlua`). Three trigger points fire today — `on_startup`, `on_new_terminal`, and `on_theme_change` — with more to come. See [`config/hooks.lua.example`](config/hooks.lua.example).
 
 ### Planned
 
