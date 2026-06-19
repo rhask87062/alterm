@@ -3,6 +3,7 @@
 /// Each tab owns a `pane_grid::State<Block>` so tabs have completely
 /// independent tiling arrangements.
 use iced::widget::pane_grid;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::Block;
@@ -19,6 +20,9 @@ pub struct Tab {
     pub panes: pane_grid::State<Block>,
     /// Which pane inside this tab is focused (if any).
     pub focus: Option<pane_grid::Pane>,
+    /// Custom user labels for panes, keyed by pane. A pane with no entry falls
+    /// back to its block's default title (e.g. "Terminal").
+    pub pane_labels: HashMap<pane_grid::Pane, String>,
 }
 
 impl Tab {
@@ -37,6 +41,7 @@ impl Tab {
             title: "Terminal".to_string(),
             panes,
             focus: Some(first_pane),
+            pane_labels: HashMap::new(),
         })
     }
 
@@ -67,6 +72,7 @@ impl Tab {
             title,
             panes,
             focus,
+            pane_labels: HashMap::new(),
         }
     }
 }

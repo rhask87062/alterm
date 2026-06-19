@@ -41,6 +41,10 @@ pub struct TabState {
     pub focus: Option<usize>,
     pub maximized: Option<usize>,
     pub layout: PaneNode,
+    /// Custom pane labels as (spatial-order index, label) pairs. Indices match
+    /// `panes_in_spatial_order`, the same ordering used for `focus`/`maximized`.
+    #[serde(default)]
+    pub pane_labels: Vec<(usize, String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -158,7 +162,12 @@ fn capture_tab(tab: &Tab) -> TabState {
     let maximized = tab.panes.maximized().and_then(index_of);
     let mut capture_leaf = |block: &Block| block.to_block_state();
     let layout = capture_pane_node(&tab.panes, &mut capture_leaf);
-    TabState { title: tab.title.clone(), focus, maximized, layout }
+    let pane_labels = order
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| tab.pane_labels.get(p).map(|l| (i, l.clone())))
+        .collect();
+    TabState { title: tab.title.clone(), focus, maximized, layout, pane_labels }
 }
 
 pub struct RestoredSession {
@@ -183,6 +192,11 @@ fn restore_tab(ts: TabState, config: &alterm_config::AppConfig) -> Tab {
     let focus = ts.focus.and_then(|i| order.get(i).copied());
 
     let mut tab = Tab::from_parts(ts.title, panes, focus);
+    for (i, label) in ts.pane_labels {
+        if let Some(p) = order.get(i).copied() {
+            tab.pane_labels.insert(p, label);
+        }
+    }
     if let Some(i) = ts.maximized {
         if let Some(p) = order.get(i).copied() {
             tab.panes.maximize(p);
@@ -205,6 +219,7 @@ mod tests {
                 TabState {
                     title: "one".into(), focus: Some(0), maximized: None,
                     layout: PaneNode::Leaf(BlockState::Preview { path: "/tmp".into() }),
+                    pane_labels: vec![],
                 },
                 TabState {
                     title: "two".into(), focus: Some(1), maximized: Some(0),
@@ -219,6 +234,7 @@ mod tests {
                             messages: vec![], input: "hi".into(),
                         })),
                     },
+                    pane_labels: vec![(0, "left".into())],
                 },
             ],
         }
@@ -320,6 +336,7 @@ mod tests {
                     a: Box::new(PaneNode::Leaf(BlockState::Preview { path: "/tmp".into() })),
                     b: Box::new(PaneNode::Leaf(BlockState::HotkeyInfo)),
                 },
+                pane_labels: vec![],
             }],
         };
         let restored = restore(s, &alterm_config::AppConfig::default());
