@@ -367,6 +367,14 @@ enum Message {
     PreviewSlideNext(pane_grid::Pane),
     // Hotkey info
     ShowHotkeyInfo,
+    // Terminal search (find bar)
+    SearchOpen,
+    SearchQueryChanged(String),
+    SearchToggleRegex,
+    SearchToggleCase,
+    SearchNext,
+    SearchPrev,
+    SearchClose,
     // Theme toggle
     ToggleTheme,
     // Window handle (X11 XID) ready
@@ -644,6 +652,58 @@ impl Alterm {
         self.rename_buffer.clear();
     }
 
+    /// Recompute matches for the current query and jump to the first match.
+    fn recompute_search(&mut self) -> Task<Message> {
+        let (pattern, pane, tab_id, empty) = match self.search.as_ref() {
+            Some(s) => (
+                workspace::build_search_pattern(&s.query, s.regex, s.case_sensitive),
+                s.pane,
+                s.tab_id,
+                s.query.is_empty(),
+            ),
+            None => return Task::none(),
+        };
+        let matches = if empty {
+            Vec::new()
+        } else {
+            self.tabs
+                .iter()
+                .find(|t| t.id == tab_id)
+                .and_then(|t| t.panes.get(pane))
+                .map_or(Vec::new(), |b| b.search(&pattern).unwrap_or_default())
+        };
+        if let Some(s) = self.search.as_mut() {
+            s.matches = matches;
+            s.current = 0;
+        }
+        self.scroll_to_current_match();
+        Task::none()
+    }
+
+    /// Move the current match index and scroll it into view.
+    fn step_search(&mut self, forward: bool) {
+        if let Some(s) = self.search.as_mut() {
+            if s.matches.is_empty() {
+                return;
+            }
+            s.current = wrap_index(s.current, s.matches.len(), forward);
+        }
+        self.scroll_to_current_match();
+    }
+
+    /// Scroll the searched pane so the current match is visible.
+    fn scroll_to_current_match(&mut self) {
+        let (tab_id, pane, m) = match self.search.as_ref() {
+            Some(s) if !s.matches.is_empty() => (s.tab_id, s.pane, s.matches[s.current].clone()),
+            _ => return,
+        };
+        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+            if let Some(block) = tab.panes.get_mut(pane) {
+                block.scroll_to_search_match(&m);
+            }
+        }
+    }
+
     /// Save the current session to disk.
     fn save_session(&self) {
         let window = session::WindowState { width: self.window_width, height: self.window_height };
@@ -885,10 +945,7 @@ impl Alterm {
             Action::NewPreview => self.update(Message::OpenPreview),
             Action::ShowHotkeyInfo => self.update(Message::ShowHotkeyInfo),
             Action::ToggleTheme => self.update(Message::ToggleTheme),
-            Action::Search => {
-                log::debug!("Search — not yet implemented");
-                Task::none()
-            }
+            Action::Search => self.update(Message::SearchOpen),
         }
     }
 
@@ -1793,6 +1850,63 @@ impl Alterm {
                     self.save_session();
                 }
                 return iced::exit();
+            }
+
+            Message::SearchOpen => {
+                let pane = match self.active_tab().focus {
+                    Some(p) => p,
+                    None => return Task::none(),
+                };
+                let is_term = self
+                    .active_tab()
+                    .panes
+                    .get(pane)
+                    .map_or(false, |b| b.is_terminal());
+                if !is_term {
+                    log::debug!("Search: focused pane is not a terminal");
+                    return Task::none();
+                }
+                let tab_id = self.active_tab().id;
+                self.search = Some(SearchState {
+                    pane,
+                    tab_id,
+                    query: String::new(),
+                    regex: false,
+                    case_sensitive: false,
+                    matches: Vec::new(),
+                    current: 0,
+                });
+                return widget_focus(search_input_id());
+            }
+            Message::SearchQueryChanged(q) => {
+                if let Some(s) = self.search.as_mut() {
+                    s.query = q;
+                }
+                return self.recompute_search();
+            }
+            Message::SearchToggleRegex => {
+                if let Some(s) = self.search.as_mut() {
+                    s.regex = !s.regex;
+                }
+                return self.recompute_search();
+            }
+            Message::SearchToggleCase => {
+                if let Some(s) = self.search.as_mut() {
+                    s.case_sensitive = !s.case_sensitive;
+                }
+                return self.recompute_search();
+            }
+            Message::SearchNext => {
+                self.step_search(true);
+                return Task::none();
+            }
+            Message::SearchPrev => {
+                self.step_search(false);
+                return Task::none();
+            }
+            Message::SearchClose => {
+                self.search = None;
+                return Task::none();
             }
         }
         Task::none()
