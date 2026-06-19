@@ -18,8 +18,8 @@ use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Poi
 use gpu_renderer::widget::TerminalView;
 use workspace::{
     all_palette_actions, match_shortcut, sidebar_view, tab_bar_view, Action, Block, BrowserState,
-    CommandPalette, PreviewState, SettingsField, SettingsSection, SidebarAction, Tab, TabBarAction,
-    CELL_HEIGHT,
+    CommandPalette, PreviewState, SearchMatch, SettingsField, SettingsSection, SidebarAction, Tab,
+    TabBarAction, CELL_HEIGHT,
 };
 use workspace::chrome;
 use workspace::grid;
@@ -236,6 +236,8 @@ struct Alterm {
     last_tab_click: Option<(usize, Instant)>,
     /// Last (pane, time) a pane title was clicked, for double-click rename detection.
     last_pane_click: Option<(pane_grid::Pane, Instant)>,
+    /// Active terminal find-bar search, if open.
+    search: Option<SearchState>,
 }
 
 /// What an in-progress inline rename is targeting.
@@ -256,6 +258,34 @@ struct ContextMenuState {
     /// top-left corner. The right-clicked pane is identified separately via
     /// `Alterm::active_tab().focus`, which `ContextMenuOpen` sets.
     position: Point,
+}
+
+/// Active find-bar search state for one terminal pane.
+struct SearchState {
+    pane: pane_grid::Pane,
+    tab_id: u64,
+    query: String,
+    regex: bool,
+    case_sensitive: bool,
+    matches: Vec<SearchMatch>,
+    current: usize,
+}
+
+/// Widget id of the find-bar text field, so it can be focused on open.
+fn search_input_id() -> WidgetId {
+    WidgetId::from("terminal-search-input".to_string())
+}
+
+/// Next/previous index with wraparound; returns 0 for an empty set.
+fn wrap_index(current: usize, len: usize, forward: bool) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if forward {
+        (current + 1) % len
+    } else {
+        (current + len - 1) % len
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -421,6 +451,7 @@ impl Alterm {
             rename_buffer: String::new(),
             last_tab_click: None,
             last_pane_click: None,
+            search: None,
         };
 
         // Request the native window handle from iced — fires WindowHandleReady.
@@ -3931,7 +3962,7 @@ fn extract_native_window_handle(w: &dyn iced::window::Window) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::compose_key;
+    use super::{compose_key, wrap_index};
 
     #[test]
     fn same_pane_index_distinct_across_tabs() {
@@ -3941,5 +3972,13 @@ mod tests {
         assert_ne!(compose_key(7, 0), compose_key(7, 1));
         // Low bits preserve the pane index.
         assert_eq!(compose_key(3, 5) & 0xFFFF_FFFF, 5);
+    }
+
+    #[test]
+    fn wrap_index_wraps_both_directions() {
+        assert_eq!(wrap_index(0, 3, true), 1);
+        assert_eq!(wrap_index(2, 3, true), 0); // wrap forward
+        assert_eq!(wrap_index(0, 3, false), 2); // wrap backward
+        assert_eq!(wrap_index(0, 0, true), 0); // empty is safe
     }
 }
