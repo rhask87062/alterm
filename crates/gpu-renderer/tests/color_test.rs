@@ -3,19 +3,19 @@ use gpu_renderer::colors::AnsiPalette;
 #[test]
 fn test_standard_black() {
     let palette = AnsiPalette::default();
-    assert_eq!(palette.ansi_to_rgb(0), (0x1d, 0x1d, 0x1f));
+    assert_eq!(palette.ansi_to_rgb(0), (0x1d, 0x14, 0x30));
 }
 
 #[test]
 fn test_standard_red() {
     let palette = AnsiPalette::default();
-    assert_eq!(palette.ansi_to_rgb(1), (0xff, 0x3b, 0x30));
+    assert_eq!(palette.ansi_to_rgb(1), (0xff, 0x6b, 0x9d));
 }
 
 #[test]
 fn test_bright_white() {
     let palette = AnsiPalette::default();
-    assert_eq!(palette.ansi_to_rgb(15), (0xf5, 0xf5, 0xf7));
+    assert_eq!(palette.ansi_to_rgb(15), (0xfa, 0xf3, 0xff));
 }
 
 #[test]

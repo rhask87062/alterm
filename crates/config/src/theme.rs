@@ -15,67 +15,71 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// Dark theme — macOS-inspired dark palette.
+    /// Dark theme — "Living Terminal": deep violet-black canvas with
+    /// neon-magenta accents, sampled from the app icon / marketing site
+    /// (`website/src/styles/global.css`).
     ///
     /// Background and foreground match the colors used in
     /// `crates/gpu-renderer/src/colors.rs`.
     pub fn dark() -> Self {
         Self {
             name: "dark".to_string(),
-            bg: (0x12, 0x12, 0x14),
-            fg: (0xe8, 0xe8, 0xed),
-            cursor: (0xe8, 0xe8, 0xed),
-            selection_bg: (0x3a, 0x3a, 0x44),
+            bg: (0x0d, 0x08, 0x14),     // --bg deep violet-black
+            fg: (0xec, 0xe6, 0xf5),     // --text
+            cursor: (0xf9, 0x77, 0xff), // --accent neon magenta
+            selection_bg: (0x28, 0x00, 0x56), // --purple-deep
             ansi_colors: [
                 // Normal (0–7)
-                (0x1d, 0x1d, 0x1f), // 0 black
-                (0xff, 0x3b, 0x30), // 1 red
-                (0x30, 0xd1, 0x58), // 2 green
-                (0xff, 0x9f, 0x0a), // 3 yellow
-                (0x0a, 0x84, 0xff), // 4 blue
-                (0xbf, 0x5a, 0xf2), // 5 magenta
-                (0x5a, 0xc8, 0xfa), // 6 cyan
-                (0xd1, 0xd1, 0xd6), // 7 white
+                (0x1d, 0x14, 0x30), // 0 black   — --bg-elev-2
+                (0xff, 0x6b, 0x9d), // 1 red     — --term-red
+                (0x5e, 0xf2, 0xb0), // 2 green   — --term-green
+                (0xff, 0xd5, 0x6b), // 3 yellow  — --term-yellow
+                (0x8a, 0x7b, 0xff), // 4 blue    — violet-indigo
+                (0xd4, 0x50, 0xfc), // 5 magenta — --orchid
+                (0x6f, 0xdf, 0xff), // 6 cyan    — --term-cyan
+                (0xec, 0xe6, 0xf5), // 7 white   — --text
                 // Bright (8–15)
-                (0x63, 0x63, 0x66), // 8  bright black
-                (0xff, 0x45, 0x3a), // 9  bright red
-                (0x30, 0xd1, 0x58), // 10 bright green
-                (0xff, 0xd6, 0x0a), // 11 bright yellow
-                (0x40, 0x9c, 0xff), // 12 bright blue
-                (0xda, 0x8f, 0xff), // 13 bright magenta
-                (0x70, 0xd7, 0xff), // 14 bright cyan
-                (0xf5, 0xf5, 0xf7), // 15 bright white
+                (0x6c, 0x62, 0x85), // 8  bright black   — --text-faint
+                (0xff, 0x8f, 0xb5), // 9  bright red
+                (0x7e, 0xf8, 0xc4), // 10 bright green
+                (0xff, 0xe2, 0x8a), // 11 bright yellow
+                (0xa9, 0x9b, 0xff), // 12 bright blue
+                (0xf9, 0x77, 0xff), // 13 bright magenta — --accent
+                (0x9b, 0xea, 0xff), // 14 bright cyan
+                (0xfa, 0xf3, 0xff), // 15 bright white
             ],
         }
     }
 
-    /// Light theme — soft white background with dark text.
+    /// Light theme — the same "Living Terminal" violet family, but favoring
+    /// the lighter tints and white: a soft lavender-white canvas with deep
+    /// violet text and contrast-tuned (darker) accents.
     pub fn light() -> Self {
         Self {
             name: "light".to_string(),
-            bg: (0xf5, 0xf5, 0xf7),
-            fg: (0x1d, 0x1d, 0x1f),
-            cursor: (0x1d, 0x1d, 0x1f),
-            selection_bg: (0xc7, 0xd7, 0xf0),
+            bg: (0xfa, 0xf3, 0xff),     // bright white with a lavender tint
+            fg: (0x1d, 0x14, 0x30),     // deep violet text (--bg-elev-2)
+            cursor: (0xa0, 0x21, 0xd6), // --purple-mid (readable on white)
+            selection_bg: (0xe6, 0xd8, 0xf7), // light lavender
             ansi_colors: [
-                // Normal (0–7)
-                (0x1d, 0x1d, 0x1f), // 0 black
-                (0xc0, 0x22, 0x18), // 1 red
-                (0x18, 0x7d, 0x36), // 2 green
-                (0x8a, 0x56, 0x00), // 3 yellow
-                (0x00, 0x56, 0xc8), // 4 blue
-                (0x6e, 0x28, 0x9a), // 5 magenta
-                (0x00, 0x6e, 0x9e), // 6 cyan
-                (0x5e, 0x5e, 0x60), // 7 white
-                // Bright (8–15)
-                (0x3a, 0x3a, 0x3c), // 8  bright black
-                (0xff, 0x3b, 0x30), // 9  bright red
-                (0x30, 0xd1, 0x58), // 10 bright green
-                (0xff, 0x9f, 0x0a), // 11 bright yellow
-                (0x0a, 0x84, 0xff), // 12 bright blue
-                (0xbf, 0x5a, 0xf2), // 13 bright magenta
-                (0x5a, 0xc8, 0xfa), // 14 bright cyan
-                (0xf5, 0xf5, 0xf7), // 15 bright white
+                // Normal (0–7) — darkened for contrast on the light canvas.
+                (0x1d, 0x14, 0x30), // 0 black
+                (0xd8, 0x33, 0x6e), // 1 red
+                (0x1f, 0x9e, 0x6e), // 2 green
+                (0xa9, 0x75, 0x0a), // 3 yellow / amber
+                (0x5b, 0x4f, 0xd6), // 4 blue / indigo
+                (0x9a, 0x1f, 0xc4), // 5 magenta
+                (0x1d, 0x8f, 0xb0), // 6 cyan
+                (0x6c, 0x62, 0x85), // 7 white  — --text-faint
+                // Bright (8–15) — the lighter, more saturated neon tints.
+                (0x9a, 0x8f, 0xb0), // 8  bright black — --text-muted
+                (0xff, 0x6b, 0x9d), // 9  bright red    — --term-red
+                (0x2b, 0xbd, 0x86), // 10 bright green
+                (0xc8, 0x92, 0x00), // 11 bright yellow
+                (0x7a, 0x6b, 0xff), // 12 bright blue
+                (0xd4, 0x50, 0xfc), // 13 bright magenta — --orchid
+                (0x2b, 0xb0, 0xd6), // 14 bright cyan
+                (0xec, 0xe6, 0xf5), // 15 bright white   — --text
             ],
         }
     }
@@ -102,8 +106,8 @@ mod tests {
     #[test]
     fn dark_theme_bg_fg() {
         let t = Theme::dark();
-        assert_eq!(t.bg, (0x12, 0x12, 0x14));
-        assert_eq!(t.fg, (0xe8, 0xe8, 0xed));
+        assert_eq!(t.bg, (0x0d, 0x08, 0x14));
+        assert_eq!(t.fg, (0xec, 0xe6, 0xf5));
     }
 
     #[test]
