@@ -16,6 +16,7 @@ use iced::window;
 use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Point, Subscription, Task, Theme};
 
 use gpu_renderer::widget::TerminalView;
+use gpu_renderer::grid::{CellHighlight, RenderGrid};
 use workspace::{
     all_palette_actions, match_shortcut, sidebar_view, tab_bar_view, Action, Block, BrowserState,
     CommandPalette, PreviewState, SearchMatch, SettingsField, SettingsSection, SidebarAction, Tab,
@@ -1960,6 +1961,7 @@ impl Alterm {
         };
         let rename_buffer = self.rename_buffer.as_str();
         let pane_labels = &tab.pane_labels;
+        let active_tab_id = tab.id;
         let rename_id = rename_input_id();
         // The active iced theme, so panes (e.g. the hotkey panel) can style
         // themselves to it during view construction.
@@ -1971,14 +1973,33 @@ impl Alterm {
                 // Build content based on block type.
                 let content: Element<'_, Message> = match block {
                     Block::Terminal { .. } => {
-                        let grid = block.render_grid(light_mode);
+                        let mut grid = block.render_grid(light_mode);
+                        let searching = self
+                            .search
+                            .as_ref()
+                            .map_or(false, |s| s.tab_id == active_tab_id && s.pane == pane);
+                        if searching {
+                            if let Some(s) = &self.search {
+                                apply_search_highlights(&mut grid, &s.matches, s.current);
+                            }
+                        }
                         let terminal_view = TerminalView::new(grid)
                             .with_font_size(self.config.appearance.font_size)
                             .with_font_family(self.terminal_font_family);
-                        terminal_view.view(
+                        let term_el = terminal_view.view(
                             Message::TerminalSelected,
                             move |pos| Message::ContextMenuOpen(pane, pos),
-                        )
+                        );
+                        if searching {
+                            if let Some(s) = &self.search {
+                                let bar = search_bar_view(s);
+                                stack![term_el, bar].into()
+                            } else {
+                                term_el
+                            }
+                        } else {
+                            term_el
+                        }
                     }
                     Block::AIChat { state } => {
                         ai_chat_view(pane, state, has_terminal_context)
@@ -3455,6 +3476,33 @@ fn format_size(bytes: u64) -> String {
 // ---------------------------------------------------------------------------
 
 /// Build the hotkey info reference pane showing all keyboard shortcuts.
+/// Stamp search highlights onto a render grid for the searched pane.
+fn apply_search_highlights(grid: &mut RenderGrid, matches: &[SearchMatch], current: usize) {
+    let offset = grid.display_offset as i32;
+    let last_col = grid.cols.saturating_sub(1);
+    for (i, m) in matches.iter().enumerate() {
+        let kind = if i == current {
+            CellHighlight::Current
+        } else {
+            CellHighlight::Match
+        };
+        for line in m.start_line..=m.end_line {
+            let row = line + offset;
+            if row < 0 || row as usize >= grid.rows {
+                continue;
+            }
+            let row = row as usize;
+            let col_start = if line == m.start_line { m.start_col } else { 0 };
+            let col_end = if line == m.end_line { m.end_col.min(last_col) } else { last_col };
+            for col in col_start..=col_end {
+                if let Some(cell) = grid.cells.get_mut(row).and_then(|r| r.get_mut(col)) {
+                    cell.highlight = kind;
+                }
+            }
+        }
+    }
+}
+
 /// Linear interpolation between two colors.
 fn lerp_color(a: Color, b: Color, f: f32) -> Color {
     Color {
@@ -3772,6 +3820,51 @@ fn async_stream(
 // ---------------------------------------------------------------------------
 // Title bar button helper
 // ---------------------------------------------------------------------------
+
+/// Build the bottom-anchored find bar overlaid on the searched terminal pane.
+fn search_bar_view<'a>(s: &'a SearchState) -> Element<'a, Message> {
+    let counter = if s.matches.is_empty() {
+        "0/0".to_string()
+    } else {
+        format!("{}/{}", s.current + 1, s.matches.len())
+    };
+    let case_label = if s.case_sensitive { "[Aa]" } else { "Aa" };
+    let regex_label = if s.regex { "[.*]" } else { ".*" };
+
+    let input = text_input("Find", &s.query)
+        .id(search_input_id())
+        .on_input(Message::SearchQueryChanged)
+        .on_submit(Message::SearchNext)
+        .size(13)
+        .padding(Padding::from([2, 6]))
+        .width(Length::Fixed(220.0));
+
+    let bar = row![
+        text("\u{1F50D}").size(13),
+        input,
+        text(counter).size(12),
+        title_bar_button("\u{2039}", Message::SearchPrev),
+        title_bar_button("\u{203A}", Message::SearchNext),
+        title_bar_button(case_label, Message::SearchToggleCase),
+        title_bar_button(regex_label, Message::SearchToggleRegex),
+        title_bar_button("\u{00D7}", Message::SearchClose),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center);
+
+    let is_focused = true;
+    let inner = container(bar)
+        .padding(6)
+        .style(move |t: &Theme| title_bar_style(t, is_focused));
+
+    container(inner)
+        .width(Fill)
+        .height(Fill)
+        .align_x(iced::alignment::Horizontal::Right)
+        .align_y(iced::alignment::Vertical::Bottom)
+        .padding(8)
+        .into()
+}
 
 /// Build a small, styled button for the pane title bar.
 fn title_bar_button(label: &str, on_press: Message) -> Element<'_, Message> {
