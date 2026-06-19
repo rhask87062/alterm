@@ -298,6 +298,43 @@ impl TerminalState {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Search pattern helpers
+// ---------------------------------------------------------------------------
+
+/// Backslash-escape regex metacharacters so a query matches literally.
+fn escape_regex(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(
+            c,
+            '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
+        ) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Build the final regex string for the search engine.
+///
+/// - `regex_mode == false`: the query is escaped so it matches literally.
+/// - `case_sensitive == false`: a `(?i)` prefix is added for case-insensitive
+///   matching.
+pub fn build_search_pattern(query: &str, regex_mode: bool, case_sensitive: bool) -> String {
+    let body = if regex_mode {
+        query.to_string()
+    } else {
+        escape_regex(query)
+    };
+    if case_sensitive {
+        body
+    } else {
+        format!("(?i){body}")
+    }
+}
+
 #[cfg(test)]
 mod scrollback_tests {
     use super::*;
@@ -315,5 +352,28 @@ mod scrollback_tests {
         // Line cap is respected.
         let capped = t.scrollback_ansi(1);
         assert!(capped.lines().count() <= 1 + 1); // allow trailing newline
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_pattern_escapes_literal_metachars() {
+        assert_eq!(build_search_pattern("a.b", false, true), "a\\.b");
+        assert_eq!(build_search_pattern("[E0432]", false, true), "\\[E0432\\]");
+    }
+
+    #[test]
+    fn build_pattern_adds_case_insensitive_prefix() {
+        assert_eq!(build_search_pattern("error", false, false), "(?i)error");
+        assert_eq!(build_search_pattern("error", false, true), "error");
+    }
+
+    #[test]
+    fn build_pattern_regex_mode_passthrough() {
+        assert_eq!(build_search_pattern("\\d+", true, true), "\\d+");
+        assert_eq!(build_search_pattern("ab", true, false), "(?i)ab");
     }
 }
