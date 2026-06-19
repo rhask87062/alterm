@@ -6,6 +6,12 @@ A GPU-accelerated, cross-platform terminal **workspace** built in Rust. It combi
 
 ---
 
+## Screenshot
+
+![Alterm workspace — terminal and AI chat side by side](assets/mock-up/mawk-up.png)
+
+---
+
 ## Features
 
 Alterm is more than a terminal — it's a tiling workspace where every pane can be a
