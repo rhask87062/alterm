@@ -8,8 +8,8 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, mouse_area, opaque, pane_grid, pick_list, rich_text, row,
-    scrollable, slider, span, stack, text, text_input, toggler, Column, Id as WidgetId,
+    button, column, container, mouse_area, opaque, pane_grid, pick_list, responsive, rich_text,
+    row, scrollable, slider, span, stack, text, text_input, toggler, Column, Id as WidgetId,
 };
 use iced::widget::operation::focus as widget_focus;
 use iced::window;
@@ -1856,20 +1856,30 @@ impl Alterm {
                     // the press — otherwise the pane-grid title bar treats the
                     // area as a drag handle and the click never registers. The
                     // app turns a quick second click into a rename.
-                    button(text(label).size(12))
-                        .padding(Padding::from([0, 2]))
-                        .on_press(Message::PaneTitleClicked(pane))
-                        .style(move |theme: &Theme, _status| iced::widget::button::Style {
-                            background: None,
-                            text_color: if is_focused {
-                                chrome::accent_text(theme)
-                            } else {
-                                chrome::text_muted(theme)
-                            },
-                            border: Border::default(),
-                            ..Default::default()
-                        })
-                        .into()
+                    // No wrapping: a long title stays one line so this pane's
+                    // title bar can't grow taller than its neighbors'. We use
+                    // `responsive` to learn the title slot's width and truncate
+                    // with an ellipsis that ends *before* the right edge instead
+                    // of running off the title bar.
+                    responsive(move |size| {
+                        let shown = truncate_to_width(&label, size.width);
+                        button(text(shown).size(12).wrapping(text::Wrapping::None))
+                            .padding(Padding::from([0, 2]))
+                            .on_press(Message::PaneTitleClicked(pane))
+                            .style(move |theme: &Theme, _status| iced::widget::button::Style {
+                                background: None,
+                                text_color: if is_focused {
+                                    chrome::accent_text(theme)
+                                } else {
+                                    chrome::text_muted(theme)
+                                },
+                                border: Border::default(),
+                                ..Default::default()
+                            })
+                            .into()
+                    })
+                    .height(Length::Shrink)
+                    .into()
                 };
 
                 // Build control buttons row
@@ -1918,6 +1928,13 @@ impl Alterm {
         let base: Element<'_, Message> = container(layout)
             .width(Fill)
             .height(Fill)
+            // Fill the canvas behind the panes with the same color as the tab
+            // bar and sidebar so the gaps between panes blend with the chrome
+            // instead of showing the bare (black) app background.
+            .style(|theme: &Theme| iced::widget::container::Style {
+                background: Some(Background::Color(chrome::bg_subtle(theme))),
+                ..Default::default()
+            })
             .into();
 
         // Overlays: command palette and context menu can stack on top of base.
@@ -3611,6 +3628,29 @@ fn async_stream(
 // Title bar button helper
 // ---------------------------------------------------------------------------
 
+/// Truncate a pane title to fit `width` pixels, appending an ellipsis so it
+/// ends before the right edge of the title bar instead of running off it.
+/// Uses an estimated average glyph width for the size-12 title font; the
+/// estimate runs slightly wide so the result errs on the side of fitting.
+fn truncate_to_width(label: &str, width: f32) -> String {
+    // ~7px per glyph at size 12, minus the button's horizontal padding (2+2)
+    // and a little slack for the ellipsis glyph.
+    const AVG_GLYPH_PX: f32 = 7.0;
+    let usable = (width - 6.0).max(0.0);
+    let max_chars = (usable / AVG_GLYPH_PX).floor() as usize;
+
+    let len = label.chars().count();
+    if len <= max_chars {
+        return label.to_string();
+    }
+    if max_chars <= 1 {
+        return "…".to_string();
+    }
+    let mut out: String = label.chars().take(max_chars - 1).collect();
+    out.push('…');
+    out
+}
+
 /// Build a small, styled button for the pane title bar.
 fn title_bar_button(label: &str, on_press: Message) -> Element<'_, Message> {
     button(text(label).size(12).center())
@@ -3664,7 +3704,7 @@ fn title_bar_style(
     let (bg, text_color, border_color) = if is_focused {
         (chrome::accent_subtle(theme), chrome::accent_text(theme), chrome::accent(theme))
     } else {
-        (chrome::bg_subtle(theme), chrome::text_muted(theme), chrome::line(theme))
+        (chrome::bg_pane_title(theme), chrome::text_muted(theme), chrome::line(theme))
     };
 
     iced::widget::container::Style {

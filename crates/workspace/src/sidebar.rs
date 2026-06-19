@@ -249,7 +249,7 @@ fn sidebar_container_style(theme: &Theme) -> iced::widget::container::Style {
         background: Some(Background::Color(chrome::bg_subtle(theme))),
         border: Border {
             color: chrome::line(theme),
-            width: 1.0,
+            width: 0.0,
             radius: 0.0.into(),
         },
         ..Default::default()
