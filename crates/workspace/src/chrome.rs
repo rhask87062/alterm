@@ -30,6 +30,36 @@ pub fn bg_raised(theme: &Theme) -> Color {
     theme.extended_palette().background.strong.color
 }
 
+/// Pane title bars — clearly more elevated than the tab bar (which uses
+/// [`bg_subtle`]) so individual panes' title bars contrast against the app
+/// title bar. Starts from the most-raised palette step and pushes further
+/// past it — lightening on dark themes, darkening on light ones — for a
+/// punchy, unmistakable shade on every theme.
+pub fn bg_pane_title(theme: &Theme) -> Color {
+    let base = bg_pressed(theme);
+    // Lighten on dark themes, darken on light themes, toward more contrast.
+    let target = if is_dark(bg_base(theme)) { WHITE } else { BLACK };
+    mix(base, target, 0.16)
+}
+
+const WHITE: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+const BLACK: Color = Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+
+/// Perceived-luminance check — true when a color reads as dark.
+fn is_dark(c: Color) -> bool {
+    0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 0.5
+}
+
+/// Linearly interpolate between two colors (`f` in 0.0..=1.0).
+fn mix(a: Color, b: Color, f: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * f,
+        g: a.g + (b.g - a.g) * f,
+        b: a.b + (b.b - a.b) * f,
+        a: a.a + (b.a - a.a) * f,
+    }
+}
+
 /// Pressed / most-raised surface.
 pub fn bg_pressed(theme: &Theme) -> Color {
     theme.extended_palette().background.stronger.color

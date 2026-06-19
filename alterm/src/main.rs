@@ -8,8 +8,8 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, mouse_area, opaque, pane_grid, pick_list, rich_text, row,
-    scrollable, slider, span, stack, text, text_input, toggler, Column, Id as WidgetId,
+    button, column, container, mouse_area, opaque, pane_grid, pick_list, responsive, rich_text,
+    row, scrollable, slider, span, stack, text, text_input, toggler, Column, Id as WidgetId,
 };
 use iced::widget::operation::focus as widget_focus;
 use iced::window;
@@ -174,6 +174,10 @@ const SIDEBAR_WIDTH: f32 = 44.0;
 const PANE_GRID_SPACING: f32 = 2.0;
 /// Minimum pane size — must match `.min_size(120)` on the PaneGrid widget.
 const PANE_GRID_MIN_SIZE: f32 = 120.0;
+/// Padding around the whole pane grid (between the panes and the surrounding
+/// chrome). Must match the container padding wrapping the PaneGrid in `view`;
+/// the browser-webview positioning math offsets by it to stay aligned.
+const GRID_PADDING: f32 = 8.0;
 /// Height of the browser nav bar (URL input + padding) in logical pixels.
 const BROWSER_NAV_BAR_HEIGHT: f32 = 40.0;
 
@@ -507,7 +511,13 @@ impl Alterm {
 
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
-        let bounds = Size::new(grid_width, grid_height);
+
+        // The grid is inset by GRID_PADDING on all sides, so pane regions are
+        // computed against the smaller padded area.
+        let bounds = Size::new(
+            (grid_width - GRID_PADDING * 2.0).max(40.0),
+            (grid_height - GRID_PADDING * 2.0).max(40.0),
+        );
 
         let tab = self.active_tab_mut();
         let tab_id = tab.id;
@@ -521,10 +531,10 @@ impl Alterm {
             bounds,
         );
 
-        // Full-grid rectangle for maximized panes
+        // Full-grid rectangle for maximized panes (within the padded area).
         let full_rect = Rectangle {
             x: 0.0, y: 0.0,
-            width: grid_width, height: grid_height,
+            width: bounds.width, height: bounds.height,
         };
 
         for (pane, default_rect) in &regions {
@@ -559,9 +569,12 @@ impl Alterm {
                 if block.is_browser() {
                     let pane_id = webview_key(tab_id, *pane);
                     if webview_manager::exists(pane_id) {
-                        let wv_x = rect.x as f64;
-                        let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+                        let wv_x = (GRID_PADDING + rect.x) as f64;
+                        let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
                         let wv_w = rect.width as f64;
+                        // The native webview is a plain rectangle and fills to
+                        // the pane bottom, so browser panes have square bottom
+                        // corners (no rounded clipping for native windows).
                         let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
                         webview_manager::set_bounds(pane_id, wv_x, wv_y, wv_w, wv_h);
                         webview_manager::set_visible(pane_id, true);
@@ -613,7 +626,10 @@ impl Alterm {
         use iced::Size;
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
-        let bounds = Size::new(grid_width, grid_height);
+        let bounds = Size::new(
+            (grid_width - GRID_PADDING * 2.0).max(40.0),
+            (grid_height - GRID_PADDING * 2.0).max(40.0),
+        );
 
         let tab = self.active_tab();
         let regions = tab.panes.layout().pane_regions(
@@ -623,8 +639,8 @@ impl Alterm {
         );
 
         let (x, y, w, h) = if let Some(rect) = regions.get(&pane) {
-            let wv_x = rect.x as f64;
-            let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+            let wv_x = (GRID_PADDING + rect.x) as f64;
+            let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
             let wv_w = rect.width as f64;
             let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
             (wv_x, wv_y, wv_w, wv_h)
@@ -746,7 +762,10 @@ impl Alterm {
         use iced::Size;
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
-        let bounds = Size::new(grid_width, grid_height);
+        let bounds = Size::new(
+            (grid_width - GRID_PADDING * 2.0).max(40.0),
+            (grid_height - GRID_PADDING * 2.0).max(40.0),
+        );
 
         // Find the tab by id to look up its pane layout.
         let regions = self.tabs.iter()
@@ -755,8 +774,8 @@ impl Alterm {
 
         let (x, y, w, h) = if let Some(regions) = regions {
             if let Some(rect) = regions.get(&pane) {
-                let wv_x = rect.x as f64;
-                let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+                let wv_x = (GRID_PADDING + rect.x) as f64;
+                let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
                 let wv_w = rect.width as f64;
                 let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
                 (wv_x, wv_y, wv_w, wv_h)
@@ -2068,20 +2087,30 @@ impl Alterm {
                     // the press — otherwise the pane-grid title bar treats the
                     // area as a drag handle and the click never registers. The
                     // app turns a quick second click into a rename.
-                    button(text(label).size(12))
-                        .padding(Padding::from([0, 2]))
-                        .on_press(Message::PaneTitleClicked(pane))
-                        .style(move |theme: &Theme, _status| iced::widget::button::Style {
-                            background: None,
-                            text_color: if is_focused {
-                                chrome::accent_text(theme)
-                            } else {
-                                chrome::text_muted(theme)
-                            },
-                            border: Border::default(),
-                            ..Default::default()
-                        })
-                        .into()
+                    // No wrapping: a long title stays one line so this pane's
+                    // title bar can't grow taller than its neighbors'. We use
+                    // `responsive` to learn the title slot's width and truncate
+                    // with an ellipsis that ends *before* the right edge instead
+                    // of running off the title bar.
+                    responsive(move |size| {
+                        let shown = truncate_to_width(&label, size.width);
+                        button(text(shown).size(12).wrapping(text::Wrapping::None))
+                            .padding(Padding::from([0, 2]))
+                            .on_press(Message::PaneTitleClicked(pane))
+                            .style(move |theme: &Theme, _status| iced::widget::button::Style {
+                                background: None,
+                                text_color: if is_focused {
+                                    chrome::accent_text(theme)
+                                } else {
+                                    chrome::text_muted(theme)
+                                },
+                                border: Border::default(),
+                                ..Default::default()
+                            })
+                            .into()
+                    })
+                    .height(Length::Shrink)
+                    .into()
                 };
 
                 // Build control buttons row
@@ -2123,13 +2152,26 @@ impl Alterm {
         // Sidebar
         let sidebar = sidebar_view(Message::SidebarAction, light_mode);
 
+        // Pad the grid so the panes sit inset from the surrounding chrome.
+        let padded_grid = container(pane_grid_widget)
+            .width(Fill)
+            .height(Fill)
+            .padding(GRID_PADDING);
+
         // Layout: tab bar on top, then [pane_grid | sidebar] below
-        let content_row = row![pane_grid_widget, sidebar];
+        let content_row = row![padded_grid, sidebar];
         let layout = column![tab_bar, content_row];
 
         let base: Element<'_, Message> = container(layout)
             .width(Fill)
             .height(Fill)
+            // Fill the canvas behind the panes with the same color as the tab
+            // bar and sidebar so the gaps between panes blend with the chrome
+            // instead of showing the bare (black) app background.
+            .style(|theme: &Theme| iced::widget::container::Style {
+                background: Some(Background::Color(chrome::bg_subtle(theme))),
+                ..Default::default()
+            })
             .into();
 
         // Overlays: command palette and context menu can stack on top of base.
@@ -2600,7 +2642,8 @@ fn ai_chat_view<'a>(
                     Color::from_rgb(0.15, 0.15, 0.20)
                 },
                 width: 1.0,
-                radius: 0.0.into(),
+                // Round the bottom corners to match the pane's rounded border.
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
             },
             ..Default::default()
         }
@@ -2799,8 +2842,16 @@ fn settings_view<'a>(
     container(column![header, body])
         .width(Fill)
         .height(Fill)
+        // Bottom inset so overflowing scroll content / scrollbar doesn't paint
+        // over the rounded bottom corners (iced only clips rectangles).
+        .padding(Padding { top: 0.0, right: 0.0, bottom: PANE_CORNER_RADIUS, left: 0.0 })
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -3107,8 +3158,13 @@ fn browser_view<'a>(
     container(column![nav_bar, webview_area])
         .width(Fill)
         .height(Fill)
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -3467,11 +3523,22 @@ fn preview_view<'a>(
     };
 
     // ── Wrap content ──
+    // Round the bottom corners to match the pane's rounded border (this is the
+    // element that reaches the bottom of the pane). A small bottom inset keeps
+    // overflowing content and the scrollbar from painting over the rounded
+    // corners (iced only supports rectangular clipping, so the rounded
+    // background would otherwise be covered in tiled/overflow layouts).
     let content_styled: Element<'a, Message> = container(content_area)
         .width(Fill)
         .height(Fill)
+        .padding(Padding { top: 0.0, right: 0.0, bottom: PANE_CORNER_RADIUS, left: 0.0 })
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into();
@@ -3480,8 +3547,13 @@ fn preview_view<'a>(
     container(column![path_bar, content_styled].width(Fill).height(Fill))
         .width(Fill)
         .height(Fill)
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -3790,8 +3862,16 @@ fn hotkey_info_view<'a>(theme: &Theme) -> Element<'a, Message> {
     container(layout)
         .width(Fill)
         .height(Fill)
+        // Bottom inset so overflowing scroll content / scrollbar doesn't paint
+        // over the rounded bottom corners (iced only clips rectangles).
+        .padding(Padding { top: 0.0, right: 0.0, bottom: PANE_CORNER_RADIUS, left: 0.0 })
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -3895,6 +3975,29 @@ fn search_bar_view<'a>(s: &'a SearchState) -> Element<'a, Message> {
         .into()
 }
 
+/// Truncate a pane title to fit `width` pixels, appending an ellipsis so it
+/// ends before the right edge of the title bar instead of running off it.
+/// Uses an estimated average glyph width for the size-12 title font; the
+/// estimate runs slightly wide so the result errs on the side of fitting.
+fn truncate_to_width(label: &str, width: f32) -> String {
+    // ~7px per glyph at size 12, minus the button's horizontal padding (2+2)
+    // and a little slack for the ellipsis glyph.
+    const AVG_GLYPH_PX: f32 = 7.0;
+    let usable = (width - 6.0).max(0.0);
+    let max_chars = (usable / AVG_GLYPH_PX).floor() as usize;
+
+    let len = label.chars().count();
+    if len <= max_chars {
+        return label.to_string();
+    }
+    if max_chars <= 1 {
+        return "…".to_string();
+    }
+    let mut out: String = label.chars().take(max_chars - 1).collect();
+    out.push('…');
+    out
+}
+
 /// Build a small, styled button for the pane title bar.
 fn title_bar_button(label: &str, on_press: Message) -> Element<'_, Message> {
     button(text(label).size(12).center())
@@ -3948,7 +4051,7 @@ fn title_bar_style(
     let (bg, text_color, border_color) = if is_focused {
         (chrome::accent_subtle(theme), chrome::accent_text(theme), chrome::accent(theme))
     } else {
-        (chrome::bg_subtle(theme), chrome::text_muted(theme), chrome::line(theme))
+        (chrome::bg_pane_title(theme), chrome::text_muted(theme), chrome::line(theme))
     };
 
     iced::widget::container::Style {
