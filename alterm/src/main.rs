@@ -1715,6 +1715,23 @@ impl Alterm {
                     return Task::none();
                 }
 
+                // While the find bar is open it owns the keyboard: Escape closes,
+                // Enter jumps to the next match, and other keys are handled by the
+                // text_input (or swallowed) rather than running shortcuts / a PTY.
+                if self.search.is_some() {
+                    match &key {
+                        Key::Named(Named::Escape) => return self.update(Message::SearchClose),
+                        Key::Named(Named::Enter) => return self.update(Message::SearchNext),
+                        _ => {
+                            // Let Ctrl+Shift+F toggle the find bar off.
+                            if let Some(Action::Search) = match_shortcut(&key, &modifiers) {
+                                return self.update(Message::SearchClose);
+                            }
+                            return Task::none();
+                        }
+                    }
+                }
+
                 // When the palette is open, intercept navigation keys.
                 if self.palette.visible {
                     match &key {
