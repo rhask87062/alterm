@@ -309,6 +309,7 @@ fn escape_regex(s: &str) -> String {
         if matches!(
             c,
             '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
+                | '-' | '#' | '&' | '~'
         ) {
             out.push('\\');
         }
@@ -375,5 +376,11 @@ mod tests {
     fn build_pattern_regex_mode_passthrough() {
         assert_eq!(build_search_pattern("\\d+", true, true), "\\d+");
         assert_eq!(build_search_pattern("ab", true, false), "(?i)ab");
+    }
+
+    #[test]
+    fn build_pattern_escapes_class_and_verbose_metachars() {
+        assert_eq!(build_search_pattern("a-z", false, true), "a\\-z");
+        assert_eq!(build_search_pattern("f#b", false, true), "f\\#b");
     }
 }
