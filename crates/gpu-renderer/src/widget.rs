@@ -10,6 +10,10 @@ use iced::widget::Canvas;
 
 use crate::grid::RenderGrid;
 
+/// Bottom-corner radius for a terminal pane's background, matching the pane
+/// border radius defined in the app shell.
+const PANE_CORNER_RADIUS: f32 = 8.0;
+
 // ---------------------------------------------------------------------------
 // SelectionState
 // ---------------------------------------------------------------------------
@@ -228,12 +232,16 @@ impl<M: 'static> canvas::Program<M> for TerminalCanvas<M> {
         };
         let default_bg = Color::from_rgb8(dr, dg, db);
 
-        // Fill entire background first.
-        frame.fill_rectangle(
+        // Fill entire background first. The bottom corners are rounded to match
+        // the pane's rounded border (the top stays square because the pane's
+        // title bar sits over it). Without this the square fill pokes past the
+        // rounded border and the bottom corners look like sharp 90° angles.
+        let bg_path = canvas::Path::rounded_rectangle(
             Point::ORIGIN,
             bounds.size(),
-            default_bg,
+            iced::border::bottom(PANE_CORNER_RADIUS),
         );
+        frame.fill(&bg_path, default_bg);
 
         let cw = self.cell_width;
         let ch = self.cell_height;
