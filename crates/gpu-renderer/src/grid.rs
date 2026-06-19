@@ -12,6 +12,19 @@ use terminal::term::TerminalState;
 use crate::colors::AnsiPalette;
 
 // ---------------------------------------------------------------------------
+// CellHighlight
+// ---------------------------------------------------------------------------
+
+/// Search-highlight state for a single cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CellHighlight {
+    #[default]
+    None,
+    Match,
+    Current,
+}
+
+// ---------------------------------------------------------------------------
 // RenderCell
 // ---------------------------------------------------------------------------
 
@@ -29,6 +42,8 @@ pub struct RenderCell {
     pub underline: bool,
     /// True when this cell is under the terminal cursor.
     pub is_cursor: bool,
+    /// Search highlight state for this cell.
+    pub highlight: CellHighlight,
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +150,7 @@ fn cell_to_render(
         c.line == Line(row as i32) && c.column == Column(col)
     });
 
-    RenderCell { c: cell.c, fg, bg, bold, italic, underline, is_cursor }
+    RenderCell { c: cell.c, fg, bg, bold, italic, underline, is_cursor, highlight: CellHighlight::None }
 }
 
 /// A blank cell using palette defaults.
@@ -152,7 +167,7 @@ fn blank_cell(light_mode: bool) -> RenderCell {
         AnsiPalette::default_bg()
     };
     let bg = to_float(r, g, b);
-    RenderCell { c: ' ', fg, bg, bold: false, italic: false, underline: false, is_cursor: false }
+    RenderCell { c: ' ', fg, bg, bold: false, italic: false, underline: false, is_cursor: false, highlight: CellHighlight::None }
 }
 
 /// Resolve an alacritty_terminal `Color` to normalized RGBA floats.
@@ -223,4 +238,40 @@ pub fn resolve_color(color: Color, palette: &AnsiPalette, is_fg: bool, light_mod
 #[inline]
 pub fn to_float(r: u8, g: u8, b: u8) -> [f32; 4] {
     [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
+}
+
+/// Background/foreground colors for a search-highlighted cell, or `None` when
+/// the cell is not highlighted. Returns `(bg, fg)` as normalized RGBA.
+pub fn highlight_colors(kind: CellHighlight, light_mode: bool) -> Option<([f32; 4], [f32; 4])> {
+    match kind {
+        CellHighlight::None => None,
+        CellHighlight::Match => Some(if light_mode {
+            ([1.0, 0.92, 0.55, 1.0], [0.0, 0.0, 0.0, 1.0])
+        } else {
+            ([0.40, 0.32, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])
+        }),
+        CellHighlight::Current => Some(if light_mode {
+            ([1.0, 0.66, 0.16, 1.0], [0.0, 0.0, 0.0, 1.0])
+        } else {
+            ([0.95, 0.60, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0])
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_defaults_to_none() {
+        assert_eq!(CellHighlight::default(), CellHighlight::None);
+    }
+
+    #[test]
+    fn highlight_colors_distinguish_current_from_match() {
+        assert!(highlight_colors(CellHighlight::None, false).is_none());
+        let m = highlight_colors(CellHighlight::Match, false).unwrap();
+        let c = highlight_colors(CellHighlight::Current, false).unwrap();
+        assert_ne!(m.0, c.0, "current and match backgrounds must differ");
+    }
 }
