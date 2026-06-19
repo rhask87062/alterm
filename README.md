@@ -6,9 +6,13 @@ A GPU-accelerated, cross-platform terminal **workspace** built in Rust. It combi
 
 ---
 
-## Screenshot
+## Screenshots
 
-![Alterm workspace — terminal and AI chat side by side](assets/mock-up/mawk-up.png)
+![4-pane split — file tree, image preview, terminal, browser](website/assets/4-way-split-ss.png)
+
+![5-pane split — with settings panel open](website/assets/5-way-split-ss.png)
+
+![6-pane split — settings + keyboard shortcuts panel](website/assets/6-way-split-ss.png)
 
 ---
 
