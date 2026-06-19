@@ -173,6 +173,10 @@ const SIDEBAR_WIDTH: f32 = 44.0;
 const PANE_GRID_SPACING: f32 = 2.0;
 /// Minimum pane size — must match `.min_size(120)` on the PaneGrid widget.
 const PANE_GRID_MIN_SIZE: f32 = 120.0;
+/// Padding around the whole pane grid (between the panes and the surrounding
+/// chrome). Must match the container padding wrapping the PaneGrid in `view`;
+/// the browser-webview positioning math offsets by it to stay aligned.
+const GRID_PADDING: f32 = 8.0;
 /// Height of the browser nav bar (URL input + padding) in logical pixels.
 const BROWSER_NAV_BAR_HEIGHT: f32 = 40.0;
 
@@ -464,7 +468,13 @@ impl Alterm {
 
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
-        let bounds = Size::new(grid_width, grid_height);
+
+        // The grid is inset by GRID_PADDING on all sides, so pane regions are
+        // computed against the smaller padded area.
+        let bounds = Size::new(
+            (grid_width - GRID_PADDING * 2.0).max(40.0),
+            (grid_height - GRID_PADDING * 2.0).max(40.0),
+        );
 
         let tab = self.active_tab_mut();
         let tab_id = tab.id;
@@ -478,10 +488,10 @@ impl Alterm {
             bounds,
         );
 
-        // Full-grid rectangle for maximized panes
+        // Full-grid rectangle for maximized panes (within the padded area).
         let full_rect = Rectangle {
             x: 0.0, y: 0.0,
-            width: grid_width, height: grid_height,
+            width: bounds.width, height: bounds.height,
         };
 
         for (pane, default_rect) in &regions {
@@ -516,8 +526,8 @@ impl Alterm {
                 if block.is_browser() {
                     let pane_id = webview_key(tab_id, *pane);
                     if webview_manager::exists(pane_id) {
-                        let wv_x = rect.x as f64;
-                        let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+                        let wv_x = (GRID_PADDING + rect.x) as f64;
+                        let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
                         let wv_w = rect.width as f64;
                         let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
                         webview_manager::set_bounds(pane_id, wv_x, wv_y, wv_w, wv_h);
@@ -570,7 +580,10 @@ impl Alterm {
         use iced::Size;
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
-        let bounds = Size::new(grid_width, grid_height);
+        let bounds = Size::new(
+            (grid_width - GRID_PADDING * 2.0).max(40.0),
+            (grid_height - GRID_PADDING * 2.0).max(40.0),
+        );
 
         let tab = self.active_tab();
         let regions = tab.panes.layout().pane_regions(
@@ -580,8 +593,8 @@ impl Alterm {
         );
 
         let (x, y, w, h) = if let Some(rect) = regions.get(&pane) {
-            let wv_x = rect.x as f64;
-            let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+            let wv_x = (GRID_PADDING + rect.x) as f64;
+            let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
             let wv_w = rect.width as f64;
             let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
             (wv_x, wv_y, wv_w, wv_h)
@@ -636,7 +649,10 @@ impl Alterm {
         use iced::Size;
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
-        let bounds = Size::new(grid_width, grid_height);
+        let bounds = Size::new(
+            (grid_width - GRID_PADDING * 2.0).max(40.0),
+            (grid_height - GRID_PADDING * 2.0).max(40.0),
+        );
 
         // Find the tab by id to look up its pane layout.
         let regions = self.tabs.iter()
@@ -645,8 +661,8 @@ impl Alterm {
 
         let (x, y, w, h) = if let Some(regions) = regions {
             if let Some(rect) = regions.get(&pane) {
-                let wv_x = rect.x as f64;
-                let wv_y = (TAB_BAR_HEIGHT + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+                let wv_x = (GRID_PADDING + rect.x) as f64;
+                let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
                 let wv_w = rect.width as f64;
                 let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
                 (wv_x, wv_y, wv_w, wv_h)
@@ -1921,8 +1937,14 @@ impl Alterm {
         // Sidebar
         let sidebar = sidebar_view(Message::SidebarAction, light_mode);
 
+        // Pad the grid so the panes sit inset from the surrounding chrome.
+        let padded_grid = container(pane_grid_widget)
+            .width(Fill)
+            .height(Fill)
+            .padding(GRID_PADDING);
+
         // Layout: tab bar on top, then [pane_grid | sidebar] below
-        let content_row = row![pane_grid_widget, sidebar];
+        let content_row = row![padded_grid, sidebar];
         let layout = column![tab_bar, content_row];
 
         let base: Element<'_, Message> = container(layout)
@@ -2405,7 +2427,8 @@ fn ai_chat_view<'a>(
                     Color::from_rgb(0.15, 0.15, 0.20)
                 },
                 width: 1.0,
-                radius: 0.0.into(),
+                // Round the bottom corners to match the pane's rounded border.
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
             },
             ..Default::default()
         }
@@ -2604,8 +2627,16 @@ fn settings_view<'a>(
     container(column![header, body])
         .width(Fill)
         .height(Fill)
+        // Bottom inset so overflowing scroll content / scrollbar doesn't paint
+        // over the rounded bottom corners (iced only clips rectangles).
+        .padding(Padding { top: 0.0, right: 0.0, bottom: PANE_CORNER_RADIUS, left: 0.0 })
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -2912,8 +2943,13 @@ fn browser_view<'a>(
     container(column![nav_bar, webview_area])
         .width(Fill)
         .height(Fill)
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -3272,11 +3308,22 @@ fn preview_view<'a>(
     };
 
     // ── Wrap content ──
+    // Round the bottom corners to match the pane's rounded border (this is the
+    // element that reaches the bottom of the pane). A small bottom inset keeps
+    // overflowing content and the scrollbar from painting over the rounded
+    // corners (iced only supports rectangular clipping, so the rounded
+    // background would otherwise be covered in tiled/overflow layouts).
     let content_styled: Element<'a, Message> = container(content_area)
         .width(Fill)
         .height(Fill)
+        .padding(Padding { top: 0.0, right: 0.0, bottom: PANE_CORNER_RADIUS, left: 0.0 })
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into();
@@ -3285,8 +3332,13 @@ fn preview_view<'a>(
     container(column![path_bar, content_styled].width(Fill).height(Fill))
         .width(Fill)
         .height(Fill)
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -3568,8 +3620,16 @@ fn hotkey_info_view<'a>(theme: &Theme) -> Element<'a, Message> {
     container(layout)
         .width(Fill)
         .height(Fill)
+        // Bottom inset so overflowing scroll content / scrollbar doesn't paint
+        // over the rounded bottom corners (iced only clips rectangles).
+        .padding(Padding { top: 0.0, right: 0.0, bottom: PANE_CORNER_RADIUS, left: 0.0 })
+        .clip(true)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(chrome::bg_base(theme))),
+            border: Border {
+                radius: iced::border::bottom(PANE_CORNER_RADIUS),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
