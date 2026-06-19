@@ -1,22 +1,21 @@
--- Alterm hooks file
--- Place this at ~/.config/alterm/hooks.lua
+-- Alterm Lua hooks — copy to ~/.config/alterm/hooks.lua to enable.
+--
+-- A global `alterm` table is available: alterm.version, alterm.platform, alterm.home.
+-- Each function below is optional; define only the ones you want.
 
--- Called when a new terminal is created
-function on_terminal_created()
-    -- Return a custom shell command, or nil for default
-    return nil
+-- Runs once at launch. Returned string is logged.
+function on_startup()
+  return "Alterm " .. alterm.version .. " ready on " .. alterm.platform
 end
 
--- Called to determine the terminal title
-function on_title_change(title)
-    -- Modify the title, or return nil to use default
-    return title
+-- Runs for every terminal you open after launch (not restored/launch terminals).
+-- Returned string is run in the new shell.
+function on_new_terminal()
+  -- return "echo Welcome to Alterm"
+  return ""
 end
 
--- Conditional configuration based on hostname
-local hostname = io.popen("hostname"):read("*l")
-if hostname == "work-machine" then
-    default_provider = "anthropic"
-else
-    default_provider = "ollama"
+-- Runs when you toggle the theme. `theme` is "dark" or "light". Returned string is logged.
+function on_theme_change(theme)
+  return "theme is now " .. theme
 end

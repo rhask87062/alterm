@@ -406,6 +406,9 @@ impl Alterm {
             Ok(false) => log::debug!("No hooks.lua found; Lua hooks disabled"),
             Err(e) => log::warn!("Failed to load hooks.lua: {e}"),
         }
+        if let Some(msg) = hooks.call_hook("on_startup") {
+            log::info!("[hooks] on_startup: {msg}");
+        }
 
         // Restore session or build a default tab.
         let (tabs, active_tab, window_width, window_height) = {
@@ -705,6 +708,21 @@ impl Alterm {
         }
     }
 
+    /// Fire the `on_new_terminal` Lua hook for a freshly created terminal pane
+    /// in the active tab. If the hook returns a string, it is written to the new
+    /// PTY as a newline-terminated command. No-op when the hook is undefined.
+    fn fire_on_new_terminal(&mut self, pane: pane_grid::Pane) {
+        let Some(input) = self.hooks.call_hook("on_new_terminal") else {
+            return;
+        };
+        if input.is_empty() {
+            return;
+        }
+        if let Some(block) = self.active_tab_mut().panes.get_mut(pane) {
+            block.write_input(format!("{input}\n").as_bytes());
+        }
+    }
+
     /// Save the current session to disk.
     fn save_session(&self) {
         let window = session::WindowState { width: self.window_width, height: self.window_height };
@@ -999,7 +1017,8 @@ impl Alterm {
             // Split Right / Split Down now both add a window to the balanced grid.
             Message::SplitHorizontal | Message::SplitVertical => {
                 if let Ok(block) = Block::new_terminal(24, 80) {
-                    self.add_window(block);
+                    let pane = self.add_window(block);
+                    self.fire_on_new_terminal(pane);
                 }
             }
             Message::ClosePane => {
@@ -1045,7 +1064,8 @@ impl Alterm {
             // Per-pane title-bar split buttons also add a window to the grid.
             Message::SplitPaneRight(_) | Message::SplitPaneDown(_) => {
                 if let Ok(block) = Block::new_terminal(24, 80) {
-                    self.add_window(block);
+                    let pane = self.add_window(block);
+                    self.fire_on_new_terminal(pane);
                 }
             }
             Message::ClosePaneId(pane) => {
@@ -1093,6 +1113,9 @@ impl Alterm {
                 if let Ok(new_tab) = Tab::new() {
                     self.tabs.push(new_tab);
                     self.active_tab = self.tabs.len() - 1;
+                    if let Some(pane) = self.active_tab().focus {
+                        self.fire_on_new_terminal(pane);
+                    }
                 }
             }
             Message::CloseTab(index) => {
@@ -1846,6 +1869,12 @@ impl Alterm {
                             state.config.appearance.theme = self.config.appearance.theme.clone();
                         }
                     }
+                }
+                if let Some(msg) = self
+                    .hooks
+                    .call_hook_with("on_theme_change", &self.config.appearance.theme)
+                {
+                    log::info!("[hooks] on_theme_change: {msg}");
                 }
             }
 
