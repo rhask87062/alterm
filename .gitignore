@@ -3,3 +3,10 @@
 *.rs.bk
 *.swp
 .env
+
+# Build artifacts / scratch
+/rust_out
+
+# Agent tooling scratch (Claude Code worktrees, SDD ledger/briefs)
+.claude/
+/.superpowers/
