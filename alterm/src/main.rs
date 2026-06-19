@@ -3450,6 +3450,9 @@ fn title_bar_button(label: &str, on_press: Message) -> Element<'_, Message> {
 // Styles
 // ---------------------------------------------------------------------------
 
+/// Corner radius applied to panes (the outer pane container and its title bar).
+const PANE_CORNER_RADIUS: f32 = 8.0;
+
 fn title_bar_style(
     theme: &Theme,
     is_focused: bool,
@@ -3470,10 +3473,10 @@ fn title_bar_style(
     };
 
     let border_color = match (light, is_focused) {
-        (true, true) => Color::from_rgb(0.20, 0.45, 0.80),
-        (true, false) => Color::from_rgb(0.80, 0.80, 0.82),
-        (false, true) => Color::from_rgb(0.35, 0.55, 0.90),
-        (false, false) => Color::from_rgb(0.12, 0.12, 0.14),
+        (true, true) => Color::from_rgb(0.627, 0.129, 0.839),  // --purple-mid
+        (true, false) => Color::from_rgb(0.847, 0.792, 0.918),
+        (false, true) => Color::from_rgb(0.976, 0.467, 1.000), // --accent magenta
+        (false, false) => Color::from_rgb(0.239, 0.173, 0.341), // --line-bright
     };
 
     iced::widget::container::Style {
@@ -3482,7 +3485,8 @@ fn title_bar_style(
         border: Border {
             color: border_color,
             width: if is_focused { 1.0 } else { 0.0 },
-            radius: 0.0.into(),
+            // Round only the top corners — the title bar caps the top of the pane.
+            radius: iced::border::top(PANE_CORNER_RADIUS),
         },
         ..Default::default()
     }
@@ -3493,17 +3497,19 @@ fn pane_content_style(
     is_focused: bool,
 ) -> iced::widget::container::Style {
     let light = is_light_theme(theme);
+    // Match the terminal/app background so the rounded corners blend with the
+    // surrounding canvas instead of showing a mismatched square fill.
     let bg = if light {
-        Color::from_rgb(0.96, 0.96, 0.97)
+        Color::from_rgb(0.980, 0.953, 1.000) // --bg light
     } else {
-        Color::from_rgb(0.05, 0.05, 0.05)
+        Color::from_rgb(0.051, 0.031, 0.078) // --bg deep violet-black
     };
 
     let border_color = match (light, is_focused) {
-        (true, true) => Color::from_rgb(0.20, 0.45, 0.80),
-        (true, false) => Color::from_rgb(0.80, 0.80, 0.82),
-        (false, true) => Color::from_rgb(0.35, 0.55, 0.90),
-        (false, false) => Color::from_rgb(0.12, 0.12, 0.14),
+        (true, true) => Color::from_rgb(0.627, 0.129, 0.839),  // --purple-mid
+        (true, false) => Color::from_rgb(0.847, 0.792, 0.918),
+        (false, true) => Color::from_rgb(0.976, 0.467, 1.000), // --accent magenta
+        (false, false) => Color::from_rgb(0.239, 0.173, 0.341), // --line-bright
     };
 
     iced::widget::container::Style {
@@ -3511,7 +3517,7 @@ fn pane_content_style(
         border: Border {
             color: border_color,
             width: if is_focused { 2.0 } else { 1.0 },
-            radius: 0.0.into(),
+            radius: PANE_CORNER_RADIUS.into(),
         },
         ..Default::default()
     }
