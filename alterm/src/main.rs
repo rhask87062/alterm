@@ -529,6 +529,9 @@ impl Alterm {
                         let wv_x = (GRID_PADDING + rect.x) as f64;
                         let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
                         let wv_w = rect.width as f64;
+                        // The native webview is a plain rectangle and fills to
+                        // the pane bottom, so browser panes have square bottom
+                        // corners (no rounded clipping for native windows).
                         let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
                         webview_manager::set_bounds(pane_id, wv_x, wv_y, wv_w, wv_h);
                         webview_manager::set_visible(pane_id, true);
