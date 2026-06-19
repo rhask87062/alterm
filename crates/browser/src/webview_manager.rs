@@ -29,8 +29,20 @@ use {
 
 thread_local! {
     static WEBVIEWS: RefCell<HashMap<u64, WebView>> = RefCell::new(HashMap::new());
+    /// Navigation events `(pane_id, url)` reported by webviews' navigation
+    /// handlers, queued for the UI thread to drain on its tick. Webviews and
+    /// the UI loop share the main thread, so a thread-local queue is sufficient
+    /// (no cross-thread channel needed).
+    static NAV_EVENTS: RefCell<Vec<(u64, String)>> = const { RefCell::new(Vec::new()) };
     #[cfg(target_os = "linux")]
     static GTK_INITIALIZED: RefCell<bool> = RefCell::new(false);
+}
+
+/// Drain queued navigation events. Each is `(pane_id, url)` for a navigation
+/// that occurred in a webview (URL-bar submit, link click, redirect, or a
+/// confirmed back/forward move). The caller updates the matching pane state.
+pub fn drain_nav_events() -> Vec<(u64, String)> {
+    NAV_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
 }
 
 /// Ensure GTK is initialized. No-op on non-Linux platforms.
@@ -89,6 +101,13 @@ pub fn create_webview(
             position: LogicalPosition::new(bounds.0, bounds.1).into(),
             size: LogicalSize::new(bounds.2, bounds.3).into(),
         })
+        // Record every navigation (URL-bar submit, link click, redirect, or a
+        // back/forward move) so the UI can keep its history/URL bar accurate.
+        // Returning true allows the navigation to proceed.
+        .with_navigation_handler(move |url| {
+            NAV_EVENTS.with(|q| q.borrow_mut().push((pane_id, url)));
+            true
+        })
         .build_as_child(&wrapper)
         .map_err(|e| format!("Failed to create webview: {e}"))?;
 
@@ -117,12 +136,17 @@ pub fn navigate(pane_id: u64, url: &str) {
 pub fn set_bounds(pane_id: u64, x: f64, y: f64, w: f64, h: f64) {
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
-            if let Err(e) = wv.set_bounds(Rect {
+            match wv.set_bounds(Rect {
                 position: LogicalPosition::new(x, y).into(),
                 size: LogicalSize::new(w, h).into(),
             }) {
-                log::warn!("WebView set_bounds failed for pane {pane_id}: {e}");
+                Ok(()) => log::debug!(
+                    "[wv-diag] set_bounds ok: pane {pane_id} -> ({x:.0},{y:.0},{w:.0},{h:.0})"
+                ),
+                Err(e) => log::warn!("WebView set_bounds failed for pane {pane_id}: {e}"),
             }
+        } else {
+            log::debug!("[wv-diag] set_bounds: no webview for pane {pane_id}");
         }
     });
 }
@@ -130,9 +154,12 @@ pub fn set_bounds(pane_id: u64, x: f64, y: f64, w: f64, h: f64) {
 pub fn set_visible(pane_id: u64, visible: bool) {
     WEBVIEWS.with(|wvs| {
         if let Some(wv) = wvs.borrow().get(&pane_id) {
-            if let Err(e) = wv.set_visible(visible) {
-                log::warn!("WebView set_visible({visible}) failed for pane {pane_id}: {e}");
+            match wv.set_visible(visible) {
+                Ok(()) => log::debug!("[wv-diag] set_visible({visible}) ok: pane {pane_id}"),
+                Err(e) => log::warn!("WebView set_visible({visible}) failed for pane {pane_id}: {e}"),
             }
+        } else {
+            log::debug!("[wv-diag] set_visible({visible}): no webview for pane {pane_id}");
         }
     });
 }

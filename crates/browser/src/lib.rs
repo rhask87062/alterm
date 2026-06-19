@@ -28,6 +28,7 @@ pub mod webview_manager {
     pub fn reload(_pane_id: u64) {}
     pub fn go_back(_pane_id: u64) {}
     pub fn go_forward(_pane_id: u64) {}
+    pub fn drain_nav_events() -> Vec<(u64, String)> { Vec::new() }
 }
 
 /// Manages the state for a single browser pane.
@@ -48,6 +49,13 @@ pub struct BrowserState {
     pub history: Vec<String>,
     /// Index into `history` pointing at the current page.
     pub history_index: usize,
+    /// A back (-1) or forward (+1) move we initiated on the real webview and
+    /// are waiting for the resulting navigation event to confirm. 0 = none.
+    ///
+    /// This lets `on_navigation` tell a Back/Forward press (which must move the
+    /// index without discarding the other direction's history) apart from a
+    /// fresh navigation (link click / URL bar) which truncates forward history.
+    pub pending_move: i8,
 }
 
 impl BrowserState {
@@ -63,66 +71,89 @@ impl BrowserState {
             can_go_forward: false,
             history: vec![url],
             history_index: 0,
+            pending_move: 0,
         }
     }
 
-    /// Navigate to a new URL, pushing it onto the history stack.
+    /// Begin navigating to a URL typed in the URL bar.
     ///
-    /// Any forward history beyond the current position is discarded
-    /// (standard browser behaviour when you navigate from the middle
-    /// of the back/forward list).
-    pub fn navigate(&mut self, url: &str) {
+    /// Returns the normalised URL to hand to the real webview. The history
+    /// stack is *not* updated here — the resulting navigation event flows back
+    /// through [`on_navigation`], which is the single source of truth for
+    /// history (so in-page link clicks are recorded the same way).
+    pub fn navigate(&mut self, url: &str) -> String {
+        let url = normalise_url(url);
+        self.input_url = url.clone();
+        self.loading = true;
+        // A URL-bar navigation is a fresh navigation, not a back/forward move.
+        self.pending_move = 0;
+        url
+    }
+
+    /// Record a navigation that actually occurred in the webview (URL-bar
+    /// submit, link click, redirect, or a confirmed back/forward move).
+    ///
+    /// This is the single place history is mutated, so every navigation —
+    /// however it was triggered — keeps the stack and nav flags accurate.
+    pub fn on_navigation(&mut self, url: &str) {
         let url = normalise_url(url);
 
-        // Don't push a duplicate of the current page.
-        if url == self.url {
-            self.input_url = url;
-            return;
+        match self.pending_move {
+            -1 => {
+                // Confirmed Back: move the index, keep forward history intact.
+                self.history_index = self.history_index.saturating_sub(1);
+                self.pending_move = 0;
+            }
+            1 => {
+                // Confirmed Forward: move the index, keep back history intact.
+                if self.history_index + 1 < self.history.len() {
+                    self.history_index += 1;
+                }
+                self.pending_move = 0;
+            }
+            _ => {
+                // Fresh navigation. Ignore a duplicate of the current page
+                // (e.g. the webview re-reporting the page we're already on).
+                if url != self.url {
+                    self.history.truncate(self.history_index + 1);
+                    self.history.push(url.clone());
+                    self.history_index = self.history.len() - 1;
+                }
+            }
         }
-
-        // Truncate any forward history.
-        self.history.truncate(self.history_index + 1);
-
-        // Push the new URL.
-        self.history.push(url.clone());
-        self.history_index = self.history.len() - 1;
 
         self.url = url.clone();
         self.input_url = url;
-        self.loading = true;
+        self.loading = false;
         self.update_nav_flags();
 
         log::debug!(
-            "Browser navigate: index={} history_len={}",
+            "Browser on_navigation: index={} history_len={}",
             self.history_index,
             self.history.len()
         );
     }
 
-    /// Go back one page in the history. No-op if already at the beginning.
-    pub fn go_back(&mut self) {
+    /// Request a Back move. Returns `true` if there is somewhere to go, in
+    /// which case the caller should drive the real webview's history.
+    /// The actual index move is confirmed later by [`on_navigation`].
+    pub fn begin_back(&mut self) -> bool {
         if !self.can_go_back {
-            return;
+            return false;
         }
-        self.history_index -= 1;
-        let url = self.history[self.history_index].clone();
-        self.url = url.clone();
-        self.input_url = url;
+        self.pending_move = -1;
         self.loading = true;
-        self.update_nav_flags();
+        true
     }
 
-    /// Go forward one page in the history. No-op if already at the end.
-    pub fn go_forward(&mut self) {
+    /// Request a Forward move. Returns `true` if there is somewhere to go.
+    pub fn begin_forward(&mut self) -> bool {
         if !self.can_go_forward {
-            return;
+            return false;
         }
-        self.history_index += 1;
-        let url = self.history[self.history_index].clone();
-        self.url = url.clone();
-        self.input_url = url;
+        self.pending_move = 1;
         self.loading = true;
-        self.update_nav_flags();
+        true
     }
 
     /// Reload the current page.
@@ -179,9 +210,21 @@ mod tests {
     }
 
     #[test]
-    fn navigate_adds_to_history() {
+    fn navigate_returns_normalised_url_without_touching_history() {
         let mut s = BrowserState::new("https://a.com");
-        s.navigate("https://b.com");
+        let target = s.navigate("b.com");
+        assert_eq!(target, "https://b.com");
+        // History only changes once the navigation is confirmed.
+        assert_eq!(s.history.len(), 1);
+        assert_eq!(s.input_url, "https://b.com");
+    }
+
+    #[test]
+    fn on_navigation_records_fresh_navigations() {
+        // Simulates URL-bar submits and/or in-page link clicks reported by
+        // the webview's navigation handler.
+        let mut s = BrowserState::new("https://a.com");
+        s.on_navigation("https://b.com");
         assert_eq!(s.url, "https://b.com");
         assert_eq!(s.history.len(), 2);
         assert!(s.can_go_back);
@@ -189,28 +232,48 @@ mod tests {
     }
 
     #[test]
-    fn back_and_forward() {
+    fn on_navigation_ignores_duplicate_of_current_page() {
         let mut s = BrowserState::new("https://a.com");
-        s.navigate("https://b.com");
-        s.navigate("https://c.com");
+        s.on_navigation("https://a.com");
+        assert_eq!(s.history.len(), 1);
+        assert!(!s.can_go_back);
+    }
 
-        s.go_back();
+    #[test]
+    fn back_and_forward_preserve_history() {
+        let mut s = BrowserState::new("https://a.com");
+        s.on_navigation("https://b.com");
+        s.on_navigation("https://c.com");
+
+        // Back: caller asks, then the webview reports the prior page.
+        assert!(s.begin_back());
+        s.on_navigation("https://b.com");
         assert_eq!(s.url, "https://b.com");
         assert!(s.can_go_back);
-        assert!(s.can_go_forward);
+        assert!(s.can_go_forward); // forward history preserved
 
-        s.go_forward();
+        // Forward.
+        assert!(s.begin_forward());
+        s.on_navigation("https://c.com");
         assert_eq!(s.url, "https://c.com");
         assert!(!s.can_go_forward);
     }
 
     #[test]
-    fn navigate_from_middle_truncates_forward() {
+    fn begin_back_returns_false_at_start() {
         let mut s = BrowserState::new("https://a.com");
-        s.navigate("https://b.com");
-        s.navigate("https://c.com");
-        s.go_back(); // at b.com
-        s.navigate("https://d.com");
+        assert!(!s.begin_back());
+        assert_eq!(s.pending_move, 0);
+    }
+
+    #[test]
+    fn fresh_navigation_from_middle_truncates_forward() {
+        let mut s = BrowserState::new("https://a.com");
+        s.on_navigation("https://b.com");
+        s.on_navigation("https://c.com");
+        assert!(s.begin_back());
+        s.on_navigation("https://b.com"); // back at b.com
+        s.on_navigation("https://d.com"); // fresh nav (e.g. link click)
 
         assert_eq!(s.history.len(), 3); // a, b, d
         assert_eq!(s.url, "https://d.com");

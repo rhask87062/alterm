@@ -568,6 +568,10 @@ impl Alterm {
 
                 if block.is_browser() {
                     let pane_id = webview_key(tab_id, *pane);
+                    log::debug!(
+                        "[wv-diag] resize: key={pane_id} exists={} rect=({:.0},{:.0},{:.0},{:.0})",
+                        webview_manager::exists(pane_id), rect.x, rect.y, rect.width, rect.height
+                    );
                     if webview_manager::exists(pane_id) {
                         let wv_x = (GRID_PADDING + rect.x) as f64;
                         let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
@@ -660,7 +664,36 @@ impl Alterm {
             let is_active = tab_idx == self.active_tab;
             for (pane, block) in tab.panes.iter() {
                 if block.is_browser() {
+                    log::debug!(
+                        "[wv-diag] visibility: tab_idx={tab_idx} active={is_active} key={}",
+                        webview_key(tab.id, *pane)
+                    );
                     webview_manager::set_visible(webview_key(tab.id, *pane), is_active);
+                }
+            }
+        }
+    }
+
+    /// Drain navigation events reported by the webviews and apply each to the
+    /// matching browser pane's state. Events are keyed by `webview_key`, so we
+    /// resolve each back to its (tab, pane) by recomputing the key.
+    fn apply_browser_nav_events(&mut self) {
+        let events = webview_manager::drain_nav_events();
+        if events.is_empty() {
+            return;
+        }
+        for (pane_id, url) in events {
+            for tab in &mut self.tabs {
+                let tab_id = tab.id;
+                if let Some((_, block)) = tab
+                    .panes
+                    .iter_mut()
+                    .find(|(p, _)| webview_key(tab_id, **p) == pane_id)
+                {
+                    if let Block::Browser { state } = block {
+                        state.on_navigation(&url);
+                    }
+                    break;
                 }
             }
         }
@@ -993,6 +1026,11 @@ impl Alterm {
                 // Pump GTK events so webkit2gtk can process network/rendering.
                 webview_manager::pump_gtk_events();
 
+                // Apply any navigations the webviews reported (link clicks,
+                // redirects, URL-bar submits, confirmed back/forward moves) so
+                // the URL bar and back/forward buttons stay accurate.
+                self.apply_browser_nav_events();
+
                 // Tick all panes in all tabs.
                 for tab in &mut self.tabs {
                     for (_pane, block) in tab.panes.iter_mut() {
@@ -1017,12 +1055,26 @@ impl Alterm {
                     }
                 }
             }
+            Message::PaneDragged(pane_grid::DragEvent::Picked { .. }) => {
+                // Native browser webviews sit on top of the iced surface and
+                // capture mouse events over their region, so iced never sees a
+                // drag-over/drop near a browser pane. Hide them for the duration
+                // of the drag; resize_all_panes() re-shows them on drop/cancel.
+                let tab = self.active_tab();
+                let tab_id = tab.id;
+                for (pane, block) in tab.panes.iter() {
+                    if block.is_browser() {
+                        webview_manager::set_visible(webview_key(tab_id, *pane), false);
+                    }
+                }
+            }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
                 self.active_tab_mut().panes.drop(pane, target);
                 self.resize_all_panes();
             }
             Message::PaneDragged(_) => {
-                // Picked / Canceled — nothing to do.
+                // Canceled — re-show/reposition the webviews hidden on Picked.
+                self.resize_all_panes();
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
                 self.active_tab_mut().panes.resize(split, ratio);
@@ -1135,6 +1187,11 @@ impl Alterm {
                     if let Some(pane) = self.active_tab().focus {
                         self.fire_on_new_terminal(pane);
                     }
+                    // Size the new tab's panes and hide the previous tab's
+                    // browser webviews — otherwise those native webviews stay
+                    // visible and show through on top of the new tab.
+                    self.resize_all_panes();
+                    self.update_webview_visibility();
                 }
             }
             Message::CloseTab(index) => {
@@ -1590,9 +1647,10 @@ impl Alterm {
                 let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.navigate(&url);
-                    // Also navigate the real webview.
-                    webview_manager::navigate(pane_id, &state.url);
+                    // navigate() normalises the URL; history is recorded when the
+                    // resulting navigation event flows back via drain_nav_events().
+                    let target = state.navigate(&url);
+                    webview_manager::navigate(pane_id, &target);
                 }
             }
             Message::BrowserBack(pane) => {
@@ -1600,8 +1658,11 @@ impl Alterm {
                 let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.go_back();
-                    webview_manager::navigate(pane_id, &state.url);
+                    // Drive the webview's *real* history; the index move is
+                    // confirmed when the navigation event comes back.
+                    if state.begin_back() {
+                        webview_manager::go_back(pane_id);
+                    }
                 }
             }
             Message::BrowserForward(pane) => {
@@ -1609,8 +1670,9 @@ impl Alterm {
                 let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.go_forward();
-                    webview_manager::navigate(pane_id, &state.url);
+                    if state.begin_forward() {
+                        webview_manager::go_forward(pane_id);
+                    }
                 }
             }
             Message::BrowserReload(pane) => {
