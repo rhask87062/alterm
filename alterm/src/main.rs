@@ -1799,6 +1799,9 @@ impl Alterm {
         let rename_buffer = self.rename_buffer.as_str();
         let pane_labels = &tab.pane_labels;
         let rename_id = rename_input_id();
+        // The active iced theme, so panes (e.g. the hotkey panel) can style
+        // themselves to it during view construction.
+        let current_theme = theme_from_config(&self.config.appearance.theme);
         let pane_grid_widget =
             pane_grid::PaneGrid::new(&tab.panes, |pane, block, _maximized| {
                 let is_focused = focus == Some(pane);
@@ -1828,7 +1831,7 @@ impl Alterm {
                         preview_view(pane, state)
                     }
                     Block::HotkeyInfo => {
-                        hotkey_info_view()
+                        hotkey_info_view(&current_theme)
                     }
                 };
 
@@ -3300,23 +3303,19 @@ fn lerp_color(a: Color, b: Color, f: f32) -> Color {
     }
 }
 
-/// The logo gradient at position `t` in `0.0..=1.0`: dark purple → orchid →
-/// near-white, matching the terminal startup logo.
-fn logo_gradient_color(t: f32) -> Color {
-    let stops = [hex(0x56008d), hex(0xd450fc), hex(0xfaf3ff)];
-    let t = t.clamp(0.0, 1.0);
-    let scaled = t * (stops.len() - 1) as f32;
-    let i = (scaled.floor() as usize).min(stops.len() - 2);
-    lerp_color(stops[i], stops[i + 1], scaled - i as f32)
-}
-
-fn hotkey_info_view<'a>() -> Element<'a, Message> {
-    // Brand colors — the Alterm "Living Terminal" palette.
-    let accent = hex(0xd450fc); // orchid — section headings
-    let heading_color = hex(0xfaf3ff); // near-white — panel title
-    let shortcut_color = hex(0xf0b6ff); // light magenta — key combos
-    let label_color = hex(0xd8cfe8); // light lavender — descriptions
-    let dim_color = hex(0x9a8fb0); // muted — mouse / secondary
+fn hotkey_info_view<'a>(theme: &Theme) -> Element<'a, Message> {
+    // Colors derived from the active theme so the panel is readable on any
+    // theme — the brand orchid/violet on the Alterm themes, palette-correct
+    // colors elsewhere (and dark-on-light text on light themes).
+    let accent = chrome::accent(theme); // section headings + key combos
+    let heading_color = chrome::text(theme); // panel title
+    let shortcut_color = chrome::accent(theme); // key combos
+    let label_color = chrome::text(theme); // descriptions
+    let dim_color = chrome::text_muted(theme); // mouse / secondary
+    // Logo gradient: accent → readable text color, so it always contrasts with
+    // the background (light-ward on dark themes, dark-ward on light themes).
+    let logo_start = accent;
+    let logo_end = heading_color;
 
     // ── ASCII logo header, painted with the same left→right dark-to-light
     //    gradient as the terminal startup logo (one shade per column). ──
@@ -3335,7 +3334,7 @@ fn hotkey_info_view<'a>() -> Element<'a, Message> {
                 span(ch.to_string())
                     .font(iced::Font::MONOSPACE)
                     .size(11)
-                    .color(logo_gradient_color(t)),
+                    .color(lerp_color(logo_start, logo_end, t)),
             );
         }
         logo_spans.push(span("\n").font(iced::Font::MONOSPACE).size(11));
