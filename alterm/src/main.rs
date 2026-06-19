@@ -72,15 +72,9 @@ static ALTERM_LIGHT: LazyLock<Theme> = LazyLock::new(|| {
 
 /// Returns `true` when the current iced theme is a light variant.
 fn is_light_theme(theme: &Theme) -> bool {
-    matches!(
-        theme,
-        Theme::Light
-            | Theme::SolarizedLight
-            | Theme::GruvboxLight
-            | Theme::CatppuccinLatte
-            | Theme::TokyoNightLight
-            | Theme::KanagawaLotus
-    ) || matches!(theme, Theme::Custom(_) if theme.to_string() == ALTERM_LIGHT_NAME)
+    // Derive from the theme's own palette so every theme works — built-in
+    // light variants and custom themes (e.g. "Alterm Light") alike.
+    !theme.extended_palette().is_dark
 }
 
 /// Returns `true` when the config theme string is a light variant.

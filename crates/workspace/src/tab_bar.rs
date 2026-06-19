@@ -7,8 +7,12 @@ use iced::widget::{button, container, row, text, Row};
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 
 /// Returns `true` when the iced theme is light.
+///
+/// Derived from the theme's own palette so it works for every theme —
+/// built-in light variants *and* custom themes like "Alterm Light" — rather
+/// than matching a fixed list of variants.
 fn is_light_theme(theme: &Theme) -> bool {
-    matches!(theme, Theme::Light)
+    !theme.extended_palette().is_dark
 }
 
 /// Messages that the tab bar can produce.
