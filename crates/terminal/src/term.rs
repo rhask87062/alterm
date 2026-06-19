@@ -172,6 +172,25 @@ impl TerminalState {
         self.term.scroll_display(Scroll::Delta(lines));
     }
 
+    /// Scroll so `target_line` (grid-line coordinate; negative = history) is
+    /// visible. No-op when it is already on screen; otherwise centers it,
+    /// clamped to the available history.
+    pub fn scroll_to_line(&mut self, target_line: i32) {
+        let rows = self.rows() as i32;
+        let offset = self.display_offset() as i32;
+        let top = -offset;
+        let bottom = rows - 1 - offset;
+        if target_line >= top && target_line <= bottom {
+            return; // already visible
+        }
+        let history = self.term.grid().history_size() as i32;
+        let desired = (rows / 2 - target_line).clamp(0, history);
+        let delta = desired - offset;
+        if delta != 0 {
+            self.scroll(delta);
+        }
+    }
+
     /// Current display (scroll) offset — 0 means the bottom (latest) output
     /// is visible.
     pub fn display_offset(&self) -> usize {
@@ -476,5 +495,27 @@ mod tests {
         let m = t.search_all(&build_search_pattern("needle", false, true)).unwrap();
         assert_eq!(m.len(), 1);
         assert!(m[0].start_line < 0, "match should be in scrollback history");
+    }
+
+    #[test]
+    fn scroll_to_line_keeps_visible_line_put() {
+        let mut t = TerminalState::new(24, 80);
+        t.process_output(b"hello\n");
+        t.scroll_to_line(0); // line 0 already on screen
+        assert_eq!(t.display_offset(), 0);
+    }
+
+    #[test]
+    fn scroll_to_line_brings_history_line_into_view() {
+        let mut t = TerminalState::new(24, 80);
+        for _ in 0..100 {
+            t.process_output(b"line\n");
+        }
+        t.scroll_to_line(-50);
+        let off = t.display_offset() as i32;
+        let rows = 24;
+        // -50 must be within the visible window [-off, rows-1-off].
+        assert!(-off <= -50 && -50 <= rows - 1 - off, "target line not visible");
+        assert!(off > 0);
     }
 }
