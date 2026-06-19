@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use iced::event::Status;
@@ -24,41 +25,88 @@ use workspace::session;
 // Theme helpers
 // ---------------------------------------------------------------------------
 
+/// Build an opaque `Color` from a `0xRRGGBB` literal.
+const fn hex(rgb: u32) -> Color {
+    Color::from_rgb(
+        ((rgb >> 16) & 0xff) as f32 / 255.0,
+        ((rgb >> 8) & 0xff) as f32 / 255.0,
+        (rgb & 0xff) as f32 / 255.0,
+    )
+}
+
+/// Theme names for the app's own brand themes (the "Living Terminal" palette
+/// shared with the marketing site, `website/src/styles/global.css`).
+const ALTERM_DARK_NAME: &str = "Alterm Dark";
+const ALTERM_LIGHT_NAME: &str = "Alterm Light";
+
+/// The default dark chrome theme — deep violet-black canvas with neon-magenta
+/// accents, matching the terminal palette in `crates/config/src/theme.rs`.
+static ALTERM_DARK: LazyLock<Theme> = LazyLock::new(|| {
+    Theme::custom(
+        ALTERM_DARK_NAME.to_string(),
+        iced::theme::Palette {
+            background: hex(0x0d0814), // --bg
+            text: hex(0xece6f5),       // --text
+            primary: hex(0xd450fc),    // --orchid
+            success: hex(0x5ef2b0),    // --term-green
+            warning: hex(0xffd56b),    // --term-yellow
+            danger: hex(0xff6b9d),     // --term-red
+        },
+    )
+});
+
+/// The light chrome theme — same family favoring white and lighter tints.
+static ALTERM_LIGHT: LazyLock<Theme> = LazyLock::new(|| {
+    Theme::custom(
+        ALTERM_LIGHT_NAME.to_string(),
+        iced::theme::Palette {
+            background: hex(0xfaf3ff), // lavender-white
+            text: hex(0x1d1430),       // deep violet text
+            primary: hex(0xa021d6),    // --purple-mid
+            success: hex(0x1f9e6e),
+            warning: hex(0xa9750a),
+            danger: hex(0xd8336e),
+        },
+    )
+});
+
 /// Returns `true` when the current iced theme is a light variant.
 fn is_light_theme(theme: &Theme) -> bool {
-    matches!(
-        theme,
-        Theme::Light
-            | Theme::SolarizedLight
-            | Theme::GruvboxLight
-            | Theme::CatppuccinLatte
-            | Theme::TokyoNightLight
-            | Theme::KanagawaLotus
-    )
+    // Derive from the theme's own palette so every theme works — built-in
+    // light variants and custom themes (e.g. "Alterm Light") alike.
+    !theme.extended_palette().is_dark
 }
 
 /// Returns `true` when the config theme string is a light variant.
 fn is_config_light_theme(s: &str) -> bool {
-    matches!(s, "light" | "Solarized Light" | "Gruvbox Light" | "Catppuccin Latte")
+    matches!(
+        s,
+        "light" | "Solarized Light" | "Gruvbox Light" | "Catppuccin Latte" | ALTERM_LIGHT_NAME
+    )
 }
 
 /// Map a config theme string to an iced `Theme`.
 fn theme_from_config(s: &str) -> Theme {
     match s {
-        "light" => Theme::Light,
+        // The app's own brand themes (the website "Living Terminal" palette).
+        // "dark"/"light" are aliases so the default config maps to the brand.
+        ALTERM_DARK_NAME | "dark" => ALTERM_DARK.clone(),
+        ALTERM_LIGHT_NAME | "light" => ALTERM_LIGHT.clone(),
         "Solarized Light" => Theme::SolarizedLight,
         "Solarized Dark" => Theme::SolarizedDark,
         "Gruvbox Light" => Theme::GruvboxLight,
         "Gruvbox Dark" => Theme::GruvboxDark,
         "Catppuccin Latte" => Theme::CatppuccinLatte,
         "Catppuccin Mocha" => Theme::CatppuccinMocha,
-        _ => Theme::Dark, // "dark" and any unrecognised value
+        _ => ALTERM_DARK.clone(), // any unrecognised value → brand dark
     }
 }
 
 /// Return the light↔dark partner for a theme string.
 fn theme_partner(s: &str) -> &'static str {
     match s {
+        ALTERM_DARK_NAME => ALTERM_LIGHT_NAME,
+        ALTERM_LIGHT_NAME => ALTERM_DARK_NAME,
         "light" => "dark",
         "Solarized Light" => "Solarized Dark",
         "Gruvbox Light" => "Gruvbox Dark",
@@ -2014,8 +2062,8 @@ fn ai_chat_view<'a>(
     .padding(Padding::from([4, 8]))
     .style(|theme: &Theme| iced::widget::container::Style {
         background: Some(Background::Color(themed(theme,
-            Color::from_rgb(0.92, 0.92, 0.94),
-            Color::from_rgb(0.08, 0.08, 0.11),
+            Color::from_rgb(0.925, 0.882, 0.969), // light lavender
+            Color::from_rgb(0.086, 0.055, 0.133), // --bg-elev
         ))),
         ..Default::default()
     })
@@ -2356,8 +2404,8 @@ fn settings_view<'a>(
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.96, 0.96, 0.97),
-                Color::from_rgb(0.06, 0.06, 0.08),
+                Color::from_rgb(0.969, 0.945, 0.992), // lavender-white
+                Color::from_rgb(0.075, 0.047, 0.125), // deep violet panel
             ))),
             ..Default::default()
         })
@@ -2391,8 +2439,8 @@ fn settings_appearance_section<'a>(
     // Theme
     let theme_label = text("Theme").size(12);
     let theme_options: Vec<String> = vec![
-        "dark".to_string(),
-        "light".to_string(),
+        ALTERM_DARK_NAME.to_string(),
+        ALTERM_LIGHT_NAME.to_string(),
         "Solarized Dark".to_string(),
         "Solarized Light".to_string(),
         "Gruvbox Dark".to_string(),
@@ -2667,8 +2715,8 @@ fn browser_view<'a>(
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.96, 0.96, 0.97),
-                Color::from_rgb(0.06, 0.06, 0.08),
+                Color::from_rgb(0.969, 0.945, 0.992), // lavender-white
+                Color::from_rgb(0.075, 0.047, 0.125), // deep violet panel
             ))),
             ..Default::default()
         })
@@ -2991,8 +3039,8 @@ fn preview_view<'a>(
             .padding(Padding::from([4, 8]))
             .style(|theme: &Theme| iced::widget::container::Style {
                 background: Some(Background::Color(themed(theme,
-                    Color::from_rgb(0.88, 0.88, 0.92),
-                    Color::from_rgb(0.10, 0.10, 0.13),
+                    Color::from_rgb(0.902, 0.847, 0.969), // light lavender
+                    Color::from_rgb(0.114, 0.078, 0.188), // --bg-elev-2
                 ))),
                 ..Default::default()
             })
@@ -3036,8 +3084,8 @@ fn preview_view<'a>(
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.97, 0.97, 0.98),
-                Color::from_rgb(0.04, 0.04, 0.06),
+                Color::from_rgb(0.980, 0.953, 1.000), // --bg light
+                Color::from_rgb(0.051, 0.031, 0.078), // --bg deep violet-black
             ))),
             ..Default::default()
         })
@@ -3049,8 +3097,8 @@ fn preview_view<'a>(
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.96, 0.96, 0.97),
-                Color::from_rgb(0.06, 0.06, 0.08),
+                Color::from_rgb(0.969, 0.945, 0.992), // lavender-white
+                Color::from_rgb(0.075, 0.047, 0.125), // deep violet panel
             ))),
             ..Default::default()
         })
@@ -3301,8 +3349,8 @@ fn hotkey_info_view<'a>() -> Element<'a, Message> {
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
             background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.96, 0.96, 0.97),
-                Color::from_rgb(0.06, 0.06, 0.08),
+                Color::from_rgb(0.969, 0.945, 0.992), // lavender-white
+                Color::from_rgb(0.075, 0.047, 0.125), // deep violet panel
             ))),
             ..Default::default()
         })

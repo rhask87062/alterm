@@ -97,6 +97,12 @@ impl PtyHandle {
 
         let (tx, rx) = mpsc::channel::<TerminalEvent>(EVENT_CHANNEL_SIZE);
 
+        // Greet every new terminal with the bundled Alterm ASCII logo. It is
+        // enqueued before the reader thread starts, so it is rendered ahead of
+        // any shell output and the prompt appears just beneath it. `try_send`
+        // is safe here: the channel was just created and is empty.
+        let _ = tx.try_send(TerminalEvent::PtyOutput(startup_banner()));
+
         // Spawn the blocking reader thread.
         std::thread::spawn(move || {
             let mut buf = vec![0u8; 4096];
@@ -189,6 +195,22 @@ mod tests {
         let expected = std::env::current_dir().unwrap().canonicalize().unwrap();
         assert_eq!(cwd.canonicalize().unwrap(), expected);
     }
+}
+
+/// The bundled Alterm ASCII logo, shown at the top of every new terminal.
+/// Sourced from `assets/ascii_logo.txt` at the repository root.
+const ASCII_LOGO: &str = include_str!("../../../assets/ascii_logo.txt");
+
+/// Build the startup banner bytes for a fresh terminal: the ASCII logo with
+/// CRLF line endings (so each line returns to column 0 on a raw PTY) followed
+/// by a blank line to separate it from the shell prompt.
+fn startup_banner() -> Vec<u8> {
+    let mut s = ASCII_LOGO.replace("\r\n", "\n").replace('\n', "\r\n");
+    if !s.ends_with("\r\n") {
+        s.push_str("\r\n");
+    }
+    s.push_str("\r\n");
+    s.into_bytes()
 }
 
 fn default_shell() -> String {

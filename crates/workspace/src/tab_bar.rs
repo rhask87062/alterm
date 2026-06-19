@@ -7,8 +7,12 @@ use iced::widget::{button, container, row, text, Row};
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 
 /// Returns `true` when the iced theme is light.
+///
+/// Derived from the theme's own palette so it works for every theme —
+/// built-in light variants *and* custom themes like "Alterm Light" — rather
+/// than matching a fixed list of variants.
 fn is_light_theme(theme: &Theme) -> bool {
-    matches!(theme, Theme::Light)
+    !theme.extended_palette().is_dark
 }
 
 /// Messages that the tab bar can produce.
@@ -85,15 +89,15 @@ fn tab_bar_container_style(theme: &Theme) -> iced::widget::container::Style {
     let light = is_light_theme(theme);
     iced::widget::container::Style {
         background: Some(Background::Color(if light {
-            Color::from_rgb(0.93, 0.93, 0.95)
+            Color::from_rgb(0.925, 0.882, 0.969)
         } else {
-            Color::from_rgb(0.06, 0.06, 0.08)
+            Color::from_rgb(0.075, 0.047, 0.125) // deep violet bar
         })),
         border: Border {
             color: if light {
-                Color::from_rgb(0.82, 0.82, 0.86)
+                Color::from_rgb(0.847, 0.792, 0.918)
             } else {
-                Color::from_rgb(0.12, 0.12, 0.15)
+                Color::from_rgb(0.165, 0.122, 0.239) // --line
             },
             width: 0.0,
             radius: 0.0.into(),
@@ -110,24 +114,24 @@ fn tab_button_style(
     let light = is_light_theme(theme);
 
     let bg = match (light, is_active, status) {
-        (true, true, _) => Color::from_rgb(0.88, 0.90, 0.95),
-        (true, false, button::Status::Hovered) => Color::from_rgb(0.88, 0.88, 0.92),
-        (true, false, _) => Color::from_rgb(0.93, 0.93, 0.95),
-        (false, true, _) => Color::from_rgb(0.16, 0.18, 0.26),
-        (false, false, button::Status::Hovered) => Color::from_rgb(0.13, 0.13, 0.17),
-        (false, false, _) => Color::from_rgb(0.08, 0.08, 0.10),
+        (true, true, _) => Color::from_rgb(0.902, 0.847, 0.969),
+        (true, false, button::Status::Hovered) => Color::from_rgb(0.925, 0.882, 0.969),
+        (true, false, _) => Color::from_rgb(0.953, 0.925, 0.984),
+        (false, true, _) => Color::from_rgb(0.157, 0.000, 0.337), // --purple-deep active
+        (false, false, button::Status::Hovered) => Color::from_rgb(0.114, 0.078, 0.188),
+        (false, false, _) => Color::from_rgb(0.075, 0.047, 0.125),
     };
 
     let text_color = match (light, is_active) {
-        (true, true) => Color::from_rgb(0.10, 0.10, 0.15),
-        (true, false) => Color::from_rgb(0.45, 0.45, 0.55),
-        (false, true) => Color::from_rgb(0.95, 0.96, 1.0),
-        (false, false) => Color::from_rgb(0.45, 0.45, 0.48),
+        (true, true) => Color::from_rgb(0.114, 0.078, 0.188),
+        (true, false) => Color::from_rgb(0.424, 0.384, 0.522),
+        (false, true) => Color::from_rgb(0.980, 0.953, 1.000),
+        (false, false) => Color::from_rgb(0.604, 0.561, 0.690), // --text-muted
     };
 
     let border_bottom = match (light, is_active) {
-        (true, true) => Color::from_rgb(0.20, 0.45, 0.80),
-        (false, true) => Color::from_rgb(0.40, 0.60, 0.95),
+        (true, true) => Color::from_rgb(0.627, 0.129, 0.839), // --purple-mid
+        (false, true) => Color::from_rgb(0.976, 0.467, 1.000), // --accent neon magenta
         _ => Color::TRANSPARENT,
     };
 
@@ -149,9 +153,9 @@ fn close_button_style(
 ) -> button::Style {
     let light = is_light_theme(theme);
     let text_color = match (light, status) {
-        (_, button::Status::Hovered) => Color::from_rgb(0.9, 0.3, 0.3),
-        (true, _) => Color::from_rgb(0.55, 0.55, 0.60),
-        (false, _) => Color::from_rgb(0.4, 0.4, 0.4),
+        (_, button::Status::Hovered) => Color::from_rgb(1.000, 0.420, 0.616), // --term-red
+        (true, _) => Color::from_rgb(0.424, 0.384, 0.522),
+        (false, _) => Color::from_rgb(0.424, 0.384, 0.522),
     };
     button::Style {
         background: Some(Background::Color(Color::TRANSPARENT)),
@@ -171,17 +175,17 @@ fn new_tab_button_style(
 ) -> button::Style {
     let light = is_light_theme(theme);
     let bg = match (light, status) {
-        (true, button::Status::Hovered) => Color::from_rgb(0.85, 0.85, 0.90),
-        (true, _) => Color::from_rgb(0.90, 0.90, 0.92),
-        (false, button::Status::Hovered) => Color::from_rgb(0.16, 0.16, 0.20),
-        (false, _) => Color::from_rgb(0.10, 0.10, 0.12),
+        (true, button::Status::Hovered) => Color::from_rgb(0.902, 0.847, 0.969),
+        (true, _) => Color::from_rgb(0.925, 0.882, 0.969),
+        (false, button::Status::Hovered) => Color::from_rgb(0.165, 0.122, 0.239),
+        (false, _) => Color::from_rgb(0.075, 0.047, 0.125),
     };
     button::Style {
         background: Some(Background::Color(bg)),
         text_color: if light {
-            Color::from_rgb(0.40, 0.40, 0.50)
+            Color::from_rgb(0.424, 0.384, 0.522)
         } else {
-            Color::from_rgb(0.55, 0.55, 0.58)
+            Color::from_rgb(0.604, 0.561, 0.690)
         },
         border: Border {
             color: Color::TRANSPARENT,

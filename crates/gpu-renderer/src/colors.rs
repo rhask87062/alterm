@@ -16,23 +16,25 @@ impl Default for AnsiPalette {
     fn default() -> Self {
         let mut table = [(0u8, 0u8, 0u8); 256];
 
-        // Standard 16 colors — dark macOS-inspired theme.
-        table[0]  = (0x1d, 0x1d, 0x1f); // black
-        table[1]  = (0xff, 0x3b, 0x30); // red
-        table[2]  = (0x30, 0xd1, 0x58); // green
-        table[3]  = (0xff, 0x9f, 0x0a); // yellow
-        table[4]  = (0x0a, 0x84, 0xff); // blue
-        table[5]  = (0xbf, 0x5a, 0xf2); // magenta
-        table[6]  = (0x5a, 0xc8, 0xfa); // cyan
-        table[7]  = (0xd1, 0xd1, 0xd6); // white
-        table[8]  = (0x63, 0x63, 0x66); // bright black
-        table[9]  = (0xff, 0x45, 0x3a); // bright red
-        table[10] = (0x30, 0xd1, 0x58); // bright green
-        table[11] = (0xff, 0xd6, 0x0a); // bright yellow
-        table[12] = (0x40, 0x9c, 0xff); // bright blue
-        table[13] = (0xda, 0x8f, 0xff); // bright magenta
-        table[14] = (0x70, 0xd7, 0xff); // bright cyan
-        table[15] = (0xf5, 0xf5, 0xf7); // bright white
+        // Standard 16 colors — "Living Terminal" dark theme, sampled from the
+        // app icon / marketing site. Keep in sync with `Theme::dark()` in
+        // `crates/config/src/theme.rs`.
+        table[0]  = (0x1d, 0x14, 0x30); // black   — --bg-elev-2
+        table[1]  = (0xff, 0x6b, 0x9d); // red     — --term-red
+        table[2]  = (0x5e, 0xf2, 0xb0); // green   — --term-green
+        table[3]  = (0xff, 0xd5, 0x6b); // yellow  — --term-yellow
+        table[4]  = (0x8a, 0x7b, 0xff); // blue    — violet-indigo
+        table[5]  = (0xd4, 0x50, 0xfc); // magenta — --orchid
+        table[6]  = (0x6f, 0xdf, 0xff); // cyan    — --term-cyan
+        table[7]  = (0xec, 0xe6, 0xf5); // white   — --text
+        table[8]  = (0x6c, 0x62, 0x85); // bright black   — --text-faint
+        table[9]  = (0xff, 0x8f, 0xb5); // bright red
+        table[10] = (0x7e, 0xf8, 0xc4); // bright green
+        table[11] = (0xff, 0xe2, 0x8a); // bright yellow
+        table[12] = (0xa9, 0x9b, 0xff); // bright blue
+        table[13] = (0xf9, 0x77, 0xff); // bright magenta — --accent
+        table[14] = (0x9b, 0xea, 0xff); // bright cyan
+        table[15] = (0xfa, 0xf3, 0xff); // bright white
 
         // 6×6×6 RGB cube — indices 16–231.
         for i in 0u8..216 {
@@ -59,23 +61,23 @@ impl AnsiPalette {
         self.table[index as usize]
     }
 
-    /// Default foreground color (dark theme).
+    /// Default foreground color (dark theme) — --text.
     pub fn default_fg() -> (u8, u8, u8) {
-        (0xe8, 0xe8, 0xed)
+        (0xec, 0xe6, 0xf5)
     }
 
-    /// Default background color (dark theme).
+    /// Default background color (dark theme) — deep violet-black --bg.
     pub fn default_bg() -> (u8, u8, u8) {
-        (0x12, 0x12, 0x14)
+        (0x0d, 0x08, 0x14)
     }
 
-    /// Default foreground color for light theme.
+    /// Default foreground color for light theme — deep violet text.
     pub fn default_fg_light() -> (u8, u8, u8) {
-        (0x1d, 0x1d, 0x1f)
+        (0x1d, 0x14, 0x30)
     }
 
-    /// Default background color for light theme.
+    /// Default background color for light theme — lavender-white.
     pub fn default_bg_light() -> (u8, u8, u8) {
-        (0xf5, 0xf5, 0xf7)
+        (0xfa, 0xf3, 0xff)
     }
 }
