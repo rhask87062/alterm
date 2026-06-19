@@ -31,6 +31,16 @@ impl TermSize {
     }
 }
 
+/// A search hit in grid-line coordinates. `*_line` is alacritty grid space:
+/// 0 = top of the active screen, negative = scrollback history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchMatch {
+    pub start_line: i32,
+    pub start_col: usize,
+    pub end_line: i32,
+    pub end_col: usize,
+}
+
 /// Default scrollback history in lines.
 const SCROLLBACK_LINES: usize = 10_000;
 
@@ -296,6 +306,52 @@ impl TerminalState {
         }
         out
     }
+
+    /// Find every match of `pattern` across scrollback history + the active
+    /// screen. Returns matches top-to-bottom. `Err` if the pattern fails to
+    /// compile (invalid regex).
+    pub fn search_all(&self, pattern: &str) -> Result<Vec<SearchMatch>, String> {
+        use alacritty_terminal::index::Direction;
+        use alacritty_terminal::term::search::{RegexIter, RegexSearch};
+
+        // alacritty's RegexSearch::new applies a "smartcase" heuristic: if the
+        // pattern has no uppercase letters it forces global case-insensitive
+        // matching. Override this with an inline `(?-i)` flag when the pattern
+        // is not already marked case-insensitive via `(?i)`. The inline flag
+        // takes precedence over the global DFA-level setting.
+        let effective_pattern;
+        let pattern = if pattern.starts_with("(?i)") {
+            pattern
+        } else {
+            effective_pattern = format!("(?-i){pattern}");
+            &effective_pattern
+        };
+
+        let mut regex = RegexSearch::new(pattern).map_err(|e| e.to_string())?;
+
+        let rows = self.rows() as i32;
+        let cols = self.cols();
+        if rows == 0 || cols == 0 {
+            return Ok(Vec::new());
+        }
+        let history = self.term.grid().history_size() as i32;
+        let start = Point::new(Line(-history), Column(0));
+        let end = Point::new(Line(rows - 1), Column(cols - 1));
+
+        let matches = RegexIter::new(start, end, Direction::Right, &self.term, &mut regex)
+            .map(|m| {
+                let s = *m.start();
+                let e = *m.end();
+                SearchMatch {
+                    start_line: s.line.0,
+                    start_col: s.column.0,
+                    end_line: e.line.0,
+                    end_col: e.column.0,
+                }
+            })
+            .collect();
+        Ok(matches)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -382,5 +438,43 @@ mod tests {
     fn build_pattern_escapes_class_and_verbose_metachars() {
         assert_eq!(build_search_pattern("a-z", false, true), "a\\-z");
         assert_eq!(build_search_pattern("f#b", false, true), "f\\#b");
+    }
+
+    #[test]
+    fn search_all_finds_literal_substring() {
+        let mut t = TerminalState::new(24, 80);
+        t.process_output(b"error here\n");
+        let pat = build_search_pattern("error", false, true);
+        let m = t.search_all(&pat).unwrap();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].start_line, 0);
+        assert_eq!(m[0].start_col, 0);
+        assert_eq!(m[0].end_col, 4); // "error" spans cols 0..=4
+    }
+
+    #[test]
+    fn search_all_respects_case() {
+        let mut t = TerminalState::new(24, 80);
+        t.process_output(b"ERROR\n");
+        assert_eq!(t.search_all(&build_search_pattern("error", false, false)).unwrap().len(), 1);
+        assert_eq!(t.search_all(&build_search_pattern("error", false, true)).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn search_all_invalid_regex_is_err() {
+        let t = TerminalState::new(24, 80);
+        assert!(t.search_all("(").is_err());
+    }
+
+    #[test]
+    fn search_all_finds_match_in_scrollback() {
+        let mut t = TerminalState::new(24, 80);
+        t.process_output(b"needle\n");
+        for _ in 0..40 {
+            t.process_output(b"x\n");
+        }
+        let m = t.search_all(&build_search_pattern("needle", false, true)).unwrap();
+        assert_eq!(m.len(), 1);
+        assert!(m[0].start_line < 0, "match should be in scrollback history");
     }
 }
