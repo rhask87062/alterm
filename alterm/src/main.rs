@@ -8,8 +8,8 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, mouse_area, opaque, pane_grid, pick_list, row, scrollable, slider,
-    stack, text, text_input, toggler, Column, Id as WidgetId,
+    button, column, container, mouse_area, opaque, pane_grid, pick_list, rich_text, row,
+    scrollable, slider, span, stack, text, text_input, toggler, Column, Id as WidgetId,
 };
 use iced::widget::operation::focus as widget_focus;
 use iced::window;
@@ -781,7 +781,14 @@ impl Alterm {
                 }
             }
             Action::RenameTab => {
-                log::debug!("RenameTab — not yet implemented");
+                // F2 renames the active tab using the same inline editor as a
+                // double-click on the tab.
+                let i = self.active_tab;
+                if let Some(tab) = self.tabs.get(i) {
+                    self.rename = Some(RenameTarget::Tab(i));
+                    self.rename_buffer = tab.title.clone();
+                    return widget_focus(rename_input_id());
+                }
                 Task::none()
             }
             Action::SplitRight => self.update(Message::SplitHorizontal),
@@ -3283,24 +3290,60 @@ fn format_size(bytes: u64) -> String {
 // ---------------------------------------------------------------------------
 
 /// Build the hotkey info reference pane showing all keyboard shortcuts.
-fn hotkey_info_view<'a>() -> Element<'a, Message> {
-    let accent = Color::from_rgb(0.40, 0.65, 1.0);
-    let heading_color = Color::from_rgb(0.85, 0.87, 0.92);
-    let shortcut_color = Color::from_rgb(0.70, 0.80, 1.0);
-    let label_color = Color::from_rgb(0.80, 0.80, 0.84);
-    let dim_color = Color::from_rgb(0.50, 0.50, 0.55);
+/// Linear interpolation between two colors.
+fn lerp_color(a: Color, b: Color, f: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * f,
+        g: a.g + (b.g - a.g) * f,
+        b: a.b + (b.b - a.b) * f,
+        a: 1.0,
+    }
+}
 
-    // ── ASCII logo header ──
+/// The logo gradient at position `t` in `0.0..=1.0`: dark purple → orchid →
+/// near-white, matching the terminal startup logo.
+fn logo_gradient_color(t: f32) -> Color {
+    let stops = [hex(0x56008d), hex(0xd450fc), hex(0xfaf3ff)];
+    let t = t.clamp(0.0, 1.0);
+    let scaled = t * (stops.len() - 1) as f32;
+    let i = (scaled.floor() as usize).min(stops.len() - 2);
+    lerp_color(stops[i], stops[i + 1], scaled - i as f32)
+}
+
+fn hotkey_info_view<'a>() -> Element<'a, Message> {
+    // Brand colors — the Alterm "Living Terminal" palette.
+    let accent = hex(0xd450fc); // orchid — section headings
+    let heading_color = hex(0xfaf3ff); // near-white — panel title
+    let shortcut_color = hex(0xf0b6ff); // light magenta — key combos
+    let label_color = hex(0xd8cfe8); // light lavender — descriptions
+    let dim_color = hex(0x9a8fb0); // muted — mouse / secondary
+
+    // ── ASCII logo header, painted with the same left→right dark-to-light
+    //    gradient as the terminal startup logo (one shade per column). ──
     let logo_text = include_str!("../../assets/ascii_logo.txt");
-    let logo: Element<'a, Message> = container(
-        text(logo_text)
-            .size(11)
-            .color(accent)
-            .font(iced::Font::MONOSPACE),
-    )
-    .width(Fill)
-    .padding(Padding { top: 12.0, right: 16.0, bottom: 4.0, left: 16.0 })
-    .into();
+    let max_cols = logo_text
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(1)
+        .max(2);
+    let mut logo_spans: Vec<iced::widget::text::Span<'a, Message, iced::Font>> = Vec::new();
+    for line in logo_text.lines() {
+        for (col, ch) in line.chars().enumerate() {
+            let t = col as f32 / (max_cols - 1) as f32;
+            logo_spans.push(
+                span(ch.to_string())
+                    .font(iced::Font::MONOSPACE)
+                    .size(11)
+                    .color(logo_gradient_color(t)),
+            );
+        }
+        logo_spans.push(span("\n").font(iced::Font::MONOSPACE).size(11));
+    }
+    let logo: Element<'a, Message> = container(rich_text(logo_spans))
+        .width(Fill)
+        .padding(Padding { top: 12.0, right: 16.0, bottom: 4.0, left: 16.0 })
+        .into();
 
     // ── Title ──
     let title: Element<'a, Message> = container(
@@ -3462,6 +3505,8 @@ fn hotkey_info_view<'a>() -> Element<'a, Message> {
         .into(),
     );
     let mouse_rows: Vec<(&str, &str)> = vec![
+        ("Double-click tab", "Rename tab"),
+        ("Double-click pane title", "Rename / label pane"),
         ("Drag title bar", "Rearrange panes"),
         ("Drag split edge", "Resize panes"),
         ("Scroll wheel", "Terminal scrollback"),
