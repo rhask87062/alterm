@@ -3,17 +3,9 @@
 /// Positioned on the right side of the workspace, provides quick access to
 /// split the focused pane with different block types.
 use iced::widget::{button, column, container, svg, text, tooltip};
-use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
+use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
+use crate::chrome;
 use crate::keybindings::Action;
-
-/// Returns `true` when the iced theme is light.
-///
-/// Derived from the theme's own palette so it works for every theme —
-/// built-in light variants *and* custom themes like "Alterm Light" — rather
-/// than matching a fixed list of variants.
-fn is_light_theme(theme: &Theme) -> bool {
-    !theme.extended_palette().is_dark
-}
 
 /// Actions the sidebar can produce.
 #[derive(Debug, Clone)]
@@ -235,24 +227,12 @@ fn with_tooltip<'a, M: 'a>(content: Element<'a, M>, hint: String) -> Element<'a,
 }
 
 /// Styled background box for sidebar tooltips (theme-aware).
-///
-/// The box stays dark in both themes (light text on a dark box reads well over
-/// either background); the light branch is only slightly lighter for contrast.
 fn tooltip_box_style(theme: &Theme) -> iced::widget::container::Style {
-    let light = is_light_theme(theme);
     iced::widget::container::Style {
-        background: Some(Background::Color(if light {
-            Color::from_rgb(0.165, 0.122, 0.239)
-        } else {
-            Color::from_rgb(0.114, 0.078, 0.188) // --bg-elev-2
-        })),
-        text_color: Some(Color::from_rgb(0.925, 0.902, 0.961)),
+        background: Some(Background::Color(chrome::bg_raised(theme))),
+        text_color: Some(chrome::text(theme)),
         border: Border {
-            color: if light {
-                Color::from_rgb(0.290, 0.208, 0.408)
-            } else {
-                Color::from_rgb(0.239, 0.173, 0.341) // --line-bright
-            },
+            color: chrome::line(theme),
             width: 1.0,
             radius: 4.0.into(),
         },
@@ -265,19 +245,10 @@ fn tooltip_box_style(theme: &Theme) -> iced::widget::container::Style {
 // ---------------------------------------------------------------------------
 
 fn sidebar_container_style(theme: &Theme) -> iced::widget::container::Style {
-    let light = is_light_theme(theme);
     iced::widget::container::Style {
-        background: Some(Background::Color(if light {
-            Color::from_rgb(0.925, 0.882, 0.969)
-        } else {
-            Color::from_rgb(0.067, 0.039, 0.110) // violet sidebar
-        })),
+        background: Some(Background::Color(chrome::bg_subtle(theme))),
         border: Border {
-            color: if light {
-                Color::from_rgb(0.847, 0.792, 0.918)
-            } else {
-                Color::from_rgb(0.165, 0.122, 0.239) // --line
-            },
+            color: chrome::line(theme),
             width: 1.0,
             radius: 0.0.into(),
         },
@@ -286,49 +257,13 @@ fn sidebar_container_style(theme: &Theme) -> iced::widget::container::Style {
 }
 
 fn sidebar_button_style(theme: &Theme, status: button::Status, enabled: bool) -> button::Style {
-    let light = is_light_theme(theme);
-
     let (bg, text_color) = if !enabled {
-        if light {
-            (
-                Color::from_rgb(0.90, 0.90, 0.92),
-                Color::from_rgb(0.60, 0.60, 0.65),
-            )
-        } else {
-            (
-                Color::from_rgb(0.075, 0.047, 0.125),
-                Color::from_rgb(0.424, 0.384, 0.522), // --text-faint
-            )
-        }
-    } else if light {
-        match status {
-            button::Status::Hovered => (
-                Color::from_rgb(0.82, 0.82, 0.88),
-                Color::from_rgb(0.10, 0.10, 0.15),
-            ),
-            button::Status::Pressed => (
-                Color::from_rgb(0.78, 0.78, 0.84),
-                Color::BLACK,
-            ),
-            _ => (
-                Color::from_rgb(0.88, 0.88, 0.92),
-                Color::from_rgb(0.20, 0.20, 0.25),
-            ),
-        }
+        (chrome::bg_subtle(theme), chrome::text_muted(theme))
     } else {
         match status {
-            button::Status::Hovered => (
-                Color::from_rgb(0.239, 0.173, 0.341), // --line-bright
-                Color::from_rgb(0.925, 0.902, 0.961),
-            ),
-            button::Status::Pressed => (
-                Color::from_rgb(0.290, 0.208, 0.408),
-                Color::WHITE,
-            ),
-            _ => (
-                Color::from_rgb(0.114, 0.078, 0.188), // --bg-elev-2
-                Color::from_rgb(0.851, 0.820, 0.910),
-            ),
+            button::Status::Hovered => (chrome::bg_raised(theme), chrome::text(theme)),
+            button::Status::Pressed => (chrome::bg_pressed(theme), chrome::text(theme)),
+            _ => (chrome::bg_subtle(theme), chrome::text(theme)),
         }
     };
 
@@ -336,11 +271,7 @@ fn sidebar_button_style(theme: &Theme, status: button::Status, enabled: bool) ->
         background: Some(Background::Color(bg)),
         text_color,
         border: Border {
-            color: if light {
-                Color::from_rgb(0.78, 0.78, 0.82)
-            } else {
-                Color::from_rgb(0.20, 0.20, 0.25)
-            },
+            color: chrome::line(theme),
             width: 1.0,
             radius: 4.0.into(),
         },

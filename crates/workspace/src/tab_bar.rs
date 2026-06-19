@@ -5,15 +5,7 @@
 /// new tabs.
 use iced::widget::{button, container, row, text, Row};
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
-
-/// Returns `true` when the iced theme is light.
-///
-/// Derived from the theme's own palette so it works for every theme —
-/// built-in light variants *and* custom themes like "Alterm Light" — rather
-/// than matching a fixed list of variants.
-fn is_light_theme(theme: &Theme) -> bool {
-    !theme.extended_palette().is_dark
-}
+use crate::chrome;
 
 /// Messages that the tab bar can produce.
 /// The consuming application maps these into its own message type.
@@ -86,19 +78,10 @@ pub fn tab_bar_view<'a, M: Clone + 'a>(
 // ---------------------------------------------------------------------------
 
 fn tab_bar_container_style(theme: &Theme) -> iced::widget::container::Style {
-    let light = is_light_theme(theme);
     iced::widget::container::Style {
-        background: Some(Background::Color(if light {
-            Color::from_rgb(0.925, 0.882, 0.969)
-        } else {
-            Color::from_rgb(0.075, 0.047, 0.125) // deep violet bar
-        })),
+        background: Some(Background::Color(chrome::bg_subtle(theme))),
         border: Border {
-            color: if light {
-                Color::from_rgb(0.847, 0.792, 0.918)
-            } else {
-                Color::from_rgb(0.165, 0.122, 0.239) // --line
-            },
+            color: chrome::line(theme),
             width: 0.0,
             radius: 0.0.into(),
         },
@@ -111,28 +94,23 @@ fn tab_button_style(
     status: button::Status,
     is_active: bool,
 ) -> button::Style {
-    let light = is_light_theme(theme);
-
-    let bg = match (light, is_active, status) {
-        (true, true, _) => Color::from_rgb(0.902, 0.847, 0.969),
-        (true, false, button::Status::Hovered) => Color::from_rgb(0.925, 0.882, 0.969),
-        (true, false, _) => Color::from_rgb(0.953, 0.925, 0.984),
-        (false, true, _) => Color::from_rgb(0.157, 0.000, 0.337), // --purple-deep active
-        (false, false, button::Status::Hovered) => Color::from_rgb(0.114, 0.078, 0.188),
-        (false, false, _) => Color::from_rgb(0.075, 0.047, 0.125),
+    // The active tab is highlighted with the theme's accent tint; inactive
+    // tabs sit on the bar and lift slightly on hover.
+    let bg = match (is_active, status) {
+        (true, _) => chrome::accent_subtle(theme),
+        (false, button::Status::Hovered) => chrome::bg_raised(theme),
+        (false, _) => chrome::bg_subtle(theme),
     };
 
-    let text_color = match (light, is_active) {
-        (true, true) => Color::from_rgb(0.114, 0.078, 0.188),
-        (true, false) => Color::from_rgb(0.424, 0.384, 0.522),
-        (false, true) => Color::from_rgb(0.980, 0.953, 1.000),
-        (false, false) => Color::from_rgb(0.604, 0.561, 0.690), // --text-muted
+    let text_color = match is_active {
+        true => chrome::accent_text(theme),
+        false => chrome::text_muted(theme),
     };
 
-    let border_bottom = match (light, is_active) {
-        (true, true) => Color::from_rgb(0.627, 0.129, 0.839), // --purple-mid
-        (false, true) => Color::from_rgb(0.976, 0.467, 1.000), // --accent neon magenta
-        _ => Color::TRANSPARENT,
+    let border_bottom = if is_active {
+        chrome::accent(theme)
+    } else {
+        Color::TRANSPARENT
     };
 
     button::Style {
@@ -151,11 +129,9 @@ fn close_button_style(
     theme: &Theme,
     status: button::Status,
 ) -> button::Style {
-    let light = is_light_theme(theme);
-    let text_color = match (light, status) {
-        (_, button::Status::Hovered) => Color::from_rgb(1.000, 0.420, 0.616), // --term-red
-        (true, _) => Color::from_rgb(0.424, 0.384, 0.522),
-        (false, _) => Color::from_rgb(0.424, 0.384, 0.522),
+    let text_color = match status {
+        button::Status::Hovered => chrome::danger(theme),
+        _ => chrome::text_muted(theme),
     };
     button::Style {
         background: Some(Background::Color(Color::TRANSPARENT)),
@@ -173,20 +149,13 @@ fn new_tab_button_style(
     theme: &Theme,
     status: button::Status,
 ) -> button::Style {
-    let light = is_light_theme(theme);
-    let bg = match (light, status) {
-        (true, button::Status::Hovered) => Color::from_rgb(0.902, 0.847, 0.969),
-        (true, _) => Color::from_rgb(0.925, 0.882, 0.969),
-        (false, button::Status::Hovered) => Color::from_rgb(0.165, 0.122, 0.239),
-        (false, _) => Color::from_rgb(0.075, 0.047, 0.125),
+    let bg = match status {
+        button::Status::Hovered => chrome::bg_raised(theme),
+        _ => chrome::bg_subtle(theme),
     };
     button::Style {
         background: Some(Background::Color(bg)),
-        text_color: if light {
-            Color::from_rgb(0.424, 0.384, 0.522)
-        } else {
-            Color::from_rgb(0.604, 0.561, 0.690)
-        },
+        text_color: chrome::text_muted(theme),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
