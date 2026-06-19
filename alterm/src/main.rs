@@ -3504,7 +3504,6 @@ fn format_size(bytes: u64) -> String {
 // Hotkey Info view
 // ---------------------------------------------------------------------------
 
-/// Build the hotkey info reference pane showing all keyboard shortcuts.
 /// Stamp search highlights onto a render grid for the searched pane.
 fn apply_search_highlights(grid: &mut RenderGrid, matches: &[SearchMatch], current: usize) {
     let offset = grid.display_offset as i32;
@@ -3542,6 +3541,7 @@ fn lerp_color(a: Color, b: Color, f: f32) -> Color {
     }
 }
 
+/// Build the hotkey info reference pane showing all keyboard shortcuts.
 fn hotkey_info_view<'a>(theme: &Theme) -> Element<'a, Message> {
     // Colors derived from the active theme so the panel is readable on any
     // theme — the brand orchid/violet on the Alterm themes, palette-correct

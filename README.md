@@ -208,6 +208,12 @@ A pane's content is a `Block` — one of terminal, AI chat, settings, browser, p
 
 ---
 
+## Known issues
+
+- **🔴 Top priority — browser panes bleed across tabs.** Browser/webview panes sometimes glitch and render on top of other tabs, appearing when the user has switched away to a different tab. Root cause appears to be the global webview map being keyed by pane id, which collides across tabs.
+
+---
+
 ## Acknowledgments
 
 Alterm builds on the work of several excellent open-source projects:

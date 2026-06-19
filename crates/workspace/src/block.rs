@@ -429,14 +429,6 @@ impl Block {
         self.refresh_cache();
     }
 
-    /// Current scroll offset of this terminal (0 for non-terminals).
-    pub fn display_offset(&self) -> usize {
-        match self {
-            Block::Terminal { state, .. } => state.display_offset(),
-            _ => 0,
-        }
-    }
-
     /// Scroll the terminal viewport by the given number of lines.
     ///
     /// Positive = scroll up (toward history), negative = scroll down.
