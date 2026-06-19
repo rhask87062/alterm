@@ -4,6 +4,7 @@
 
 pub mod ai_chat;
 pub mod block;
+pub mod chrome;
 pub mod command_palette;
 pub mod grid;
 pub mod keybindings;

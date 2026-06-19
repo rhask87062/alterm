@@ -18,6 +18,7 @@ use workspace::{
     CommandPalette, PreviewState, SettingsField, SettingsSection, SidebarAction, Tab, TabBarAction,
     CELL_HEIGHT,
 };
+use workspace::chrome;
 use workspace::grid;
 use workspace::session;
 
@@ -116,12 +117,6 @@ fn theme_partner(s: &str) -> &'static str {
         "Catppuccin Mocha" => "Catppuccin Latte",
         _ => "light", // "dark" → "light", unknown → "light"
     }
-}
-
-/// Pick between a light-mode and dark-mode color.
-#[inline]
-fn themed(theme: &Theme, light: Color, dark: Color) -> Color {
-    if is_light_theme(theme) { light } else { dark }
 }
 
 use ai::{
@@ -2061,10 +2056,7 @@ fn ai_chat_view<'a>(
     .width(Fill)
     .padding(Padding::from([4, 8]))
     .style(|theme: &Theme| iced::widget::container::Style {
-        background: Some(Background::Color(themed(theme,
-            Color::from_rgb(0.925, 0.882, 0.969), // light lavender
-            Color::from_rgb(0.086, 0.055, 0.133), // --bg-elev
-        ))),
+        background: Some(Background::Color(chrome::bg_subtle(theme))),
         ..Default::default()
     })
     .into();
@@ -2403,10 +2395,7 @@ fn settings_view<'a>(
         .width(Fill)
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.969, 0.945, 0.992), // lavender-white
-                Color::from_rgb(0.075, 0.047, 0.125), // deep violet panel
-            ))),
+            background: Some(Background::Color(chrome::bg_base(theme))),
             ..Default::default()
         })
         .into()
@@ -2714,10 +2703,7 @@ fn browser_view<'a>(
         .width(Fill)
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.969, 0.945, 0.992), // lavender-white
-                Color::from_rgb(0.075, 0.047, 0.125), // deep violet panel
-            ))),
+            background: Some(Background::Color(chrome::bg_base(theme))),
             ..Default::default()
         })
         .into()
@@ -3038,10 +3024,7 @@ fn preview_view<'a>(
             .width(Fill)
             .padding(Padding::from([4, 8]))
             .style(|theme: &Theme| iced::widget::container::Style {
-                background: Some(Background::Color(themed(theme,
-                    Color::from_rgb(0.902, 0.847, 0.969), // light lavender
-                    Color::from_rgb(0.114, 0.078, 0.188), // --bg-elev-2
-                ))),
+                background: Some(Background::Color(chrome::bg_subtle(theme))),
                 ..Default::default()
             })
             .into();
@@ -3083,10 +3066,7 @@ fn preview_view<'a>(
         .width(Fill)
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.980, 0.953, 1.000), // --bg light
-                Color::from_rgb(0.051, 0.031, 0.078), // --bg deep violet-black
-            ))),
+            background: Some(Background::Color(chrome::bg_base(theme))),
             ..Default::default()
         })
         .into();
@@ -3096,10 +3076,7 @@ fn preview_view<'a>(
         .width(Fill)
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.969, 0.945, 0.992), // lavender-white
-                Color::from_rgb(0.075, 0.047, 0.125), // deep violet panel
-            ))),
+            background: Some(Background::Color(chrome::bg_base(theme))),
             ..Default::default()
         })
         .into()
@@ -3348,10 +3325,7 @@ fn hotkey_info_view<'a>() -> Element<'a, Message> {
         .width(Fill)
         .height(Fill)
         .style(|theme: &Theme| iced::widget::container::Style {
-            background: Some(Background::Color(themed(theme,
-                Color::from_rgb(0.969, 0.945, 0.992), // lavender-white
-                Color::from_rgb(0.075, 0.047, 0.125), // deep violet panel
-            ))),
+            background: Some(Background::Color(chrome::bg_base(theme))),
             ..Default::default()
         })
         .into()
@@ -3457,26 +3431,13 @@ fn title_bar_style(
     theme: &Theme,
     is_focused: bool,
 ) -> iced::widget::container::Style {
-    let light = is_light_theme(theme);
-    let bg = match (light, is_focused) {
-        (true, true) => Color::from_rgb(0.88, 0.90, 0.95),
-        (true, false) => Color::from_rgb(0.93, 0.93, 0.95),
-        (false, true) => Color::from_rgb(0.14, 0.16, 0.24),
-        (false, false) => Color::from_rgb(0.08, 0.08, 0.10),
-    };
-
-    let text_color = match (light, is_focused) {
-        (true, true) => Color::from_rgb(0.10, 0.10, 0.15),
-        (true, false) => Color::from_rgb(0.40, 0.40, 0.50),
-        (false, true) => Color::from_rgb(0.90, 0.92, 0.96),
-        (false, false) => Color::from_rgb(0.50, 0.50, 0.52),
-    };
-
-    let border_color = match (light, is_focused) {
-        (true, true) => Color::from_rgb(0.627, 0.129, 0.839),  // --purple-mid
-        (true, false) => Color::from_rgb(0.847, 0.792, 0.918),
-        (false, true) => Color::from_rgb(0.976, 0.467, 1.000), // --accent magenta
-        (false, false) => Color::from_rgb(0.239, 0.173, 0.341), // --line-bright
+    // The active (focused) pane's title bar is highlighted with the theme's
+    // accent; the inactive title bar sits quietly on the chrome. All colors
+    // come from the theme palette so each theme highlights appropriately.
+    let (bg, text_color, border_color) = if is_focused {
+        (chrome::accent_subtle(theme), chrome::accent_text(theme), chrome::accent(theme))
+    } else {
+        (chrome::bg_subtle(theme), chrome::text_muted(theme), chrome::line(theme))
     };
 
     iced::widget::container::Style {
@@ -3496,20 +3457,15 @@ fn pane_content_style(
     theme: &Theme,
     is_focused: bool,
 ) -> iced::widget::container::Style {
-    let light = is_light_theme(theme);
-    // Match the terminal/app background so the rounded corners blend with the
+    // Match the app background so the rounded corners blend with the
     // surrounding canvas instead of showing a mismatched square fill.
-    let bg = if light {
-        Color::from_rgb(0.980, 0.953, 1.000) // --bg light
-    } else {
-        Color::from_rgb(0.051, 0.031, 0.078) // --bg deep violet-black
-    };
+    let bg = chrome::bg_base(theme);
 
-    let border_color = match (light, is_focused) {
-        (true, true) => Color::from_rgb(0.627, 0.129, 0.839),  // --purple-mid
-        (true, false) => Color::from_rgb(0.847, 0.792, 0.918),
-        (false, true) => Color::from_rgb(0.976, 0.467, 1.000), // --accent magenta
-        (false, false) => Color::from_rgb(0.239, 0.173, 0.341), // --line-bright
+    // The focused pane gets an accent border; unfocused panes a subtle line.
+    let border_color = if is_focused {
+        chrome::accent(theme)
+    } else {
+        chrome::line(theme)
     };
 
     iced::widget::container::Style {
