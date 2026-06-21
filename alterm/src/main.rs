@@ -8,7 +8,7 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, mouse_area, opaque, pane_grid, pick_list, responsive, rich_text,
+    button, column, container, mouse_area, opaque, pane_grid, pick_list, rich_text,
     row, scrollable, slider, span, stack, text, text_input, toggler, Column, Id as WidgetId,
 };
 use iced::widget::operation::focus as widget_focus;
@@ -180,6 +180,10 @@ const PANE_GRID_MIN_SIZE: f32 = 120.0;
 const GRID_PADDING: f32 = 8.0;
 /// Height of the browser nav bar (URL input + padding) in logical pixels.
 const BROWSER_NAV_BAR_HEIGHT: f32 = 40.0;
+/// Max characters shown in a pane title before it's truncated with an ellipsis.
+/// Keeps long titles (e.g. browser URLs) from running off the title bar while
+/// the title button stays Shrink-width (so the rename click target works).
+const PANE_TITLE_MAX_CHARS: usize = 48;
 
 /// Extract a numeric ID from a `pane_grid::Pane` for use as a webview key.
 ///
@@ -568,6 +572,10 @@ impl Alterm {
 
                 if block.is_browser() {
                     let pane_id = webview_key(tab_id, *pane);
+                    log::debug!(
+                        "[wv-diag] resize: key={pane_id} exists={} rect=({:.0},{:.0},{:.0},{:.0})",
+                        webview_manager::exists(pane_id), rect.x, rect.y, rect.width, rect.height
+                    );
                     if webview_manager::exists(pane_id) {
                         let wv_x = (GRID_PADDING + rect.x) as f64;
                         let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
@@ -660,7 +668,36 @@ impl Alterm {
             let is_active = tab_idx == self.active_tab;
             for (pane, block) in tab.panes.iter() {
                 if block.is_browser() {
+                    log::debug!(
+                        "[wv-diag] visibility: tab_idx={tab_idx} active={is_active} key={}",
+                        webview_key(tab.id, *pane)
+                    );
                     webview_manager::set_visible(webview_key(tab.id, *pane), is_active);
+                }
+            }
+        }
+    }
+
+    /// Drain navigation events reported by the webviews and apply each to the
+    /// matching browser pane's state. Events are keyed by `webview_key`, so we
+    /// resolve each back to its (tab, pane) by recomputing the key.
+    fn apply_browser_nav_events(&mut self) {
+        let events = webview_manager::drain_nav_events();
+        if events.is_empty() {
+            return;
+        }
+        for (pane_id, url) in events {
+            for tab in &mut self.tabs {
+                let tab_id = tab.id;
+                if let Some((_, block)) = tab
+                    .panes
+                    .iter_mut()
+                    .find(|(p, _)| webview_key(tab_id, **p) == pane_id)
+                {
+                    if let Block::Browser { state } = block {
+                        state.on_navigation(&url);
+                    }
+                    break;
                 }
             }
         }
@@ -993,6 +1030,11 @@ impl Alterm {
                 // Pump GTK events so webkit2gtk can process network/rendering.
                 webview_manager::pump_gtk_events();
 
+                // Apply any navigations the webviews reported (link clicks,
+                // redirects, URL-bar submits, confirmed back/forward moves) so
+                // the URL bar and back/forward buttons stay accurate.
+                self.apply_browser_nav_events();
+
                 // Tick all panes in all tabs.
                 for tab in &mut self.tabs {
                     for (_pane, block) in tab.panes.iter_mut() {
@@ -1001,19 +1043,41 @@ impl Alterm {
                 }
             }
             Message::PaneClicked(pane) => {
+                // Only steer keyboard focus to the pane's text_input when this
+                // click *switches* focus to the pane. Re-focusing on every click
+                // calls iced's `State::focus`, which moves the cursor to the end
+                // and clears the selection — so doing it on every click would
+                // break text selection (drag-highlight, double/triple-click) in
+                // the browser URL bar and AI chat input. On a re-click of the
+                // already-focused pane, let the text_input handle the click
+                // natively so selection works.
+                let switched_focus = self.active_tab().focus != Some(pane);
                 self.active_tab_mut().focus = Some(pane);
-                // If the clicked pane is an AI chat or browser, focus its text_input
-                // so keyboard events are captured by it (not routed to the PTY).
-                if let Some(block) = self.active_tab().panes.get(pane) {
-                    if block.is_ai_chat() {
-                        return widget_focus(WidgetId::from(
-                            format!("ai-chat-input-{:?}", pane),
-                        ));
+                if switched_focus {
+                    if let Some(block) = self.active_tab().panes.get(pane) {
+                        if block.is_ai_chat() {
+                            return widget_focus(WidgetId::from(
+                                format!("ai-chat-input-{:?}", pane),
+                            ));
+                        }
+                        if block.is_browser() {
+                            return widget_focus(WidgetId::from(
+                                format!("browser-url-input-{:?}", pane),
+                            ));
+                        }
                     }
+                }
+            }
+            Message::PaneDragged(pane_grid::DragEvent::Picked { .. }) => {
+                // Native browser webviews sit on top of the iced surface and
+                // capture mouse events over their region, so iced never sees a
+                // drag-over/drop near a browser pane. Hide them for the duration
+                // of the drag; resize_all_panes() re-shows them on drop/cancel.
+                let tab = self.active_tab();
+                let tab_id = tab.id;
+                for (pane, block) in tab.panes.iter() {
                     if block.is_browser() {
-                        return widget_focus(WidgetId::from(
-                            format!("browser-url-input-{:?}", pane),
-                        ));
+                        webview_manager::set_visible(webview_key(tab_id, *pane), false);
                     }
                 }
             }
@@ -1022,7 +1086,8 @@ impl Alterm {
                 self.resize_all_panes();
             }
             Message::PaneDragged(_) => {
-                // Picked / Canceled — nothing to do.
+                // Canceled — re-show/reposition the webviews hidden on Picked.
+                self.resize_all_panes();
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
                 self.active_tab_mut().panes.resize(split, ratio);
@@ -1135,6 +1200,11 @@ impl Alterm {
                     if let Some(pane) = self.active_tab().focus {
                         self.fire_on_new_terminal(pane);
                     }
+                    // Size the new tab's panes and hide the previous tab's
+                    // browser webviews — otherwise those native webviews stay
+                    // visible and show through on top of the new tab.
+                    self.resize_all_panes();
+                    self.update_webview_visibility();
                 }
             }
             Message::CloseTab(index) => {
@@ -1590,9 +1660,10 @@ impl Alterm {
                 let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.navigate(&url);
-                    // Also navigate the real webview.
-                    webview_manager::navigate(pane_id, &state.url);
+                    // navigate() normalises the URL; history is recorded when the
+                    // resulting navigation event flows back via drain_nav_events().
+                    let target = state.navigate(&url);
+                    webview_manager::navigate(pane_id, &target);
                 }
             }
             Message::BrowserBack(pane) => {
@@ -1600,8 +1671,11 @@ impl Alterm {
                 let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.go_back();
-                    webview_manager::navigate(pane_id, &state.url);
+                    // Drive the webview's *real* history; the index move is
+                    // confirmed when the navigation event comes back.
+                    if state.begin_back() {
+                        webview_manager::go_back(pane_id);
+                    }
                 }
             }
             Message::BrowserForward(pane) => {
@@ -1609,8 +1683,9 @@ impl Alterm {
                 let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.go_forward();
-                    webview_manager::navigate(pane_id, &state.url);
+                    if state.begin_forward() {
+                        webview_manager::go_forward(pane_id);
+                    }
                 }
             }
             Message::BrowserReload(pane) => {
@@ -2087,30 +2162,32 @@ impl Alterm {
                     // the press — otherwise the pane-grid title bar treats the
                     // area as a drag handle and the click never registers. The
                     // app turns a quick second click into a rename.
-                    // No wrapping: a long title stays one line so this pane's
-                    // title bar can't grow taller than its neighbors'. We use
-                    // `responsive` to learn the title slot's width and truncate
-                    // with an ellipsis that ends *before* the right edge instead
-                    // of running off the title bar.
-                    responsive(move |size| {
-                        let shown = truncate_to_width(&label, size.width);
-                        button(text(shown).size(12).wrapping(text::Wrapping::None))
-                            .padding(Padding::from([0, 2]))
-                            .on_press(Message::PaneTitleClicked(pane))
-                            .style(move |theme: &Theme, _status| iced::widget::button::Style {
-                                background: None,
-                                text_color: if is_focused {
-                                    chrome::accent_text(theme)
-                                } else {
-                                    chrome::text_muted(theme)
-                                },
-                                border: Border::default(),
-                                ..Default::default()
-                            })
-                            .into()
-                    })
-                    .height(Length::Shrink)
-                    .into()
+                    //
+                    // The button MUST stay Shrink-width (sized to its text):
+                    // pane_grid's `is_over_pick_area` makes the title bar a drag
+                    // handle everywhere *except* over the title content's bounds.
+                    // A Shrink button means clicking the text reaches the button
+                    // (→ rename) while empty title-bar space still drags the pane.
+                    // Wrapping this in a Fill widget (e.g. `responsive`) makes the
+                    // title content fill the whole slot and breaks that split, so
+                    // we truncate by characters here instead of measuring width.
+                    // No wrapping: a long title stays one line so the title bar
+                    // can't grow taller than its neighbors'.
+                    let shown = truncate_chars(&label, PANE_TITLE_MAX_CHARS);
+                    button(text(shown).size(12).wrapping(text::Wrapping::None))
+                        .padding(Padding::from([0, 2]))
+                        .on_press(Message::PaneTitleClicked(pane))
+                        .style(move |theme: &Theme, _status| iced::widget::button::Style {
+                            background: None,
+                            text_color: if is_focused {
+                                chrome::accent_text(theme)
+                            } else {
+                                chrome::text_muted(theme)
+                            },
+                            border: Border::default(),
+                            ..Default::default()
+                        })
+                        .into()
                 };
 
                 // Build control buttons row
@@ -3975,17 +4052,11 @@ fn search_bar_view<'a>(s: &'a SearchState) -> Element<'a, Message> {
         .into()
 }
 
-/// Truncate a pane title to fit `width` pixels, appending an ellipsis so it
-/// ends before the right edge of the title bar instead of running off it.
-/// Uses an estimated average glyph width for the size-12 title font; the
-/// estimate runs slightly wide so the result errs on the side of fitting.
-fn truncate_to_width(label: &str, width: f32) -> String {
-    // ~7px per glyph at size 12, minus the button's horizontal padding (2+2)
-    // and a little slack for the ellipsis glyph.
-    const AVG_GLYPH_PX: f32 = 7.0;
-    let usable = (width - 6.0).max(0.0);
-    let max_chars = (usable / AVG_GLYPH_PX).floor() as usize;
-
+/// Truncate a pane title to at most `max_chars` characters, appending an
+/// ellipsis when shortened, so a long title (e.g. a browser URL) doesn't run
+/// off the title bar. Kept Shrink-width at the call site so the title content
+/// stays sized to its text — see the rename/drag note in `view`.
+fn truncate_chars(label: &str, max_chars: usize) -> String {
     let len = label.chars().count();
     if len <= max_chars {
         return label.to_string();
