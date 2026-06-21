@@ -1043,19 +1043,28 @@ impl Alterm {
                 }
             }
             Message::PaneClicked(pane) => {
+                // Only steer keyboard focus to the pane's text_input when this
+                // click *switches* focus to the pane. Re-focusing on every click
+                // calls iced's `State::focus`, which moves the cursor to the end
+                // and clears the selection — so doing it on every click would
+                // break text selection (drag-highlight, double/triple-click) in
+                // the browser URL bar and AI chat input. On a re-click of the
+                // already-focused pane, let the text_input handle the click
+                // natively so selection works.
+                let switched_focus = self.active_tab().focus != Some(pane);
                 self.active_tab_mut().focus = Some(pane);
-                // If the clicked pane is an AI chat or browser, focus its text_input
-                // so keyboard events are captured by it (not routed to the PTY).
-                if let Some(block) = self.active_tab().panes.get(pane) {
-                    if block.is_ai_chat() {
-                        return widget_focus(WidgetId::from(
-                            format!("ai-chat-input-{:?}", pane),
-                        ));
-                    }
-                    if block.is_browser() {
-                        return widget_focus(WidgetId::from(
-                            format!("browser-url-input-{:?}", pane),
-                        ));
+                if switched_focus {
+                    if let Some(block) = self.active_tab().panes.get(pane) {
+                        if block.is_ai_chat() {
+                            return widget_focus(WidgetId::from(
+                                format!("ai-chat-input-{:?}", pane),
+                            ));
+                        }
+                        if block.is_browser() {
+                            return widget_focus(WidgetId::from(
+                                format!("browser-url-input-{:?}", pane),
+                            ));
+                        }
                     }
                 }
             }
