@@ -8,7 +8,7 @@ use iced::event::Status;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{
-    button, column, container, mouse_area, opaque, pane_grid, pick_list, responsive, rich_text,
+    button, column, container, mouse_area, opaque, pane_grid, pick_list, rich_text,
     row, scrollable, slider, span, stack, text, text_input, toggler, Column, Id as WidgetId,
 };
 use iced::widget::operation::focus as widget_focus;
@@ -180,6 +180,10 @@ const PANE_GRID_MIN_SIZE: f32 = 120.0;
 const GRID_PADDING: f32 = 8.0;
 /// Height of the browser nav bar (URL input + padding) in logical pixels.
 const BROWSER_NAV_BAR_HEIGHT: f32 = 40.0;
+/// Max characters shown in a pane title before it's truncated with an ellipsis.
+/// Keeps long titles (e.g. browser URLs) from running off the title bar while
+/// the title button stays Shrink-width (so the rename click target works).
+const PANE_TITLE_MAX_CHARS: usize = 48;
 
 /// Extract a numeric ID from a `pane_grid::Pane` for use as a webview key.
 ///
@@ -2149,30 +2153,32 @@ impl Alterm {
                     // the press — otherwise the pane-grid title bar treats the
                     // area as a drag handle and the click never registers. The
                     // app turns a quick second click into a rename.
-                    // No wrapping: a long title stays one line so this pane's
-                    // title bar can't grow taller than its neighbors'. We use
-                    // `responsive` to learn the title slot's width and truncate
-                    // with an ellipsis that ends *before* the right edge instead
-                    // of running off the title bar.
-                    responsive(move |size| {
-                        let shown = truncate_to_width(&label, size.width);
-                        button(text(shown).size(12).wrapping(text::Wrapping::None))
-                            .padding(Padding::from([0, 2]))
-                            .on_press(Message::PaneTitleClicked(pane))
-                            .style(move |theme: &Theme, _status| iced::widget::button::Style {
-                                background: None,
-                                text_color: if is_focused {
-                                    chrome::accent_text(theme)
-                                } else {
-                                    chrome::text_muted(theme)
-                                },
-                                border: Border::default(),
-                                ..Default::default()
-                            })
-                            .into()
-                    })
-                    .height(Length::Shrink)
-                    .into()
+                    //
+                    // The button MUST stay Shrink-width (sized to its text):
+                    // pane_grid's `is_over_pick_area` makes the title bar a drag
+                    // handle everywhere *except* over the title content's bounds.
+                    // A Shrink button means clicking the text reaches the button
+                    // (→ rename) while empty title-bar space still drags the pane.
+                    // Wrapping this in a Fill widget (e.g. `responsive`) makes the
+                    // title content fill the whole slot and breaks that split, so
+                    // we truncate by characters here instead of measuring width.
+                    // No wrapping: a long title stays one line so the title bar
+                    // can't grow taller than its neighbors'.
+                    let shown = truncate_chars(&label, PANE_TITLE_MAX_CHARS);
+                    button(text(shown).size(12).wrapping(text::Wrapping::None))
+                        .padding(Padding::from([0, 2]))
+                        .on_press(Message::PaneTitleClicked(pane))
+                        .style(move |theme: &Theme, _status| iced::widget::button::Style {
+                            background: None,
+                            text_color: if is_focused {
+                                chrome::accent_text(theme)
+                            } else {
+                                chrome::text_muted(theme)
+                            },
+                            border: Border::default(),
+                            ..Default::default()
+                        })
+                        .into()
                 };
 
                 // Build control buttons row
@@ -4037,17 +4043,11 @@ fn search_bar_view<'a>(s: &'a SearchState) -> Element<'a, Message> {
         .into()
 }
 
-/// Truncate a pane title to fit `width` pixels, appending an ellipsis so it
-/// ends before the right edge of the title bar instead of running off it.
-/// Uses an estimated average glyph width for the size-12 title font; the
-/// estimate runs slightly wide so the result errs on the side of fitting.
-fn truncate_to_width(label: &str, width: f32) -> String {
-    // ~7px per glyph at size 12, minus the button's horizontal padding (2+2)
-    // and a little slack for the ellipsis glyph.
-    const AVG_GLYPH_PX: f32 = 7.0;
-    let usable = (width - 6.0).max(0.0);
-    let max_chars = (usable / AVG_GLYPH_PX).floor() as usize;
-
+/// Truncate a pane title to at most `max_chars` characters, appending an
+/// ellipsis when shortened, so a long title (e.g. a browser URL) doesn't run
+/// off the title bar. Kept Shrink-width at the call site so the title content
+/// stays sized to its text — see the rename/drag note in `view`.
+fn truncate_chars(label: &str, max_chars: usize) -> String {
     let len = label.chars().count();
     if len <= max_chars {
         return label.to_string();
