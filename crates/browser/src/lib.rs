@@ -134,25 +134,41 @@ impl BrowserState {
         );
     }
 
-    /// Request a Back move. Returns `true` if there is somewhere to go, in
+    /// Move Back one entry. Returns `true` if there was somewhere to go, in
     /// which case the caller should drive the real webview's history.
-    /// The actual index move is confirmed later by [`on_navigation`].
+    ///
+    /// We update our own index *immediately* rather than waiting for a
+    /// navigation event, because webkit's navigation handler does NOT fire for
+    /// `history.back()`/`history.forward()` (bfcache restores don't trigger a
+    /// navigation-policy decision). The webview honours the move deterministically,
+    /// so mirroring it here keeps `can_go_back`/`can_go_forward` accurate. If a
+    /// webview *does* report the move, `on_navigation` ignores it as a duplicate
+    /// of the page we just moved to.
     pub fn begin_back(&mut self) -> bool {
         if !self.can_go_back {
             return false;
         }
-        self.pending_move = -1;
+        self.history_index -= 1;
+        self.url = self.history[self.history_index].clone();
+        self.input_url = self.url.clone();
         self.loading = true;
+        self.pending_move = 0;
+        self.update_nav_flags();
         true
     }
 
-    /// Request a Forward move. Returns `true` if there is somewhere to go.
+    /// Move Forward one entry. Returns `true` if there was somewhere to go.
+    /// See [`begin_back`](Self::begin_back) for why the index moves immediately.
     pub fn begin_forward(&mut self) -> bool {
         if !self.can_go_forward {
             return false;
         }
-        self.pending_move = 1;
+        self.history_index += 1;
+        self.url = self.history[self.history_index].clone();
+        self.input_url = self.url.clone();
         self.loading = true;
+        self.pending_move = 0;
+        self.update_nav_flags();
         true
     }
 
@@ -240,23 +256,44 @@ mod tests {
     }
 
     #[test]
-    fn back_and_forward_preserve_history() {
+    fn back_and_forward_move_immediately() {
+        // webkit doesn't fire the navigation handler for history.back()/forward(),
+        // so begin_back/begin_forward must update our index themselves — no
+        // on_navigation event arrives to confirm them.
         let mut s = BrowserState::new("https://a.com");
         s.on_navigation("https://b.com");
-        s.on_navigation("https://c.com");
+        s.on_navigation("https://c.com"); // [a,b,c] index=2
 
-        // Back: caller asks, then the webview reports the prior page.
         assert!(s.begin_back());
-        s.on_navigation("https://b.com");
         assert_eq!(s.url, "https://b.com");
         assert!(s.can_go_back);
         assert!(s.can_go_forward); // forward history preserved
 
-        // Forward.
         assert!(s.begin_forward());
-        s.on_navigation("https://c.com");
         assert_eq!(s.url, "https://c.com");
         assert!(!s.can_go_forward);
+
+        // Back to the very start: forward stays available the whole way.
+        assert!(s.begin_back());
+        assert!(s.begin_back());
+        assert_eq!(s.url, "https://a.com");
+        assert!(!s.can_go_back);
+        assert!(s.can_go_forward);
+        assert!(!s.begin_back()); // nowhere left to go
+    }
+
+    #[test]
+    fn duplicate_nav_event_after_back_is_ignored() {
+        // Some webkit builds *might* still report the back/forward navigation.
+        // If so, it lands on the page we already moved to and must be a no-op.
+        let mut s = BrowserState::new("https://a.com");
+        s.on_navigation("https://b.com");
+        s.on_navigation("https://c.com");
+        assert!(s.begin_back()); // index=1, url=b
+        s.on_navigation("https://b.com"); // late/duplicate report
+        assert_eq!(s.url, "https://b.com");
+        assert_eq!(s.history.len(), 3);
+        assert!(s.can_go_forward);
     }
 
     #[test]
@@ -271,8 +308,7 @@ mod tests {
         let mut s = BrowserState::new("https://a.com");
         s.on_navigation("https://b.com");
         s.on_navigation("https://c.com");
-        assert!(s.begin_back());
-        s.on_navigation("https://b.com"); // back at b.com
+        assert!(s.begin_back()); // back at b.com
         s.on_navigation("https://d.com"); // fresh nav (e.g. link click)
 
         assert_eq!(s.history.len(), 3); // a, b, d
