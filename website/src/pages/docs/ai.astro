@@ -48,24 +48,26 @@ model   = "claude-opus-4-5"</code></pre>
   </p>
 
   <h2>The context model</h2>
-  <p>The chat block can read terminal output three ways:</p>
-  <ol>
+  <p>
+    Today the chat reads the <strong>focused terminal pane</strong> — it sees that pane's recent
+    output, so its answers reflect what's actually on your screen. Switch focus, and the context
+    follows you.
+  </p>
+  <p>Two richer context modes are planned:</p>
+  <ul>
     <li>
-      <strong>Active pane (default)</strong> — the AI sees whichever terminal pane is focused.
-      Switch focus and its context follows.
+      <strong>Pinned panes</strong> <em>(planned)</em> — pin specific panes so they stay in the
+      AI's view regardless of focus, for watching build output and server logs while you work
+      elsewhere.
     </li>
     <li>
-      <strong>Pinned panes</strong> — pin specific panes so they stay in the AI's view regardless
-      of focus. Ideal for watching build output and server logs while you work elsewhere.
+      <strong>@ mentions</strong> <em>(planned)</em> — type <code>@pane:2</code> or
+      <code>@tab:ssh-prod</code> to reference a pane's output in one message without pinning it.
     </li>
-    <li>
-      <strong>@ mentions</strong> — type <code>@pane:2</code> or <code>@tab:ssh-prod</code> to
-      reference a pane's output in one message without pinning it.
-    </li>
-  </ol>
+  </ul>
 
-  <h2>AI actions</h2>
-  <p>The AI can propose actions, each behind a confirmation prompt — it proposes, you approve:</p>
+  <h2>AI actions <em>(planned)</em></h2>
+  <p>A future update will let the AI propose actions, each behind a confirmation prompt — it proposes, you approve:</p>
   <ul>
     <li>Open a new terminal pane and run a command</li>
     <li>Split the current view</li>
@@ -73,6 +75,10 @@ model   = "claude-opus-4-5"</code></pre>
   </ul>
 
   <div class="note">
-    <p>Much of the AI surface lands in <strong>Phase&nbsp;3</strong>. This page documents the intended design.</p>
+    <p>
+      <strong>Available now:</strong> the AI chat panel, multi-provider streaming, and active-pane
+      context ship in the current build (v0.4.0). <strong>Pinned panes</strong>,
+      <strong>@&nbsp;mentions</strong>, and <strong>AI actions</strong> are on the roadmap.
+    </p>
   </div>
 </DocsLayout>

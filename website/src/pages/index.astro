@@ -160,8 +160,8 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
         <p class="eyebrow">Intelligence, in context</p>
         <h2 class="h-section">AI that can <span class="gradient-text">see your terminal</span>.</h2>
         <p class="lead">
-          The chat block reads your panes' output, so help is grounded in what's actually on
-          screen — not a guess. Proposed actions always wait for your confirmation.
+          The chat block reads your focused terminal's output, so help is grounded in what's
+          actually on screen — not a guess. Replies stream live from the provider of your choice.
         </p>
         <ul class="ai-context">
           {
@@ -205,8 +205,8 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
         <p class="eyebrow">See it in action</p>
         <h2 class="h-section">One workspace, <span class="gradient-text">any split</span>.</h2>
         <p class="lead">
-          Real captures of Alterm running in Phase&nbsp;1 — tile as many panes as you need:
-          terminals, a file browser, image preview, an embedded web browser, and live settings.
+          Real captures of Alterm today — tile as many panes as you need: terminals, a file
+          browser, image preview, an embedded web browser, and live settings.
         </p>
       </header>
       <div class="shots">
@@ -249,12 +249,14 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
       <ol class="timeline">
         {
           ROADMAP.map((r, i) => (
-            <li class={`tl-item reveal ${r.current ? "current" : ""}`} data-delay={i * 70}>
+            <li class={`tl-item reveal ${r.status}`} data-delay={i * 70}>
               <span class="tl-node" />
               <div class="tl-card">
                 <div class="tl-head">
                   <span class="tl-phase">{r.phase}</span>
-                  {r.current && <span class="tag tag-live">in progress</span>}
+                  {r.status === "done" && <span class="tag tag-live">shipped</span>}
+                  {r.status === "current" && <span class="tag tag-current">in progress</span>}
+                  {r.status === "upcoming" && <span class="tag tag-planned">planned</span>}
                 </div>
                 <h3>{r.name}</h3>
                 <p>{r.body}</p>
@@ -749,6 +751,15 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
   }
   .tl-item.current .tl-card {
     border-color: rgba(249, 119, 255, 0.3);
+  }
+  /* Completed phases — solid node, no pulse. */
+  .tl-item.done .tl-node {
+    border-color: var(--orchid);
+    background: var(--orchid);
+    box-shadow: 0 0 10px -1px var(--orchid);
+  }
+  .tl-item.done .tl-card {
+    border-color: rgba(212, 80, 252, 0.2);
   }
   .tl-head {
     display: flex;

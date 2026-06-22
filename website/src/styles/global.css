@@ -415,6 +415,10 @@ h3 {
   color: var(--term-green);
   border-color: rgba(94, 242, 176, 0.35);
 }
+.tag-current {
+  color: var(--accent);
+  border-color: rgba(249, 119, 255, 0.4);
+}
 
 /* ---- Scroll reveal — rise + blur-in, with directional variants ---- */
 .reveal {

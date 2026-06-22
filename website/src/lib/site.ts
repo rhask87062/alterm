@@ -7,7 +7,7 @@ export const SITE = {
   description:
     "A GPU-accelerated, cross-platform terminal workspace built in Rust. The workspace UX of WaveTerm with the raw performance of WezTerm — without the Electron bloat.",
   repo: "https://github.com/rhask87062/alterm",
-  version: "0.1.0",
+  version: "0.4.0",
   license: "MIT",
 };
 
@@ -37,7 +37,7 @@ export const FEATURES = [
   {
     icon: "folder",
     title: "Tiling workspace",
-    body: "Drag-to-split blocks with a 7-zone drop model, tabs, resize handles, and block zoom. A real workspace, not just tabs.",
+    body: "Split panes right or down, drag to rearrange, resize handles, and block zoom — with tabs on top. A real tiling workspace, not just tabs.",
     status: "core",
   },
   {
@@ -49,7 +49,7 @@ export const FEATURES = [
   {
     icon: null,
     title: "Full keyboard control",
-    body: "Every workspace action is bound. Modifiers, leader chords, and a command palette put power users entirely on the keyboard.",
+    body: "Every workspace action has a keyboard shortcut, surfaced in a searchable command palette — splits, tabs, navigation, and terminal control without leaving the keyboard.",
     status: "core",
   },
   {
@@ -61,14 +61,14 @@ export const FEATURES = [
   {
     icon: "browser",
     title: "Embedded browser",
-    body: "A real webview pane via wry — docs and dashboards alongside your shell, using the system's native engine.",
-    status: "planned",
+    body: "A real webview pane — docs and dashboards alongside your shell, using the system's native engine, with back/forward history and drag-aware placement.",
+    status: "core",
   },
   {
     icon: "folder",
     title: "File preview",
-    body: "Syntax-highlighted code, rendered markdown, and inline images in a dedicated block. Read without leaving the workspace.",
-    status: "planned",
+    body: "Syntax-highlighted code, inline images, and even rendered PPTX slides in a dedicated block. Read without leaving the workspace.",
+    status: "core",
   },
   {
     icon: "settings",
@@ -110,16 +110,16 @@ export const PROVIDERS = [
 
 export const AI_CONTEXT = [
   {
-    title: "Active pane",
-    body: "The AI automatically sees whichever terminal pane is focused. Switch focus, and its context follows you.",
+    title: "Active-pane context",
+    body: "The chat reads the focused terminal's recent output, so answers are grounded in what's actually on your screen — not a guess.",
   },
   {
-    title: "Pinned panes",
-    body: "Pin specific panes so the AI keeps watching them — your build output and server logs stay in view while you work elsewhere.",
+    title: "Streaming, multi-provider",
+    body: "Replies stream in token by token from OpenAI, Anthropic, Gemini, or any OpenAI-compatible endpoint — Grok, Ollama, or LM Studio.",
   },
   {
-    title: "@ mentions",
-    body: "Type @pane:2 or @tab:ssh-prod to reference a pane's output in a single message without pinning it permanently.",
+    title: "Pinned panes & @-mentions",
+    body: "Planned: keep the AI watching specific panes, or @-reference a pane by name in a single message — without changing focus.",
   },
 ];
 
@@ -127,27 +127,31 @@ export const ROADMAP = [
   {
     phase: "Phase 1",
     name: "Foundation",
-    current: true,
-    body: "Single GPU-rendered terminal pane: PTY, ANSI colors, keyboard input, scrollback, resize, copy/paste.",
+    status: "done",
+    body: "GPU-rendered terminal: PTY, ANSI truecolor, keyboard input, scrollback, resize, search, copy/paste.",
   },
   {
     phase: "Phase 2",
     name: "Workspace",
-    body: "Tab bar, split panes, drag-to-split, tiling tree, widget sidebar, keyboard shortcuts, command palette.",
+    status: "done",
+    body: "Tabs, split panes, drag-to-rearrange tiling, a widget sidebar, keyboard shortcuts, command palette, and session restore.",
   },
   {
     phase: "Phase 3",
     name: "Intelligence",
-    body: "AI chat panel, multi-provider support, terminal context awareness, settings GUI, theme engine.",
+    status: "done",
+    body: "AI chat panel with active-pane context, multi-provider streaming, a settings GUI, and a theme engine.",
   },
   {
     phase: "Phase 4",
     name: "Extras",
-    body: "Embedded browser, file preview, Lua hooks, desktop integration, and packaging (deb, rpm, homebrew, winget).",
+    status: "current",
+    body: "Embedded browser, file preview, and Lua hooks have landed. Desktop integration and packaging (deb, rpm, homebrew, winget) are in progress.",
   },
   {
     phase: "Phase 5",
     name: "AI Harness",
+    status: "upcoming",
     body: "A native agentic AI coding assistant in the terminal: tool-use, self-improving techniques, a pluggable provider system.",
   },
 ];
