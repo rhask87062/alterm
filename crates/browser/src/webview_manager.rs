@@ -105,6 +105,7 @@ pub fn create_webview(
         // back/forward move) so the UI can keep its history/URL bar accurate.
         // Returning true allows the navigation to proceed.
         .with_navigation_handler(move |url| {
+            log::debug!("[nav-diag] navigation_handler fired: pane={pane_id} url={url}");
             NAV_EVENTS.with(|q| q.borrow_mut().push((pane_id, url)));
             true
         })
