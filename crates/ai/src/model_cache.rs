@@ -135,6 +135,20 @@ mod tests {
     }
 
     #[test]
+    fn lookup_at_exact_ttl_boundary_is_fresh() {
+        let mut cache = ModelCache::default();
+        cache.put("openai", vec!["gpt-4o".into()], 1000);
+        // At exactly fetched_at + ttl, entry is still fresh (not stale).
+        let at_ttl = cache.lookup("openai", 1000 + MODEL_CACHE_TTL_SECS, MODEL_CACHE_TTL_SECS);
+        assert_eq!(at_ttl.models, vec!["gpt-4o".to_string()]);
+        assert!(!at_ttl.needs_refresh);
+        // One second past ttl crosses into stale.
+        let past_ttl = cache.lookup("openai", 1000 + MODEL_CACHE_TTL_SECS + 1, MODEL_CACHE_TTL_SECS);
+        assert_eq!(past_ttl.models, vec!["gpt-4o".to_string()]);
+        assert!(past_ttl.needs_refresh);
+    }
+
+    #[test]
     fn load_missing_file_is_empty() {
         let dir = temp_dir("missing");
         assert!(load(&dir).providers.is_empty());
