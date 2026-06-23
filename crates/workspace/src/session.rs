@@ -22,6 +22,7 @@ pub enum BlockState {
     Browser { url: String, history: Vec<String>, history_index: usize },
     AiChat { provider: String, model: String, messages: Vec<DisplayMessage>, input: String },
     Preview { path: PathBuf },
+    Note { content: String },
     Settings,
     HotkeyInfo,
 }
