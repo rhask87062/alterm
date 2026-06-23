@@ -4,11 +4,11 @@
 
 pub mod ai_chat;
 pub mod block;
-pub mod note;
 pub mod chrome;
 pub mod command_palette;
 pub mod grid;
 pub mod keybindings;
+pub mod note;
 pub mod session;
 pub mod settings_panel;
 pub mod sidebar;
