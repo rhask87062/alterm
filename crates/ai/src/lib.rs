@@ -154,13 +154,16 @@ fn anthropic_hardcoded_models() -> Vec<String> {
 /// is reused. Returns `None` on any network/HTTP/parse failure so the caller
 /// can fall back to the hardcoded set.
 async fn try_fetch_anthropic(base_url: &str, api_key: Option<&str>) -> Option<Vec<String>> {
+    let key = api_key?; // Anthropic requires a key; no key -> let the caller use the fallback.
     let url = format!("{}/models", base_url);
     let client = reqwest::Client::new();
-    let mut request = client.get(&url).header("anthropic-version", "2023-06-01");
-    if let Some(key) = api_key {
-        request = request.header("x-api-key", key);
-    }
-    let resp = request.send().await.ok()?;
+    let resp = client
+        .get(&url)
+        .header("anthropic-version", "2023-06-01")
+        .header("x-api-key", key)
+        .send()
+        .await
+        .ok()?;
     if !resp.status().is_success() {
         return None;
     }
