@@ -532,6 +532,11 @@ impl Alterm {
         &mut self.tabs[self.active_tab]
     }
 
+    // Model fetches are keyed by provider name and applied across all
+    // tabs' panes, so concurrent/stale fetches converge safely without an
+    // in-flight dedup set: a late result just matches the current panes
+    // for that provider (or none). (Supersedes the spec's models_inflight.)
+
     /// Dispatch a deduped, cache-first model-list refresh for every provider
     /// currently in use across all tabs.
     fn refresh_all_model_lists(&mut self) -> Task<Message> {
@@ -1661,13 +1666,22 @@ impl Alterm {
             Message::AIModelsFetched(provider, result) => {
                 match result {
                     Ok(models) => {
-                        self.model_cache.put(&provider, models.clone(), now_secs());
-                        ai::model_cache::save(&AppConfig::config_dir(), &self.model_cache);
                         self.for_ai_panes_with_provider(&provider, |state| {
-                            state.available_models = models.clone();
                             state.models_loading = false;
+                            // A successful but empty result must not wipe a usable list.
+                            if !models.is_empty() {
+                                state.available_models = models.clone();
+                            }
+                            // A success clears any prior error regardless.
                             state.models_error = None;
                         });
+                        // Only persist a non-empty list, so an empty/transient
+                        // success doesn't mask a good list or suppress the next
+                        // refresh for the TTL window.
+                        if !models.is_empty() {
+                            self.model_cache.put(&provider, models, now_secs());
+                            ai::model_cache::save(&AppConfig::config_dir(), &self.model_cache);
+                        }
                     }
                     Err(err) => {
                         let msg = err.user_message();

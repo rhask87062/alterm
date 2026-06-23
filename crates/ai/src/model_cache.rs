@@ -19,8 +19,10 @@ const CACHE_FILE: &str = "model-cache.json";
 /// One provider's cached model list and when it was fetched.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CachedProvider {
+    #[serde(default)]
     pub models: Vec<String>,
     /// Unix timestamp (seconds) the list was fetched.
+    #[serde(default)]
     pub fetched_at: u64,
 }
 
