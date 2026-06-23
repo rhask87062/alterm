@@ -41,6 +41,11 @@ pub struct AIChatState {
     pub available_models: Vec<String>,
     /// Whether we are currently fetching the model list.
     pub models_loading: bool,
+    /// Human-readable reason the last model fetch failed. Only surfaced in the
+    /// UI when there are no models to show.
+    pub models_error: Option<String>,
+    /// Whether the user opted into typing a custom model name.
+    pub custom_model_entry: bool,
 }
 
 impl AIChatState {
@@ -65,6 +70,8 @@ impl AIChatState {
             scroll_to_bottom: true,
             available_models: Vec::new(),
             models_loading: false,
+            models_error: None,
+            custom_model_entry: false,
         }
     }
 
@@ -137,5 +144,88 @@ impl AIChatState {
                 })
             })
             .collect()
+    }
+
+    /// Decide how the model selector should render, given current state.
+    /// A non-empty list always wins, so a background refresh never hides it.
+    pub fn selector_mode(&self) -> SelectorMode {
+        if self.custom_model_entry {
+            SelectorMode::Custom
+        } else if !self.available_models.is_empty() {
+            SelectorMode::List
+        } else if self.models_loading {
+            SelectorMode::Loading
+        } else if self.models_error.is_some() {
+            SelectorMode::Error
+        } else {
+            SelectorMode::Empty
+        }
+    }
+}
+
+/// Which UI the model selector should render. A pure function of state, so the
+/// branch logic is testable without rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectorMode {
+    /// Free-text custom model entry (user opted in).
+    Custom,
+    /// A dropdown of available models.
+    List,
+    /// A fetch is in flight and there's nothing cached to show yet.
+    Loading,
+    /// The last fetch failed and there's no cached list to fall back on.
+    Error,
+    /// Nothing available and nothing happening — caller should kick a fetch.
+    Empty,
+}
+
+#[cfg(test)]
+mod selector_tests {
+    use super::*;
+
+    fn state() -> AIChatState {
+        AIChatState::new("openai".to_string(), "gpt-4o".to_string())
+    }
+
+    #[test]
+    fn defaults_to_empty() {
+        assert_eq!(state().selector_mode(), SelectorMode::Empty);
+    }
+
+    #[test]
+    fn list_when_models_present() {
+        let mut s = state();
+        s.available_models = vec!["gpt-4o".into()];
+        assert_eq!(s.selector_mode(), SelectorMode::List);
+    }
+
+    #[test]
+    fn loading_when_empty_and_loading() {
+        let mut s = state();
+        s.models_loading = true;
+        assert_eq!(s.selector_mode(), SelectorMode::Loading);
+    }
+
+    #[test]
+    fn error_when_empty_and_failed() {
+        let mut s = state();
+        s.models_error = Some("No API key".into());
+        assert_eq!(s.selector_mode(), SelectorMode::Error);
+    }
+
+    #[test]
+    fn custom_overrides_everything() {
+        let mut s = state();
+        s.available_models = vec!["gpt-4o".into()];
+        s.custom_model_entry = true;
+        assert_eq!(s.selector_mode(), SelectorMode::Custom);
+    }
+
+    #[test]
+    fn list_wins_over_loading_when_cached() {
+        let mut s = state();
+        s.available_models = vec!["gpt-4o".into()];
+        s.models_loading = true; // background refresh in flight
+        assert_eq!(s.selector_mode(), SelectorMode::List);
     }
 }

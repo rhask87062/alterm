@@ -1,5 +1,5 @@
 use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Max delay between two clicks on the same tab to count as a double-click.
 const TAB_DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -247,6 +247,8 @@ struct Alterm {
     last_pane_click: Option<(pane_grid::Pane, Instant)>,
     /// Active terminal find-bar search, if open.
     search: Option<SearchState>,
+    /// Persisted per-provider model-list cache (see `ai::model_cache`).
+    model_cache: ai::model_cache::ModelCache,
 }
 
 /// What an in-progress inline rename is targeting.
@@ -259,6 +261,14 @@ enum RenameTarget {
 /// Widget id of the inline rename text field, so it can be focused on open.
 fn rename_input_id() -> WidgetId {
     WidgetId::from("tab-pane-rename-input".to_string())
+}
+
+/// Current unix time in whole seconds (0 if the clock is before the epoch).
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 #[derive(Clone, Copy)]
@@ -342,8 +352,9 @@ enum Message {
     AIStreamError(pane_grid::Pane, String),
     AIProviderChanged(pane_grid::Pane, String),
     AIModelChanged(pane_grid::Pane, String),
-    AIFetchModels(pane_grid::Pane),
-    AIModelsFetched(pane_grid::Pane, Vec<String>),
+    AIToggleCustomModel(pane_grid::Pane),
+    AIFetchModels(String, bool),
+    AIModelsFetched(String, Result<Vec<String>, ai::ModelFetchError>),
     AICopyMessage(String),
     TerminalSelected(String),
     // Right-click context menu on a terminal pane.
@@ -453,7 +464,26 @@ impl Alterm {
         let terminal_font_family: &'static str =
             Box::leak(config.appearance.font_family.clone().into_boxed_str());
 
-        let app = Alterm {
+        // Load the persisted model-list cache and seed every AI chat pane so
+        // its dropdown is populated instantly (before any network call).
+        let model_cache = ai::model_cache::load(&AppConfig::config_dir());
+        let mut tabs = tabs;
+        for tab in &mut tabs {
+            for (_pane, block) in tab.panes.iter_mut() {
+                if let Block::AIChat { state } = block {
+                    if state.available_models.is_empty() {
+                        let hit = model_cache.lookup(
+                            &state.provider_name,
+                            now_secs(),
+                            ai::model_cache::MODEL_CACHE_TTL_SECS,
+                        );
+                        state.available_models = hit.models;
+                    }
+                }
+            }
+        }
+
+        let mut app = Alterm {
             tabs,
             active_tab,
             palette: CommandPalette::new(),
@@ -472,6 +502,7 @@ impl Alterm {
             last_tab_click: None,
             last_pane_click: None,
             search: None,
+            model_cache,
         };
 
         // Request the native window handle from iced — fires WindowHandleReady.
@@ -485,7 +516,10 @@ impl Alterm {
             }
         });
 
-        (app, fetch_handle)
+        // Cache-first refresh of every provider in use (only hits the network
+        // where the cached list is missing or stale).
+        let refresh_models = app.refresh_all_model_lists();
+        (app, Task::batch([fetch_handle, refresh_models]))
     }
 
     /// Get a reference to the active tab.
@@ -496,6 +530,44 @@ impl Alterm {
     /// Get a mutable reference to the active tab.
     fn active_tab_mut(&mut self) -> &mut Tab {
         &mut self.tabs[self.active_tab]
+    }
+
+    // Model fetches are keyed by provider name and applied across all
+    // tabs' panes, so concurrent/stale fetches converge safely without an
+    // in-flight dedup set: a late result just matches the current panes
+    // for that provider (or none). (Supersedes the spec's models_inflight.)
+
+    /// Dispatch a deduped, cache-first model-list refresh for every provider
+    /// currently in use across all tabs.
+    fn refresh_all_model_lists(&mut self) -> Task<Message> {
+        let mut providers: Vec<String> = Vec::new();
+        for tab in &self.tabs {
+            for (_pane, block) in tab.panes.iter() {
+                if let Block::AIChat { state } = block {
+                    if !providers.contains(&state.provider_name) {
+                        providers.push(state.provider_name.clone());
+                    }
+                }
+            }
+        }
+        Task::batch(
+            providers
+                .into_iter()
+                .map(|p| Task::done(Message::AIFetchModels(p, false))),
+        )
+    }
+
+    /// Run `f` against every AI chat pane (across all tabs) whose provider matches.
+    fn for_ai_panes_with_provider(&mut self, provider: &str, mut f: impl FnMut(&mut workspace::AIChatState)) {
+        for tab in &mut self.tabs {
+            for (_pane, block) in tab.panes.iter_mut() {
+                if let Block::AIChat { state } = block {
+                    if state.provider_name == provider {
+                        f(state);
+                    }
+                }
+            }
+        }
     }
 
     /// Move focus to the adjacent pane in the given direction.
@@ -1367,12 +1439,12 @@ impl Alterm {
                     _ => "unknown".to_string(),
                 };
 
-                let block = Block::new_ai_chat(provider_name, model_name);
+                let block = Block::new_ai_chat(provider_name.clone(), model_name);
                 let new_pane = self.add_window(block);
                 let focus_task = widget_focus(WidgetId::from(
                     format!("ai-chat-input-{:?}", new_pane),
                 ));
-                let fetch_task = self.update(Message::AIFetchModels(new_pane));
+                let fetch_task = self.update(Message::AIFetchModels(provider_name, false));
                 return Task::batch([focus_task, fetch_task]);
             }
 
@@ -1460,12 +1532,13 @@ impl Alterm {
                 let new_model = self.config.ai.provider_model(&provider);
                 let tab = self.active_tab_mut();
                 if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
-                    state.provider_name = provider;
+                    state.provider_name = provider.clone();
                     state.model_name = new_model;
                     state.available_models.clear();
+                    state.models_error = None;
                 }
-                // Trigger a model list fetch for the new provider.
-                return self.update(Message::AIFetchModels(pane));
+                // Force a fresh model list for the newly selected provider.
+                return self.update(Message::AIFetchModels(provider, true));
             }
             Message::AIModelChanged(pane, model) => {
                 let tab = self.active_tab_mut();
@@ -1473,45 +1546,58 @@ impl Alterm {
                     state.model_name = model;
                 }
             }
-            Message::AIFetchModels(pane) => {
-                // Look up provider info for the AI chat pane.
-                let (provider_name, base_url, api_key) = {
-                    let tab = self.active_tab();
-                    if let Some(Block::AIChat { state }) = tab.panes.get(pane) {
-                        let pname = state.provider_name.clone();
-                        let entry = self.config.ai.providers.get(&pname);
-                        let base_url = entry
-                            .map(|e| e.resolved_base_url(&pname))
-                            .unwrap_or_else(|| {
-                                alterm_config::default_base_url(&pname)
-                                    .unwrap_or("")
-                                    .to_string()
-                            });
-                        let api_key = entry.and_then(|e| e.api_key.clone());
-                        (pname, base_url, api_key)
-                    } else {
-                        return Task::none();
-                    }
-                };
-
-                // Mark as loading.
+            Message::AIToggleCustomModel(pane) => {
                 let tab = self.active_tab_mut();
                 if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
-                    state.models_loading = true;
+                    state.custom_model_entry = !state.custom_model_entry;
+                }
+            }
+            Message::AIFetchModels(provider, force) => {
+                if provider.is_empty() {
+                    return Task::none();
                 }
 
-                // Spawn async fetch.
-                let ptype = provider_name.clone();
+                // Seed matching panes from cache so the dropdown shows instantly.
+                let hit = self.model_cache.lookup(
+                    &provider,
+                    now_secs(),
+                    ai::model_cache::MODEL_CACHE_TTL_SECS,
+                );
+                let seed = hit.models.clone();
+                self.for_ai_panes_with_provider(&provider, |state| {
+                    if state.available_models.is_empty() {
+                        state.available_models = seed.clone();
+                    }
+                });
+
+                if !force && !hit.needs_refresh {
+                    // Cache is fresh and we spawn no fetch — make sure no stale
+                    // spinner lingers on these panes.
+                    self.for_ai_panes_with_provider(&provider, |state| {
+                        state.models_loading = false;
+                    });
+                    return Task::none();
+                }
+
+                // Mark matching panes as loading.
+                self.for_ai_panes_with_provider(&provider, |state| {
+                    state.models_loading = true;
+                    state.models_error = None;
+                });
+
+                // Resolve connection details from config.
+                let entry = self.config.ai.providers.get(&provider);
+                let base_url = entry
+                    .map(|e| e.resolved_base_url(&provider))
+                    .unwrap_or_else(|| {
+                        alterm_config::default_base_url(&provider).unwrap_or("").to_string()
+                    });
+                let api_key = entry.and_then(|e| e.api_key.clone());
+
+                let p = provider.clone();
                 return Task::perform(
-                    async move {
-                        ai::fetch_models(
-                            &base_url,
-                            api_key.as_deref(),
-                            &ptype,
-                        )
-                        .await
-                    },
-                    move |models| Message::AIModelsFetched(pane, models),
+                    async move { ai::fetch_models(&base_url, api_key.as_deref(), &p).await },
+                    move |result| Message::AIModelsFetched(provider.clone(), result),
                 );
             }
             Message::AICopyMessage(content) => {
@@ -1577,13 +1663,36 @@ impl Alterm {
                     }
                 }
             }
-            Message::AIModelsFetched(pane, models) => {
-                let tab = self.active_tab_mut();
-                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
-                    state.models_loading = false;
-                    state.available_models = models;
-                    // If the current model is not in the list, and we have models, keep it
-                    // (the user may have typed a custom model).
+            Message::AIModelsFetched(provider, result) => {
+                match result {
+                    Ok(models) => {
+                        self.for_ai_panes_with_provider(&provider, |state| {
+                            state.models_loading = false;
+                            // A successful but empty result must not wipe a usable list.
+                            if !models.is_empty() {
+                                state.available_models = models.clone();
+                            }
+                            // A success clears any prior error regardless.
+                            state.models_error = None;
+                        });
+                        // Only persist a non-empty list, so an empty/transient
+                        // success doesn't mask a good list or suppress the next
+                        // refresh for the TTL window.
+                        if !models.is_empty() {
+                            self.model_cache.put(&provider, models, now_secs());
+                            ai::model_cache::save(&AppConfig::config_dir(), &self.model_cache);
+                        }
+                    }
+                    Err(err) => {
+                        let msg = err.user_message();
+                        self.for_ai_panes_with_provider(&provider, |state| {
+                            state.models_loading = false;
+                            // Only surface the error if there's nothing to show.
+                            if state.available_models.is_empty() {
+                                state.models_error = Some(msg.clone());
+                            }
+                        });
+                    }
                 }
             }
 
@@ -2535,36 +2644,68 @@ fn ai_chat_view<'a>(
         move |s| Message::AIProviderChanged(pane, s),
     ).text_size(11).padding(Padding::from([2, 6]));
 
-    let model_selector: Element<'a, Message> = if !state.available_models.is_empty() {
-        // Dropdown with fetched models
-        let mut models = state.available_models.clone();
-        // Ensure current model is in the list even if not returned by API
-        if !state.model_name.is_empty() && !models.contains(&state.model_name) {
-            models.insert(0, state.model_name.clone());
+    let model_selector: Element<'a, Message> = match state.selector_mode() {
+        workspace::SelectorMode::Custom => row![
+            text_input("model name", &state.model_name)
+                .on_input(move |v| Message::AIModelChanged(pane, v))
+                .size(11)
+                .padding(Padding::from([2, 6]))
+                .width(Length::Fixed(180.0)),
+            button(text("↩ list").size(10))
+                .on_press(Message::AIToggleCustomModel(pane))
+                .padding(Padding::from([2, 6])),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center)
+        .into(),
+
+        workspace::SelectorMode::List => {
+            let mut models = state.available_models.clone();
+            // Keep the current model selectable even if the API didn't list it.
+            if !state.model_name.is_empty() && !models.contains(&state.model_name) {
+                models.insert(0, state.model_name.clone());
+            }
+            pick_list(
+                models,
+                Some(state.model_name.clone()),
+                move |selected| Message::AIModelChanged(pane, selected),
+            )
+            .text_size(11)
+            .padding(Padding::from([2, 6]))
+            .width(Length::Fixed(220.0))
+            .into()
         }
-        pick_list(
-            models,
-            Some(state.model_name.clone()),
-            move |selected| Message::AIModelChanged(pane, selected),
-        )
-        .text_size(11)
-        .padding(Padding::from([2, 6]))
-        .width(Length::Fixed(220.0))
-        .into()
-    } else if state.models_loading {
-        container(
-            text("Loading models...").size(10).color(Color::from_rgb(0.50, 0.50, 0.55))
+
+        workspace::SelectorMode::Loading => container(
+            text("Loading models…").size(10).color(Color::from_rgb(0.50, 0.50, 0.55)),
         )
         .padding(Padding::from([4, 8]))
-        .into()
-    } else {
-        // Fallback: text input if fetch failed or hasn't run yet
-        text_input("model name", &state.model_name)
-            .on_input(move |v| Message::AIModelChanged(pane, v))
-            .size(11)
-            .padding(Padding::from([2, 6]))
-            .width(Length::Fixed(180.0))
+        .into(),
+
+        workspace::SelectorMode::Error => {
+            let reason = state.models_error.clone().unwrap_or_default();
+            let provider = state.provider_name.clone();
+            row![
+                text(format!("⚠ {reason}")).size(10).color(Color::from_rgb(0.95, 0.55, 0.35)),
+                button(text("Retry").size(10))
+                    .on_press(Message::AIFetchModels(provider, true))
+                    .padding(Padding::from([2, 6])),
+                button(text("custom").size(10))
+                    .on_press(Message::AIToggleCustomModel(pane))
+                    .padding(Padding::from([2, 6])),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center)
             .into()
+        }
+
+        workspace::SelectorMode::Empty => {
+            let provider = state.provider_name.clone();
+            button(text("Load models").size(10))
+                .on_press(Message::AIFetchModels(provider, true))
+                .padding(Padding::from([2, 6]))
+                .into()
+        }
     };
 
     let context_text = if has_terminal_context {
