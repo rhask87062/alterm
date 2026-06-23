@@ -90,6 +90,26 @@ pub fn provider_requires_key(provider: &str) -> bool {
     matches!(provider, "openai" | "anthropic" | "google" | "xai")
 }
 
+/// Substrings (lowercased compare) that mark a model id as NOT a text-chat
+/// model — embeddings, speech, image/audio generation, moderation, etc.
+/// Deliberately conservative: does NOT include `audio`/`vision`/`realtime`,
+/// which are chat-capable multimodal models.
+const NON_CHAT_MARKERS: &[&str] = &[
+    "embed", "tts", "whisper", "dall-e", "dalle", "moderation",
+    "rerank", "clip", "stable-diffusion", "sora", "image-", "-image",
+];
+
+/// True if `id` looks like a text-chat model (not embeddings/speech/image/etc.).
+pub fn is_chat_model(id: &str) -> bool {
+    let lower = id.to_lowercase();
+    !NON_CHAT_MARKERS.iter().any(|m| lower.contains(m))
+}
+
+/// Drop non-chat models, preserving order.
+pub fn filter_chat_models(models: Vec<String>) -> Vec<String> {
+    models.into_iter().filter(|m| is_chat_model(m)).collect()
+}
+
 /// Fetch available models from a provider's API.
 ///
 /// - Key-requiring providers with no key → `Err(MissingApiKey)` (no network call).
@@ -149,7 +169,7 @@ async fn fetch_openai_compatible_models(
     }
     let body: serde_json::Value =
         response.json().await.map_err(|_| ModelFetchError::BadResponse)?;
-    Ok(parse_openai_models(&body))
+    Ok(filter_chat_models(parse_openai_models(&body)))
 }
 
 /// Extract model ids from an OpenAI-style `{ "data": [ { "id": ... } ] }` body.
@@ -186,7 +206,7 @@ async fn fetch_gemini_models(
     }
     let body: serde_json::Value =
         response.json().await.map_err(|_| ModelFetchError::BadResponse)?;
-    Ok(parse_gemini_models(&body))
+    Ok(filter_chat_models(parse_gemini_models(&body)))
 }
 
 /// Extract model names from a Gemini `{ "models": [ { "name": "models/..." } ] }`
@@ -254,5 +274,39 @@ mod model_listing_tests {
     fn parses_gemini_missing_models_is_empty() {
         let body = serde_json::json!({ "someOtherField": true });
         assert!(parse_gemini_models(&body).is_empty());
+    }
+
+    #[test]
+    fn keeps_chat_models() {
+        for id in [
+            "gpt-4o", "o1", "o3-mini", "claude-sonnet-4-5-20250929",
+            "llama3.2", "gemini-2.0-flash", "grok-2", "mixtral-8x7b",
+            "gpt-4o-audio-preview", "gpt-4-vision-preview", "gpt-4o-realtime-preview",
+        ] {
+            assert!(is_chat_model(id), "{id} should be kept");
+        }
+    }
+
+    #[test]
+    fn drops_non_chat_models() {
+        for id in [
+            "text-embedding-3-small", "text-embedding-ada-002", "nomic-embed-text",
+            "whisper-1", "tts-1", "tts-1-hd", "dall-e-3", "gpt-image-1",
+            "text-moderation-latest", "rerank-english-v3.0", "clip-vit-base",
+            "stable-diffusion-xl", "sora",
+        ] {
+            assert!(!is_chat_model(id), "{id} should be dropped");
+        }
+    }
+
+    #[test]
+    fn filter_preserves_order_of_kept() {
+        let input = vec![
+            "gpt-4o".to_string(),
+            "text-embedding-3-small".to_string(),
+            "o1".to_string(),
+            "whisper-1".to_string(),
+        ];
+        assert_eq!(filter_chat_models(input), vec!["gpt-4o".to_string(), "o1".to_string()]);
     }
 }
