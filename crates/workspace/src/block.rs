@@ -13,6 +13,7 @@ use browser::BrowserState;
 use preview::PreviewState;
 
 use crate::ai_chat::AIChatState;
+use crate::note::NoteState;
 use crate::settings_panel::SettingsState;
 
 /// How many ticks before the cursor blink state toggles.
@@ -53,6 +54,9 @@ pub enum Block {
     },
     Preview {
         state: PreviewState,
+    },
+    Note {
+        state: NoteState,
     },
     HotkeyInfo,
 }
@@ -135,6 +139,16 @@ impl Block {
         }
     }
 
+    /// Create a new, empty note block.
+    pub fn new_note() -> Self {
+        Block::Note { state: NoteState::new() }
+    }
+
+    /// Create a note block seeded with existing text (session restore).
+    pub fn new_note_with(text: &str) -> Self {
+        Block::Note { state: NoteState::with_text(text) }
+    }
+
     /// Create a new hotkey info reference pane (no state needed).
     pub fn new_hotkey_info() -> Self {
         Block::HotkeyInfo
@@ -177,6 +191,7 @@ impl Block {
                 block
             }
             BlockState::Preview { path } => Block::new_preview(&path.to_string_lossy()),
+            BlockState::Note { content } => Block::new_note_with(content),
             BlockState::Settings => Block::new_settings(config.clone()),
             BlockState::HotkeyInfo => Block::new_hotkey_info(),
         }
@@ -239,6 +254,9 @@ impl Block {
             Block::Preview { .. } => {
                 // Preview state is driven by navigation messages.
             }
+            Block::Note { .. } => {
+                // Note state is driven by user editor actions.
+            }
             Block::HotkeyInfo => {
                 // Static reference pane — nothing to tick.
             }
@@ -260,6 +278,7 @@ impl Block {
             Block::Settings { .. } => {}
             Block::Browser { .. } => {}
             Block::Preview { .. } => {}
+            Block::Note { .. } => {}
             Block::HotkeyInfo => {}
         }
     }
@@ -279,6 +298,7 @@ impl Block {
             Block::Settings { .. } => {}
             Block::Browser { .. } => {}
             Block::Preview { .. } => {}
+            Block::Note { .. } => {}
             Block::HotkeyInfo => {}
         }
         self.refresh_cache();
@@ -295,6 +315,7 @@ impl Block {
             Block::Settings { .. } => (0, 0),
             Block::Browser { .. } => (0, 0),
             Block::Preview { .. } => (0, 0),
+            Block::Note { .. } => (0, 0),
             Block::HotkeyInfo => (0, 0),
         }
     }
@@ -318,6 +339,7 @@ impl Block {
                     .unwrap_or_else(|| state.path.display().to_string());
                 format!("Preview — {name}")
             }
+            Block::Note { .. } => "Note".to_string(),
             Block::HotkeyInfo => "Keyboard Shortcuts".to_string(),
         }
     }
@@ -347,6 +369,11 @@ impl Block {
         matches!(self, Block::Preview { .. })
     }
 
+    /// Whether this block is a note pane.
+    pub fn is_note(&self) -> bool {
+        matches!(self, Block::Note { .. })
+    }
+
     /// Build a render-ready grid from the block's current terminal state.
     ///
     /// Returns a cached grid when nothing has changed since the last render.
@@ -366,7 +393,7 @@ impl Block {
                 }
                 RenderGrid::from_terminal_with_cursor(state, palette, *cursor_visible, light_mode)
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::Note { .. } | Block::HotkeyInfo => {
                 // Non-terminal blocks don't use the terminal canvas.
                 RenderGrid {
                     cells: Vec::new(),
@@ -396,7 +423,7 @@ impl Block {
                     *dirty = false;
                 }
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::Note { .. } | Block::HotkeyInfo => {}
         }
     }
 
@@ -407,7 +434,7 @@ impl Block {
                 *cursor_visible = true;
                 *blink_count = 0;
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::Note { .. } | Block::HotkeyInfo => {}
         }
     }
 
@@ -439,7 +466,7 @@ impl Block {
                 state.scroll(lines);
                 *dirty = true;
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => {}
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::Note { .. } | Block::HotkeyInfo => {}
         }
         self.refresh_cache();
     }
@@ -477,7 +504,7 @@ impl Block {
                     Some(output.join("\n"))
                 }
             }
-            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::HotkeyInfo => None,
+            Block::AIChat { .. } | Block::Settings { .. } | Block::Browser { .. } | Block::Preview { .. } | Block::Note { .. } | Block::HotkeyInfo => None,
         }
     }
 
@@ -503,6 +530,7 @@ impl Block {
                 input: state.input.clone(),
             },
             Block::Preview { state } => BlockState::Preview { path: state.path.clone() },
+            Block::Note { state } => BlockState::Note { content: state.text() },
             Block::Settings { .. } => BlockState::Settings,
             Block::HotkeyInfo => BlockState::HotkeyInfo,
         }

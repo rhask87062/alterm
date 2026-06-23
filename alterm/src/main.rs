@@ -402,6 +402,8 @@ enum Message {
     // Session persistence
     SaveSession,
     WindowCloseRequested,
+    // Note pane
+    NoteEdited(pane_grid::Pane, iced::widget::text_editor::Action),
 }
 
 impl Alterm {
@@ -1403,6 +1405,10 @@ impl Alterm {
                 SidebarAction::NewPreview => {
                     return self.update(Message::OpenPreview);
                 }
+                SidebarAction::NewNote => {
+                    self.add_window(Block::new_note());
+                    return Task::none();
+                }
                 SidebarAction::OpenSettings => {
                     return self.update(Message::OpenSettings);
                 }
@@ -1561,6 +1567,12 @@ impl Alterm {
                 let tab = self.active_tab_mut();
                 if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
                     state.custom_model_entry = !state.custom_model_entry;
+                }
+            }
+            Message::NoteEdited(pane, action) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Note { state }) = tab.panes.get_mut(pane) {
+                    state.perform(action);
                 }
             }
             Message::AIFetchModels(provider, force) => {
@@ -2255,6 +2267,9 @@ impl Alterm {
                     }
                     Block::Preview { state } => {
                         preview_view(pane, state)
+                    }
+                    Block::Note { state } => {
+                        note_view(pane, state)
                     }
                     Block::HotkeyInfo => {
                         hotkey_info_view(&current_theme)
@@ -3785,6 +3800,22 @@ fn preview_view<'a>(
             },
             ..Default::default()
         })
+        .into()
+}
+
+// ---------------------------------------------------------------------------
+// Note view
+// ---------------------------------------------------------------------------
+
+/// Build the note pane view: a full-height plain-text editor.
+fn note_view<'a>(
+    pane: pane_grid::Pane,
+    state: &'a workspace::NoteState,
+) -> Element<'a, Message> {
+    iced::widget::text_editor(&state.content)
+        .on_action(move |action| Message::NoteEdited(pane, action))
+        .height(Length::Fill)
+        .padding(8)
         .into()
 }
 

@@ -18,6 +18,8 @@ pub enum SidebarAction {
     NewBrowser,
     /// Split the focused pane with a new file preview.
     NewPreview,
+    /// Split the focused pane with a new note pad.
+    NewNote,
     /// Open the settings panel in a pane.
     OpenSettings,
     /// Show the keyboard shortcuts reference pane.
@@ -66,6 +68,14 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         ),
         tip_text(Action::NewPreview),
     );
+    let note_btn = with_tooltip(
+        sidebar_svg_button(
+            &theme_svg(include_bytes!("../../../assets/icons/sidebar/note.svg"), light_mode),
+            Some(map(SidebarAction::NewNote)),
+            btn_size,
+        ),
+        "New note".to_string(),
+    );
     let settings_btn = with_tooltip(
         sidebar_svg_button(
             &theme_svg(include_bytes!("../../../assets/icons/sidebar/settings-svgrepo-com.svg"), light_mode),
@@ -98,7 +108,7 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
         tip_text(Action::ToggleTheme),
     );
 
-    let top_buttons = column![terminal_btn, ai_btn, web_btn, preview_btn, settings_btn]
+    let top_buttons = column![terminal_btn, ai_btn, web_btn, preview_btn, note_btn, settings_btn]
         .spacing(4)
         .align_x(iced::Alignment::Center);
 
