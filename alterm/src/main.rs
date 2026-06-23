@@ -1566,7 +1566,12 @@ impl Alterm {
                 });
 
                 if !force && !hit.needs_refresh {
-                    return Task::none(); // cache still fresh — no network call
+                    // Cache is fresh and we spawn no fetch — make sure no stale
+                    // spinner lingers on these panes.
+                    self.for_ai_panes_with_provider(&provider, |state| {
+                        state.models_loading = false;
+                    });
+                    return Task::none();
                 }
 
                 // Mark matching panes as loading.
