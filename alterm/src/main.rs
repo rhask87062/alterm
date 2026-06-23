@@ -3826,9 +3826,44 @@ fn note_view<'a>(
         .padding(8);
 
     scrollable(editor)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(8.0)
+                .scroller_width(6.0)
+                .margin(2.0),
+        ))
+        .style(note_scrollbar_style)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+/// A subtle scrollbar for the note pane: no visible track, a narrow
+/// semi-transparent thumb that's faint at rest and a bit more opaque while
+/// hovered or dragged. Theme-aware (uses the foreground color at low alpha).
+fn note_scrollbar_style(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
+    let palette = theme.extended_palette();
+    let active = matches!(
+        status,
+        scrollable::Status::Hovered { is_vertical_scrollbar_hovered: true, .. }
+            | scrollable::Status::Dragged { is_vertical_scrollbar_dragged: true, .. }
+    );
+    let alpha = if active { 0.6 } else { 0.35 };
+    let rail = scrollable::Rail {
+        background: None,
+        border: Border::default(),
+        scroller: scrollable::Scroller {
+            background: Background::Color(palette.background.base.text.scale_alpha(alpha)),
+            border: Border { radius: 3.0.into(), ..Default::default() },
+        },
+    };
+    scrollable::Style {
+        container: iced::widget::container::Style::default(),
+        vertical_rail: rail,
+        horizontal_rail: rail,
+        gap: None,
+        auto_scroll: scrollable::default(theme, status).auto_scroll,
+    }
 }
 
 /// Format a file size in human-readable form.
