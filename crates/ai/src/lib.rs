@@ -117,7 +117,7 @@ pub fn filter_chat_models(models: Vec<String>) -> Vec<String> {
 /// Fetch available models from a provider's API.
 ///
 /// - Key-requiring providers with no key → `Err(MissingApiKey)` (no network call).
-/// - **Anthropic**: no listing endpoint — returns a hardcoded set.
+/// - **Anthropic**: `GET {base_url}/models` (x-api-key + anthropic-version), hardcoded fallback.
 /// - **Gemini** (`google`): `GET {base_url}/models?key={key}`.
 /// - **OpenAI-compatible** (openai, xai, lmstudio, ollama): `GET {base_url}/models`.
 pub async fn fetch_models(
@@ -130,7 +130,7 @@ pub async fn fetch_models(
         return Err(ModelFetchError::MissingApiKey);
     }
     match provider_type {
-        "anthropic" => Ok(anthropic_hardcoded_models()),
+        "anthropic" => Ok(fetch_anthropic_models(base_url, api_key).await),
         "google" => fetch_gemini_models(base_url, api_key).await,
         _ => fetch_openai_compatible_models(base_url, api_key).await,
     }
@@ -147,6 +147,34 @@ fn anthropic_hardcoded_models() -> Vec<String> {
         "claude-3-sonnet-20240229".to_string(),
         "claude-3-haiku-20240307".to_string(),
     ]
+}
+
+/// Fetch Anthropic's model list live. Anthropic's `GET /v1/models` returns an
+/// OpenAI-shaped `{ "data": [ { "id": ... } ] }` body, so `parse_openai_models`
+/// is reused. Returns `None` on any network/HTTP/parse failure so the caller
+/// can fall back to the hardcoded set.
+async fn try_fetch_anthropic(base_url: &str, api_key: Option<&str>) -> Option<Vec<String>> {
+    let url = format!("{}/models", base_url);
+    let client = reqwest::Client::new();
+    let mut request = client.get(&url).header("anthropic-version", "2023-06-01");
+    if let Some(key) = api_key {
+        request = request.header("x-api-key", key);
+    }
+    let resp = request.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    Some(filter_chat_models(parse_openai_models(&body)))
+}
+
+/// Anthropic models: live list when reachable and non-empty, else the
+/// hardcoded fallback. Always yields a (filtered) list — never an error.
+async fn fetch_anthropic_models(base_url: &str, api_key: Option<&str>) -> Vec<String> {
+    match try_fetch_anthropic(base_url, api_key).await {
+        Some(models) if !models.is_empty() => models,
+        _ => filter_chat_models(anthropic_hardcoded_models()),
+    }
 }
 
 fn status_to_error(status: u16) -> ModelFetchError {
@@ -312,5 +340,13 @@ mod model_listing_tests {
             "whisper-1".to_string(),
         ];
         assert_eq!(filter_chat_models(input), vec!["gpt-4o".to_string(), "o1".to_string()]);
+    }
+
+    #[test]
+    fn anthropic_fallback_is_nonempty_and_all_chat() {
+        let fallback = filter_chat_models(anthropic_hardcoded_models());
+        assert!(!fallback.is_empty());
+        // None of the hardcoded ids should be filtered out as non-chat.
+        assert_eq!(fallback.len(), anthropic_hardcoded_models().len());
     }
 }
