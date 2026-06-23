@@ -1,6 +1,5 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
-import TerminalDemo from "../components/TerminalDemo.astro";
 import {
   SITE,
   STATS,
@@ -21,8 +20,12 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
     <div class="container hero-grid">
       <div class="hero-copy">
         <p class="eyebrow reveal">GPU terminal workspace · built in Rust</p>
-        <h1 class="reveal" data-delay="60">
-          The <span class="gradient-text">alternative</span> terminal.
+        <h1 class="hero-title">
+          <span class="w" style="--i: 0"><span>The</span></span>
+          <span class="w" style="--i: 1"
+            ><span class="gradient-text gradient-flow">alternative</span></span
+          >
+          <span class="w" style="--i: 2"><span>terminal.</span></span>
         </h1>
         <p class="lead reveal" data-delay="120">
           Alterm pairs the workspace UX of WaveTerm — tiling blocks, AI chat, an embedded
@@ -51,8 +54,23 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
         </p>
       </div>
 
-      <div class="hero-demo">
-        <TerminalDemo />
+      <div class="hero-demo reveal" data-reveal="right" data-delay="120">
+        <div class="hero-tilt">
+          <div class="hero-shot">
+            <picture>
+              <source srcset={url("/shots/split-4.webp")} type="image/webp" />
+              <img
+                src={url("/shots/split-4.png")}
+                width="1600"
+                height="845"
+                alt="Alterm in a four-way tiling split — file browser, image preview, a terminal pane showing the ALTERM ascii banner, and an embedded browser on google.com, all in the dark purple theme."
+                decoding="async"
+                fetchpriority="high"
+              />
+            </picture>
+            <span class="hero-glare" aria-hidden="true"></span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -63,7 +81,7 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
       {
         STATS.map((s) => (
           <div class="stat">
-            <span class="stat-value">{s.value}</span>
+            <span class="stat-value" data-counter={s.value}>{s.value}</span>
             <span class="stat-label">{s.label}</span>
             {s.note && <span class="stat-note">{s.note}</span>}
           </div>
@@ -138,12 +156,12 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
   <!-- ================= AI ================= -->
   <section id="ai" class="ai">
     <div class="container ai-grid">
-      <div class="ai-copy reveal">
+      <div class="ai-copy reveal" data-reveal="left">
         <p class="eyebrow">Intelligence, in context</p>
         <h2 class="h-section">AI that can <span class="gradient-text">see your terminal</span>.</h2>
         <p class="lead">
-          The chat block reads your panes' output, so help is grounded in what's actually on
-          screen — not a guess. Proposed actions always wait for your confirmation.
+          The chat block reads your focused terminal's output, so help is grounded in what's
+          actually on screen — not a guess. Replies stream live from the provider of your choice.
         </p>
         <ul class="ai-context">
           {
@@ -160,7 +178,7 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
         </ul>
       </div>
 
-      <aside class="ai-providers reveal" data-delay="120">
+      <aside class="ai-providers reveal" data-reveal="right" data-delay="120">
         <p class="prov-head">Bring your own provider</p>
         <div class="prov-list">
           {
@@ -184,22 +202,36 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
   <section class="gallery">
     <div class="container">
       <header class="sec-head center reveal">
-        <p class="eyebrow">See it in motion</p>
-        <h2 class="h-section">Screenshots, <span class="gradient-text">incoming</span>.</h2>
+        <p class="eyebrow">See it in action</p>
+        <h2 class="h-section">One workspace, <span class="gradient-text">any split</span>.</h2>
         <p class="lead">
-          Alterm is in active Phase&nbsp;1 development. Real captures of the workspace land here as
-          features ship — the preview above is a faithful, stylized mock.
+          Real captures of Alterm today — tile as many panes as you need: terminals, a file
+          browser, image preview, an embedded web browser, and live settings.
         </p>
       </header>
       <div class="shots">
         {
-          ["Terminal", "Tiling split", "AI chat", "Browser pane"].map((label, i) => (
+          [
+            { src: "split-4", label: "Four-way split", caption: "Files · image preview · terminal · browser" },
+            { src: "split-5", label: "Five-way split", caption: "Adds a live settings panel" },
+            { src: "split-6", label: "Six-way split", caption: "Plus a keybindings reference pane" },
+          ].map((shot, i) => (
             <figure class={`shot reveal shot-${i}`} data-delay={(i % 2) * 80}>
-              <div class="shot-inner">
-                <span class="shot-scan" />
-                <span class="shot-label">{label}</span>
-                <span class="shot-soon">coming soon</span>
-              </div>
+              <picture>
+                <source srcset={url(`/shots/${shot.src}.webp`)} type="image/webp" />
+                <img
+                  src={url(`/shots/${shot.src}.png`)}
+                  width="1600"
+                  height="845"
+                  alt={`Alterm ${shot.label.toLowerCase()} — ${shot.caption}.`}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </picture>
+              <figcaption>
+                <span class="shot-label">{shot.label}</span>
+                <span class="shot-cap">{shot.caption}</span>
+              </figcaption>
             </figure>
           ))
         }
@@ -217,12 +249,14 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
       <ol class="timeline">
         {
           ROADMAP.map((r, i) => (
-            <li class={`tl-item reveal ${r.current ? "current" : ""}`} data-delay={i * 70}>
+            <li class={`tl-item reveal ${r.status}`} data-delay={i * 70}>
               <span class="tl-node" />
               <div class="tl-card">
                 <div class="tl-head">
                   <span class="tl-phase">{r.phase}</span>
-                  {r.current && <span class="tag tag-live">in progress</span>}
+                  {r.status === "done" && <span class="tag tag-live">shipped</span>}
+                  {r.status === "current" && <span class="tag tag-current">in progress</span>}
+                  {r.status === "upcoming" && <span class="tag tag-planned">planned</span>}
                 </div>
                 <h3>{r.name}</h3>
                 <p>{r.body}</p>
@@ -263,9 +297,96 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
     gap: clamp(32px, 5vw, 72px);
     align-items: center;
   }
-  .hero h1 {
+  /* Headline — each word clip-reveals up on load, staggered by --i */
+  .hero-title {
     font-size: clamp(2.7rem, 6.2vw, 4.9rem);
     margin: 0.25em 0 0.35em;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.26em;
+    line-height: 1.04;
+  }
+  .hero-title .w {
+    display: inline-flex;
+    overflow: hidden;
+    padding-block: 0.08em;
+  }
+  .hero-title .w > span {
+    display: inline-block;
+    transform: translateY(110%);
+    animation: word-rise 0.95s cubic-bezier(0.2, 0.85, 0.25, 1) both;
+    animation-delay: calc(0.15s + var(--i) * 0.1s);
+  }
+  @keyframes word-rise {
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  /* Hero screenshot — perspective stage, gentle float, pointer-driven 3D tilt + glare */
+  .hero-demo {
+    perspective: 1200px;
+  }
+  .hero-tilt {
+    transform-style: preserve-3d;
+    animation: hero-float 7s ease-in-out infinite;
+    will-change: transform;
+  }
+  .hero-shot {
+    position: relative;
+    border-radius: 16px;
+    padding: 1px;
+    transform-style: preserve-3d;
+    transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+    transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+    background: linear-gradient(160deg, rgba(249, 119, 255, 0.55), rgba(86, 0, 141, 0.25) 55%, transparent);
+    box-shadow:
+      0 0 0 1px rgba(249, 119, 255, 0.08),
+      0 30px 80px -30px rgba(86, 0, 141, 0.75),
+      0 8px 30px -12px rgba(0, 0, 0, 0.7);
+  }
+  /* While actively tracking the pointer, drop the easing so it follows 1:1. */
+  .hero-tilt.is-tilting .hero-shot {
+    transition: none;
+  }
+  .hero-shot::before {
+    content: "";
+    position: absolute;
+    inset: -16%;
+    z-index: -1;
+    background: radial-gradient(60% 55% at 65% 40%, rgba(249, 119, 255, 0.22), transparent 70%);
+    filter: blur(6px);
+    pointer-events: none;
+  }
+  .hero-shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 15px;
+  }
+  /* Specular sheen that tracks the cursor across the glass. */
+  .hero-glare {
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    background: radial-gradient(
+      circle at var(--gx, 50%) var(--gy, 50%),
+      rgba(255, 255, 255, 0.28),
+      rgba(255, 255, 255, 0) 45%
+    );
+    opacity: var(--go, 0);
+    mix-blend-mode: screen;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+  }
+  @keyframes hero-float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
   }
   .hero-cta {
     display: flex;
@@ -518,48 +639,51 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
   /* ---------- Gallery ---------- */
   .shots {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 18px;
   }
   .shot {
-    aspect-ratio: 16 / 10;
+    margin: 0;
     border-radius: var(--radius);
     border: 1px solid var(--line);
-    background: linear-gradient(135deg, var(--bg-elev), var(--bg));
+    background: var(--bg-elev);
     overflow: hidden;
     position: relative;
+    transition:
+      transform 0.3s ease,
+      border-color 0.3s ease,
+      box-shadow 0.3s ease;
   }
-  .shot-inner {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-content: center;
-    gap: 6px;
-    text-align: center;
+  .shot:hover {
+    transform: translateY(-4px);
+    border-color: rgba(249, 119, 255, 0.4);
+    box-shadow: 0 20px 50px -24px rgba(86, 0, 141, 0.8);
   }
-  .shot-scan {
-    position: absolute;
-    inset: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      rgba(249, 119, 255, 0.04) 0px,
-      rgba(249, 119, 255, 0.04) 1px,
-      transparent 1px,
-      transparent 6px
-    );
-    mask-image: radial-gradient(circle at 50% 50%, black, transparent 75%);
+  .shot picture,
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .shot img {
+    border-bottom: 1px solid var(--line);
+  }
+  .shot figcaption {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 16px;
   }
   .shot-label {
     font-family: var(--font-display);
     font-weight: 800;
-    font-size: 1.3rem;
+    font-size: 1.05rem;
     color: var(--text);
   }
-  .shot-soon {
+  .shot-cap {
     font-family: var(--font-mono);
-    font-size: 0.7rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
     color: var(--text-faint);
   }
 
@@ -577,6 +701,16 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
     bottom: 6px;
     width: 2px;
     background: linear-gradient(180deg, var(--purple-core), var(--orchid), transparent);
+    transform-origin: top;
+  }
+  /* With JS, the spine "draws" downward when the timeline scrolls into view.
+     Without JS it's simply shown full (no gate applied). */
+  :global(html.js) .timeline::before {
+    transform: scaleY(0);
+    transition: transform 1.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  :global(html.js) .timeline.is-drawn::before {
+    transform: scaleY(1);
   }
   .tl-item {
     position: relative;
@@ -596,6 +730,18 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
     border-color: var(--accent);
     background: var(--accent);
     box-shadow: 0 0 0 4px rgba(249, 119, 255, 0.18), 0 0 16px var(--accent);
+    animation: node-pulse 2.4s ease-out infinite;
+  }
+  @keyframes node-pulse {
+    0% {
+      box-shadow: 0 0 0 3px rgba(249, 119, 255, 0.25), 0 0 16px var(--accent);
+    }
+    70% {
+      box-shadow: 0 0 0 13px rgba(249, 119, 255, 0), 0 0 16px var(--accent);
+    }
+    100% {
+      box-shadow: 0 0 0 3px rgba(249, 119, 255, 0), 0 0 16px var(--accent);
+    }
   }
   .tl-card {
     background: linear-gradient(180deg, var(--bg-elev), var(--bg));
@@ -605,6 +751,15 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
   }
   .tl-item.current .tl-card {
     border-color: rgba(249, 119, 255, 0.3);
+  }
+  /* Completed phases — solid node, no pulse. */
+  .tl-item.done .tl-node {
+    border-color: var(--orchid);
+    background: var(--orchid);
+    box-shadow: 0 0 10px -1px var(--orchid);
+  }
+  .tl-item.done .tl-card {
+    border-color: rgba(212, 80, 252, 0.2);
   }
   .tl-head {
     display: flex;
@@ -669,6 +824,11 @@ const iconUrl = (k: string) => url(`/icons/sidebar/${k}.svg`);
     .feat-grid,
     .aud-grid {
       grid-template-columns: 1fr 1fr;
+    }
+    .shots {
+      grid-template-columns: 1fr;
+      max-width: 720px;
+      margin-inline: auto;
     }
     .ai-grid {
       grid-template-columns: 1fr;
