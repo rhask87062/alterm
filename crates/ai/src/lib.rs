@@ -1,6 +1,7 @@
 pub mod anthropic;
 pub mod gemini;
 pub mod openai;
+pub mod model_cache;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
