@@ -2630,36 +2630,68 @@ fn ai_chat_view<'a>(
         move |s| Message::AIProviderChanged(pane, s),
     ).text_size(11).padding(Padding::from([2, 6]));
 
-    let model_selector: Element<'a, Message> = if !state.available_models.is_empty() {
-        // Dropdown with fetched models
-        let mut models = state.available_models.clone();
-        // Ensure current model is in the list even if not returned by API
-        if !state.model_name.is_empty() && !models.contains(&state.model_name) {
-            models.insert(0, state.model_name.clone());
+    let model_selector: Element<'a, Message> = match state.selector_mode() {
+        workspace::SelectorMode::Custom => row![
+            text_input("model name", &state.model_name)
+                .on_input(move |v| Message::AIModelChanged(pane, v))
+                .size(11)
+                .padding(Padding::from([2, 6]))
+                .width(Length::Fixed(180.0)),
+            button(text("↩ list").size(10))
+                .on_press(Message::AIToggleCustomModel(pane))
+                .padding(Padding::from([2, 6])),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center)
+        .into(),
+
+        workspace::SelectorMode::List => {
+            let mut models = state.available_models.clone();
+            // Keep the current model selectable even if the API didn't list it.
+            if !state.model_name.is_empty() && !models.contains(&state.model_name) {
+                models.insert(0, state.model_name.clone());
+            }
+            pick_list(
+                models,
+                Some(state.model_name.clone()),
+                move |selected| Message::AIModelChanged(pane, selected),
+            )
+            .text_size(11)
+            .padding(Padding::from([2, 6]))
+            .width(Length::Fixed(220.0))
+            .into()
         }
-        pick_list(
-            models,
-            Some(state.model_name.clone()),
-            move |selected| Message::AIModelChanged(pane, selected),
-        )
-        .text_size(11)
-        .padding(Padding::from([2, 6]))
-        .width(Length::Fixed(220.0))
-        .into()
-    } else if state.models_loading {
-        container(
-            text("Loading models...").size(10).color(Color::from_rgb(0.50, 0.50, 0.55))
+
+        workspace::SelectorMode::Loading => container(
+            text("Loading models…").size(10).color(Color::from_rgb(0.50, 0.50, 0.55)),
         )
         .padding(Padding::from([4, 8]))
-        .into()
-    } else {
-        // Fallback: text input if fetch failed or hasn't run yet
-        text_input("model name", &state.model_name)
-            .on_input(move |v| Message::AIModelChanged(pane, v))
-            .size(11)
-            .padding(Padding::from([2, 6]))
-            .width(Length::Fixed(180.0))
+        .into(),
+
+        workspace::SelectorMode::Error => {
+            let reason = state.models_error.clone().unwrap_or_default();
+            let provider = state.provider_name.clone();
+            row![
+                text(format!("⚠ {reason}")).size(10).color(Color::from_rgb(0.95, 0.55, 0.35)),
+                button(text("Retry").size(10))
+                    .on_press(Message::AIFetchModels(provider, true))
+                    .padding(Padding::from([2, 6])),
+                button(text("custom").size(10))
+                    .on_press(Message::AIToggleCustomModel(pane))
+                    .padding(Padding::from([2, 6])),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center)
             .into()
+        }
+
+        workspace::SelectorMode::Empty => {
+            let provider = state.provider_name.clone();
+            button(text("Load models").size(10))
+                .on_press(Message::AIFetchModels(provider, true))
+                .padding(Padding::from([2, 6]))
+                .into()
+        }
     };
 
     let context_text = if has_terminal_context {
