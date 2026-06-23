@@ -168,6 +168,9 @@ pub fn parse_openai_models(body: &serde_json::Value) -> Vec<String> {
     models
 }
 
+/// Precondition: callers must pass a non-blank `api_key`. `fetch_models`
+/// guarantees this for `google` via the `provider_requires_key` short-circuit;
+/// a `None` key here would build a keyless URL the API rejects.
 async fn fetch_gemini_models(
     base_url: &str,
     api_key: Option<&str>,
@@ -221,8 +224,8 @@ mod model_listing_tests {
     fn error_messages_are_actionable() {
         assert!(ModelFetchError::MissingApiKey.user_message().to_lowercase().contains("api key"));
         assert!(ModelFetchError::Unauthorized.user_message().to_lowercase().contains("key"));
-        assert!(!ModelFetchError::Unreachable.user_message().is_empty());
-        assert!(!ModelFetchError::BadResponse.user_message().is_empty());
+        assert!(ModelFetchError::Unreachable.user_message().to_lowercase().contains("reach"));
+        assert!(ModelFetchError::BadResponse.user_message().to_lowercase().contains("unexpected"));
     }
 
     #[test]
@@ -245,5 +248,11 @@ mod model_listing_tests {
             "models": [ {"name": "models/gemini-2.0-flash"}, {"name": "models/gemini-1.5-pro"} ]
         });
         assert_eq!(parse_gemini_models(&body), vec!["gemini-1.5-pro", "gemini-2.0-flash"]);
+    }
+
+    #[test]
+    fn parses_gemini_missing_models_is_empty() {
+        let body = serde_json::json!({ "someOtherField": true });
+        assert!(parse_gemini_models(&body).is_empty());
     }
 }
