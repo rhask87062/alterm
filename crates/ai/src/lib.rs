@@ -60,20 +60,54 @@ pub trait Provider: Send + Sync {
 // Model listing
 // ---------------------------------------------------------------------------
 
+/// Why a model-list fetch failed. Drives the UI's empty-state message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelFetchError {
+    /// Provider requires an API key and none is configured.
+    MissingApiKey,
+    /// Server rejected the credentials (401 / 403).
+    Unauthorized,
+    /// Could not reach the provider (network/connection error).
+    Unreachable,
+    /// Reached the provider but the response was not understood.
+    BadResponse,
+}
+
+impl ModelFetchError {
+    /// A short, human-readable reason suitable for the model selector.
+    pub fn user_message(&self) -> String {
+        match self {
+            ModelFetchError::MissingApiKey => "No API key — add one in Settings".to_string(),
+            ModelFetchError::Unauthorized => "API key rejected — check it in Settings".to_string(),
+            ModelFetchError::Unreachable => "Couldn't reach provider — is it online?".to_string(),
+            ModelFetchError::BadResponse => "Unexpected response from provider".to_string(),
+        }
+    }
+}
+
+/// Whether a provider needs an API key to list models / chat.
+pub fn provider_requires_key(provider: &str) -> bool {
+    matches!(provider, "openai" | "anthropic" | "google" | "xai")
+}
+
 /// Fetch available models from a provider's API.
 ///
-/// - **OpenAI-compatible** (openai, grok, lmstudio, ollama): `GET {base_url}/models`
-/// - **Anthropic**: No listing endpoint — returns a hardcoded set.
-/// - **Gemini**: `GET {base_url}/models?key={key}`
+/// - Key-requiring providers with no key → `Err(MissingApiKey)` (no network call).
+/// - **Anthropic**: no listing endpoint — returns a hardcoded set.
+/// - **Gemini** (`google`): `GET {base_url}/models?key={key}`.
+/// - **OpenAI-compatible** (openai, xai, lmstudio, ollama): `GET {base_url}/models`.
 pub async fn fetch_models(
     base_url: &str,
     api_key: Option<&str>,
     provider_type: &str,
-) -> Vec<String> {
+) -> Result<Vec<String>, ModelFetchError> {
+    let key_missing = api_key.map_or(true, |k| k.trim().is_empty());
+    if provider_requires_key(provider_type) && key_missing {
+        return Err(ModelFetchError::MissingApiKey);
+    }
     match provider_type {
-        "anthropic" => anthropic_hardcoded_models(),
+        "anthropic" => Ok(anthropic_hardcoded_models()),
         "google" => fetch_gemini_models(base_url, api_key).await,
-        // openai, grok, lmstudio, ollama — all OpenAI-compatible
         _ => fetch_openai_compatible_models(base_url, api_key).await,
     }
 }
@@ -91,10 +125,17 @@ fn anthropic_hardcoded_models() -> Vec<String> {
     ]
 }
 
+fn status_to_error(status: u16) -> ModelFetchError {
+    match status {
+        401 | 403 => ModelFetchError::Unauthorized,
+        _ => ModelFetchError::BadResponse,
+    }
+}
+
 async fn fetch_openai_compatible_models(
     base_url: &str,
     api_key: Option<&str>,
-) -> Vec<String> {
+) -> Result<Vec<String>, ModelFetchError> {
     let url = format!("{}/models", base_url);
     let client = reqwest::Client::new();
     let mut request = client.get(&url);
@@ -102,16 +143,17 @@ async fn fetch_openai_compatible_models(
         request = request.header("Authorization", format!("Bearer {key}"));
     }
 
-    let response = match request.send().await {
-        Ok(r) if r.status().is_success() => r,
-        _ => return Vec::new(),
-    };
+    let response = request.send().await.map_err(|_| ModelFetchError::Unreachable)?;
+    if !response.status().is_success() {
+        return Err(status_to_error(response.status().as_u16()));
+    }
+    let body: serde_json::Value =
+        response.json().await.map_err(|_| ModelFetchError::BadResponse)?;
+    Ok(parse_openai_models(&body))
+}
 
-    let body: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-
+/// Extract model ids from an OpenAI-style `{ "data": [ { "id": ... } ] }` body.
+pub fn parse_openai_models(body: &serde_json::Value) -> Vec<String> {
     let mut models: Vec<String> = body
         .get("data")
         .and_then(|d| d.as_array())
@@ -122,7 +164,6 @@ async fn fetch_openai_compatible_models(
                 .collect()
         })
         .unwrap_or_default();
-
     models.sort();
     models
 }
@@ -130,37 +171,79 @@ async fn fetch_openai_compatible_models(
 async fn fetch_gemini_models(
     base_url: &str,
     api_key: Option<&str>,
-) -> Vec<String> {
+) -> Result<Vec<String>, ModelFetchError> {
     let mut url = format!("{}/models", base_url);
     if let Some(key) = api_key {
         url.push_str(&format!("?key={key}"));
     }
-
     let client = reqwest::Client::new();
-    let response = match client.get(&url).send().await {
-        Ok(r) if r.status().is_success() => r,
-        _ => return Vec::new(),
-    };
+    let response = client.get(&url).send().await.map_err(|_| ModelFetchError::Unreachable)?;
+    if !response.status().is_success() {
+        return Err(status_to_error(response.status().as_u16()));
+    }
+    let body: serde_json::Value =
+        response.json().await.map_err(|_| ModelFetchError::BadResponse)?;
+    Ok(parse_gemini_models(&body))
+}
 
-    let body: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-
+/// Extract model names from a Gemini `{ "models": [ { "name": "models/..." } ] }`
+/// body, stripping the `models/` prefix.
+pub fn parse_gemini_models(body: &serde_json::Value) -> Vec<String> {
     let mut models: Vec<String> = body
         .get("models")
         .and_then(|m| m.as_array())
         .map(|arr| {
             arr.iter()
                 .filter_map(|item| item.get("name").and_then(|v| v.as_str()))
-                .map(|s| {
-                    // Strip "models/" prefix: "models/gemini-2.0-flash" → "gemini-2.0-flash"
-                    s.strip_prefix("models/").unwrap_or(s).to_string()
-                })
+                .map(|s| s.strip_prefix("models/").unwrap_or(s).to_string())
                 .collect()
         })
         .unwrap_or_default();
-
     models.sort();
     models
+}
+
+#[cfg(test)]
+mod model_listing_tests {
+    use super::*;
+
+    #[test]
+    fn requires_key_for_cloud_not_local() {
+        for p in ["openai", "anthropic", "google", "xai"] {
+            assert!(provider_requires_key(p), "{p} should require a key");
+        }
+        for p in ["ollama", "lmstudio"] {
+            assert!(!provider_requires_key(p), "{p} should not require a key");
+        }
+    }
+
+    #[test]
+    fn error_messages_are_actionable() {
+        assert!(ModelFetchError::MissingApiKey.user_message().to_lowercase().contains("api key"));
+        assert!(ModelFetchError::Unauthorized.user_message().to_lowercase().contains("key"));
+        assert!(!ModelFetchError::Unreachable.user_message().is_empty());
+        assert!(!ModelFetchError::BadResponse.user_message().is_empty());
+    }
+
+    #[test]
+    fn parses_openai_data_ids_sorted() {
+        let body = serde_json::json!({
+            "data": [ {"id": "gpt-4o"}, {"id": "gpt-3.5"}, {"id": "o1"} ]
+        });
+        assert_eq!(parse_openai_models(&body), vec!["gpt-3.5", "gpt-4o", "o1"]);
+    }
+
+    #[test]
+    fn parses_openai_missing_data_is_empty() {
+        let body = serde_json::json!({ "object": "list" });
+        assert!(parse_openai_models(&body).is_empty());
+    }
+
+    #[test]
+    fn parses_gemini_strips_models_prefix_sorted() {
+        let body = serde_json::json!({
+            "models": [ {"name": "models/gemini-2.0-flash"}, {"name": "models/gemini-1.5-pro"} ]
+        });
+        assert_eq!(parse_gemini_models(&body), vec!["gemini-1.5-pro", "gemini-2.0-flash"]);
+    }
 }
