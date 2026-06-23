@@ -126,6 +126,27 @@ impl AIConfig {
                 _ => "default".to_string(),
             })
     }
+
+    /// Set the model for a provider, creating the provider entry (with its
+    /// canonical base URL) if it doesn't exist yet. Unknown provider names are
+    /// ignored. Call `save` afterward to persist.
+    pub fn set_provider_model(&mut self, provider: &str, model: &str) {
+        let slot: Option<&mut Option<ProviderEntry>> = match provider {
+            "openai" => Some(&mut self.providers.openai),
+            "anthropic" => Some(&mut self.providers.anthropic),
+            "google" => Some(&mut self.providers.google),
+            "xai" => Some(&mut self.providers.xai),
+            "lmstudio" => Some(&mut self.providers.lmstudio),
+            "ollama" => Some(&mut self.providers.ollama),
+            _ => None,
+        };
+        if let Some(entry_slot) = slot {
+            match entry_slot {
+                Some(entry) => entry.model = model.to_string(),
+                None => *entry_slot = Some(ProviderEntry::for_provider(provider, model)),
+            }
+        }
+    }
 }
 
 impl Default for AIConfig {
@@ -408,5 +429,43 @@ max_tokens = 2048
         "#;
         let cfg: AppConfig = toml::from_str(toml).expect("parse");
         assert!(!cfg.session.restore);
+    }
+}
+
+#[cfg(test)]
+mod set_model_tests {
+    use super::*;
+
+    #[test]
+    fn updates_existing_entry_keeps_base_url() {
+        let mut cfg = AIConfig::default();
+        cfg.providers.openai = Some(ProviderEntry {
+            api_key: Some("k".into()),
+            base_url: Some("http://custom/v1".into()),
+            model: "old".into(),
+        });
+        cfg.set_provider_model("openai", "gpt-4o");
+        let e = cfg.providers.openai.as_ref().unwrap();
+        assert_eq!(e.model, "gpt-4o");
+        assert_eq!(e.base_url.as_deref(), Some("http://custom/v1")); // unchanged
+        assert_eq!(e.api_key.as_deref(), Some("k")); // unchanged
+    }
+
+    #[test]
+    fn creates_entry_when_missing_with_canonical_base_url() {
+        let mut cfg = AIConfig::default();
+        cfg.providers.openai = None;
+        cfg.set_provider_model("openai", "gpt-4o");
+        let e = cfg.providers.openai.as_ref().unwrap();
+        assert_eq!(e.model, "gpt-4o");
+        assert_eq!(e.base_url.as_deref(), default_base_url("openai"));
+    }
+
+    #[test]
+    fn unknown_provider_is_noop() {
+        let mut cfg = AIConfig::default();
+        let before = cfg.providers.openai.clone();
+        cfg.set_provider_model("bogus", "x"); // must not panic
+        assert_eq!(cfg.providers.openai.is_some(), before.is_some());
     }
 }
