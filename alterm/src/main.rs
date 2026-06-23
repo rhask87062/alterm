@@ -1541,9 +1541,20 @@ impl Alterm {
                 return self.update(Message::AIFetchModels(provider, true));
             }
             Message::AIModelChanged(pane, model) => {
-                let tab = self.active_tab_mut();
-                if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
-                    state.model_name = model;
+                // Update in-memory pane state and capture the provider so we can
+                // persist the choice to config.
+                let provider = {
+                    let tab = self.active_tab_mut();
+                    if let Some(Block::AIChat { state }) = tab.panes.get_mut(pane) {
+                        state.model_name = model.clone();
+                        state.provider_name.clone()
+                    } else {
+                        return Task::none();
+                    }
+                };
+                self.config.ai.set_provider_model(&provider, &model);
+                if let Err(e) = self.config.save(&AppConfig::config_path()) {
+                    log::error!("Failed to persist model selection: {e}");
                 }
             }
             Message::AIToggleCustomModel(pane) => {
