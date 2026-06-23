@@ -94,6 +94,10 @@ pub fn provider_requires_key(provider: &str) -> bool {
 /// model — embeddings, speech, image/audio generation, moderation, etc.
 /// Deliberately conservative: does NOT include `audio`/`vision`/`realtime`,
 /// which are chat-capable multimodal models.
+///
+/// Note: some markers are short substrings (e.g. `clip`) and could in theory
+/// match a future chat model id by coincidence; if a real chat model ever
+/// disappears from the dropdown, narrow the offending marker here.
 const NON_CHAT_MARKERS: &[&str] = &[
     "embed", "tts", "whisper", "dall-e", "dalle", "moderation",
     "rerank", "clip", "stable-diffusion", "sora", "image-", "-image",
@@ -291,7 +295,7 @@ mod model_listing_tests {
     fn drops_non_chat_models() {
         for id in [
             "text-embedding-3-small", "text-embedding-ada-002", "nomic-embed-text",
-            "whisper-1", "tts-1", "tts-1-hd", "dall-e-3", "gpt-image-1",
+            "whisper-1", "tts-1", "tts-1-hd", "dall-e-3", "gpt-image-1", "image-gen-v2",
             "text-moderation-latest", "rerank-english-v3.0", "clip-vit-base",
             "stable-diffusion-xl", "sora",
         ] {
