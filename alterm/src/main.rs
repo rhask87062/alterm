@@ -1406,8 +1406,10 @@ impl Alterm {
                     return self.update(Message::OpenPreview);
                 }
                 SidebarAction::NewNote => {
-                    self.add_window(Block::new_note());
-                    return Task::none();
+                    let pane = self.add_window(Block::new_note());
+                    // Focus the new note's editor so the user can type immediately
+                    // (an empty editor is short, so it's otherwise a small target).
+                    return widget_focus(WidgetId::from(format!("note-editor-{:?}", pane)));
                 }
                 SidebarAction::OpenSettings => {
                     return self.update(Message::OpenSettings);
@@ -3807,15 +3809,25 @@ fn preview_view<'a>(
 // Note view
 // ---------------------------------------------------------------------------
 
-/// Build the note pane view: a full-height plain-text editor.
+/// Build the note pane view: a plain-text editor that word-wraps (breaking
+/// long unbroken tokens too) inside a vertical scrollable so a scroll bar
+/// appears once the content exceeds the visible area.
 fn note_view<'a>(
     pane: pane_grid::Pane,
     state: &'a workspace::NoteState,
 ) -> Element<'a, Message> {
-    iced::widget::text_editor(&state.content)
+    // `Shrink` height lets the editor grow with its content so the surrounding
+    // `scrollable` can scroll it (and show a bar); `WordOrGlyph` wraps normal
+    // words and also breaks a single over-long token (URL, path, hash).
+    let editor = iced::widget::text_editor(&state.content)
+        .id(WidgetId::from(format!("note-editor-{:?}", pane)))
         .on_action(move |action| Message::NoteEdited(pane, action))
+        .wrapping(text::Wrapping::WordOrGlyph)
+        .padding(8);
+
+    scrollable(editor)
+        .width(Length::Fill)
         .height(Length::Fill)
-        .padding(8)
         .into()
 }
 
