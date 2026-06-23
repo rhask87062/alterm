@@ -4,6 +4,18 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
+/// Anthropic models that removed sampling parameters (`temperature`, `top_p`,
+/// `top_k`). Sending `temperature` to these returns HTTP 400. Match by
+/// substring so suffixed/aliased ids (e.g. dated snapshots) are covered.
+const NO_TEMPERATURE_MODELS: &[&str] = &["opus-4-7", "opus-4-8"];
+
+/// Whether the given Anthropic model accepts a `temperature` parameter.
+/// Opus 4.7+ removed it; everything else (Opus 4.6 and earlier, Sonnet, Haiku)
+/// still accepts it.
+fn supports_temperature(model: &str) -> bool {
+    !NO_TEMPERATURE_MODELS.iter().any(|m| model.contains(m))
+}
+
 /// Anthropic Claude provider.
 ///
 /// Key differences from OpenAI:
@@ -59,9 +71,17 @@ impl Provider for AnthropicProvider {
             "model": &config.model,
             "messages": msgs,
             "max_tokens": config.max_tokens,
-            "temperature": config.temperature,
             "stream": true
         });
+
+        // `temperature` is only sent to models that accept it. Newer Anthropic
+        // models (Opus 4.7+) removed sampling parameters and return HTTP 400
+        // ("temperature is deprecated for this model") if it's present.
+        if supports_temperature(&config.model) {
+            body.as_object_mut()
+                .unwrap()
+                .insert("temperature".to_string(), json!(config.temperature));
+        }
 
         // System prompt goes as a top-level field
         if let Some(ref system) = config.system_prompt {
@@ -151,5 +171,29 @@ impl Provider for AnthropicProvider {
 
     fn name(&self) -> &'static str {
         "anthropic"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supports_temperature;
+
+    #[test]
+    fn opus_4_7_and_4_8_reject_temperature() {
+        assert!(!supports_temperature("claude-opus-4-8"));
+        assert!(!supports_temperature("claude-opus-4-7"));
+    }
+
+    #[test]
+    fn other_models_accept_temperature() {
+        for m in [
+            "claude-opus-4-6",
+            "claude-opus-4-5",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            "claude-3-5-sonnet-20241022",
+        ] {
+            assert!(supports_temperature(m), "{m} should accept temperature");
+        }
     }
 }
