@@ -2834,6 +2834,8 @@ fn ai_chat_view<'a>(
     let messages_area: Element<'a, Message> = scrollable(
         Column::from_vec(msg_widgets).spacing(4).width(Fill).padding(4)
     )
+    .direction(subtle_scroll_direction())
+    .style(subtle_scrollbar_style)
     .width(Fill)
     .into();
 
@@ -3076,7 +3078,11 @@ fn settings_view<'a>(
     };
 
     let content_panel = container(
-        scrollable(section_content).width(Fill).height(Fill),
+        scrollable(section_content)
+            .direction(subtle_scroll_direction())
+            .style(subtle_scrollbar_style)
+            .width(Fill)
+            .height(Fill),
     )
     .width(Fill)
     .height(Fill)
@@ -3566,6 +3572,8 @@ fn preview_view<'a>(
                     .width(Fill)
                     .padding(Padding::from([4, 8])),
             )
+            .direction(subtle_scroll_direction())
+            .style(subtle_scrollbar_style)
             .width(Fill)
             .into()
         }
@@ -3581,6 +3589,8 @@ fn preview_view<'a>(
                     .width(Fill)
                     .padding(Padding::from([8, 12])),
             )
+            .direction(subtle_scroll_direction())
+            .style(subtle_scrollbar_style)
             .width(Fill)
             .into()
         }
@@ -3651,6 +3661,8 @@ fn preview_view<'a>(
                     .width(Fill)
                     .padding(Padding::from([4, 4])),
             )
+            .direction(subtle_scroll_direction())
+            .style(subtle_scrollbar_style)
             .width(Fill)
             .height(Fill)
             .into()
@@ -3826,22 +3838,29 @@ fn note_view<'a>(
         .padding(8);
 
     scrollable(editor)
-        .direction(scrollable::Direction::Vertical(
-            scrollable::Scrollbar::new()
-                .width(8.0)
-                .scroller_width(6.0)
-                .margin(2.0),
-        ))
-        .style(note_scrollbar_style)
+        .direction(subtle_scroll_direction())
+        .style(subtle_scrollbar_style)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
 }
 
-/// A subtle scrollbar for the note pane: no visible track, a narrow
-/// semi-transparent thumb that's faint at rest and a bit more opaque while
-/// hovered or dragged. Theme-aware (uses the foreground color at low alpha).
-fn note_scrollbar_style(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
+/// The narrow vertical scrollbar dimensions shared by every pane's content
+/// area, so all panes show an identical scroll bar.
+fn subtle_scroll_direction() -> scrollable::Direction {
+    scrollable::Direction::Vertical(
+        scrollable::Scrollbar::new()
+            .width(8.0)
+            .scroller_width(6.0)
+            .margin(2.0),
+    )
+}
+
+/// The subtle scrollbar shared by every pane's content area: no visible track,
+/// a narrow semi-transparent thumb that's faint at rest and a bit more opaque
+/// while hovered or dragged. Theme-aware (foreground color at low alpha).
+/// Pair with [`subtle_scroll_direction`] so all panes match.
+fn subtle_scrollbar_style(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
     let palette = theme.extended_palette();
     let active = matches!(
         status,
@@ -4157,6 +4176,8 @@ fn hotkey_info_view<'a>(theme: &Theme) -> Element<'a, Message> {
     let scrollable_content: Element<'a, Message> = scrollable(
         content_column,
     )
+    .direction(subtle_scroll_direction())
+    .style(subtle_scrollbar_style)
     .width(Fill)
     .height(Fill)
     .into();
