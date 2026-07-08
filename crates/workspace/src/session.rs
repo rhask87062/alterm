@@ -10,6 +10,10 @@ use crate::Block;
 
 pub const SESSION_VERSION: u32 = 1;
 
+fn default_zoom() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SerAxis {
     Horizontal,
@@ -19,7 +23,13 @@ pub enum SerAxis {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum BlockState {
     Terminal { cwd: Option<PathBuf>, scrollback_ansi: String, rows: u16, cols: u16 },
-    Browser { url: String, history: Vec<String>, history_index: usize },
+    Browser {
+        url: String,
+        history: Vec<String>,
+        history_index: usize,
+        #[serde(default = "default_zoom")]
+        zoom: f64,
+    },
     AiChat { provider: String, model: String, messages: Vec<DisplayMessage>, input: String },
     Preview { path: PathBuf },
     Note { content: String },
@@ -229,6 +239,7 @@ mod tests {
                         a: Box::new(PaneNode::Leaf(BlockState::Browser {
                             url: "https://example.com".into(),
                             history: vec!["https://example.com".into()], history_index: 0,
+                            zoom: 1.0,
                         })),
                         b: Box::new(PaneNode::Leaf(BlockState::AiChat {
                             provider: "openai".into(), model: "gpt-4o".into(),
@@ -302,6 +313,17 @@ mod tests {
         assert!(load_from_path(&path).is_none());
         assert!(dir.join("session.json.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn browser_block_state_zoom_defaults_when_missing() {
+        // A v1 session file written before the zoom field existed.
+        let json = r#"{"Browser":{"url":"https://a.com","history":["https://a.com"],"history_index":0}}"#;
+        let bs: BlockState = serde_json::from_str(json).unwrap();
+        match bs {
+            BlockState::Browser { zoom, .. } => assert_eq!(zoom, 1.0),
+            other => panic!("expected browser, got {other:?}"),
+        }
     }
 
     #[test]

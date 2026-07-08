@@ -59,6 +59,8 @@ pub struct BrowserState {
     /// index without discarding the other direction's history) apart from a
     /// fresh navigation (link click / URL bar) which truncates forward history.
     pub pending_move: i8,
+    /// Page zoom factor (1.0 = 100%). Applied via the webview manager.
+    pub zoom: f64,
 }
 
 impl BrowserState {
@@ -75,6 +77,7 @@ impl BrowserState {
             history: vec![url],
             history_index: 0,
             pending_move: 0,
+            zoom: 1.0,
         }
     }
 
@@ -96,16 +99,21 @@ impl BrowserState {
     /// Record a navigation that actually occurred in the webview (URL-bar
     /// submit, link click, redirect, or a confirmed back/forward move).
     ///
+    /// Returns `true` when the navigation was fresh (recorded a new history
+    /// entry), `false` for confirmed back/forward moves and duplicate reports.
+    /// Callers use this to decide global-history recording.
+    ///
     /// This is the single place history is mutated, so every navigation —
     /// however it was triggered — keeps the stack and nav flags accurate.
-    pub fn on_navigation(&mut self, url: &str) {
+    pub fn on_navigation(&mut self, url: &str) -> bool {
         let url = normalise_url(url);
 
-        match self.pending_move {
+        let fresh = match self.pending_move {
             -1 => {
                 // Confirmed Back: move the index, keep forward history intact.
                 self.history_index = self.history_index.saturating_sub(1);
                 self.pending_move = 0;
+                false
             }
             1 => {
                 // Confirmed Forward: move the index, keep back history intact.
@@ -113,6 +121,7 @@ impl BrowserState {
                     self.history_index += 1;
                 }
                 self.pending_move = 0;
+                false
             }
             _ => {
                 // Fresh navigation. Ignore a duplicate of the current page
@@ -121,9 +130,12 @@ impl BrowserState {
                     self.history.truncate(self.history_index + 1);
                     self.history.push(url.clone());
                     self.history_index = self.history.len() - 1;
+                    true
+                } else {
+                    false
                 }
             }
-        }
+        };
 
         self.url = url.clone();
         self.input_url = url;
@@ -135,6 +147,7 @@ impl BrowserState {
             self.history_index,
             self.history.len()
         );
+        fresh
     }
 
     /// Move Back one entry. Returns `true` if there was somewhere to go, in
@@ -179,6 +192,11 @@ impl BrowserState {
     pub fn reload(&mut self) {
         self.loading = true;
         log::debug!("Browser reload: {}", self.url);
+    }
+
+    /// Update the loading flag from a webview load-state event.
+    pub fn set_loading(&mut self, loading: bool) {
+        self.loading = loading;
     }
 
     /// The URL of the currently loaded page.
@@ -373,6 +391,30 @@ mod tests {
         assert_eq!(s.history.len(), 3); // a, b, d
         assert_eq!(s.url, "https://d.com");
         assert!(!s.can_go_forward);
+    }
+
+    #[test]
+    fn on_navigation_reports_freshness() {
+        let mut s = BrowserState::new("https://a.com");
+        assert!(s.on_navigation("https://b.com"));   // fresh
+        assert!(!s.on_navigation("https://b.com"));  // duplicate of current
+        assert!(s.begin_back());
+        assert!(!s.on_navigation("https://a.com"));  // late back-report, not fresh
+    }
+
+    #[test]
+    fn zoom_defaults_to_one() {
+        let s = BrowserState::new("https://a.com");
+        assert_eq!(s.zoom, 1.0);
+    }
+
+    #[test]
+    fn set_loading_toggles() {
+        let mut s = BrowserState::new("https://a.com");
+        s.set_loading(true);
+        assert!(s.loading);
+        s.set_loading(false);
+        assert!(!s.loading);
     }
 
     #[test]

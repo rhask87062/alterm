@@ -172,13 +172,14 @@ impl Block {
                 }
                 block
             }
-            BlockState::Browser { url, history, history_index } => {
+            BlockState::Browser { url, history, history_index, zoom } => {
                 let mut block = Block::new_browser(url);
                 if let Block::Browser { state } = &mut block {
                     if !history.is_empty() {
                         state.history = history.clone();
                         state.history_index = (*history_index).min(history.len() - 1);
                     }
+                    state.zoom = *zoom;
                 }
                 block
             }
@@ -522,6 +523,7 @@ impl Block {
                 url: state.url.clone(),
                 history: state.history.clone(),
                 history_index: state.history_index,
+                zoom: state.zoom,
             },
             Block::AIChat { state } => BlockState::AiChat {
                 provider: state.provider_name.clone(),
