@@ -1,7 +1,7 @@
 # Browser Build-Out: Global History, Bookmarks & Full-Browser UX
 
 **Date:** 2026-07-08
-**Status:** Approved (design), pending implementation plan
+**Status:** Implemented
 
 ## Goal
 
