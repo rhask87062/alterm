@@ -16,6 +16,8 @@ pub struct AppConfig {
     pub terminal: TerminalConfig,
     #[serde(default)]
     pub session: SessionConfig,
+    #[serde(default)]
+    pub browser: BrowserConfig,
 }
 
 impl Default for AppConfig {
@@ -26,6 +28,7 @@ impl Default for AppConfig {
             appearance: AppearanceConfig::default(),
             terminal: TerminalConfig::default(),
             session: SessionConfig::default(),
+            browser: BrowserConfig::default(),
         }
     }
 }
@@ -329,6 +332,22 @@ impl Default for SessionConfig {
     }
 }
 
+// ── BrowserConfig ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BrowserConfig {
+    /// Search engine URL template. `{}` is replaced with the
+    /// percent-encoded query typed in the URL bar.
+    pub search_engine: String,
+}
+
+impl Default for BrowserConfig {
+    fn default() -> Self {
+        Self { search_engine: "https://duckduckgo.com/?q={}".to_string() }
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -429,6 +448,15 @@ max_tokens = 2048
         "#;
         let cfg: AppConfig = toml::from_str(toml).expect("parse");
         assert!(!cfg.session.restore);
+    }
+
+    #[test]
+    fn browser_config_defaults_and_roundtrips() {
+        let config = AppConfig::default();
+        assert_eq!(config.browser.search_engine, "https://duckduckgo.com/?q={}");
+        // Old config files without a [browser] section must still parse.
+        let parsed: AppConfig = toml::from_str("").unwrap();
+        assert_eq!(parsed.browser.search_engine, "https://duckduckgo.com/?q={}");
     }
 }
 
