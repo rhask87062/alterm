@@ -117,6 +117,7 @@ dependencies = [
  "iced",
  "log",
  "preview",
+ "serde_json",
  "terminal",
  "tokio",
  "workspace",

@@ -377,6 +377,12 @@ enum Message {
     BrowserForward(pane_grid::Pane),
     BrowserReload(pane_grid::Pane),
     BrowserUrlChanged(pane_grid::Pane, String),
+    BrowserToggleBookmark(pane_grid::Pane),
+    BrowserOpenHistory(pane_grid::Pane),
+    BrowserStop(pane_grid::Pane),
+    BrowserZoomIn(pane_grid::Pane),
+    BrowserZoomOut(pane_grid::Pane),
+    BrowserZoomReset(pane_grid::Pane),
     // Preview
     OpenPreview,
     PreviewNavigate(pane_grid::Pane, String),
@@ -406,6 +412,13 @@ enum Message {
     NoteEdited(pane_grid::Pane, iced::widget::text_editor::Action),
 }
 
+/// Direction for a browser zoom adjustment.
+enum ZoomChange {
+    In,
+    Out,
+    Reset,
+}
+
 impl Alterm {
     fn new() -> (Self, Task<Message>) {
         let window_width = 900.0_f32;
@@ -413,6 +426,18 @@ impl Alterm {
 
         // Initialize GTK early (required by webkit2gtk before any webview creation).
         webview_manager::init_gtk();
+
+        // Global browser history/bookmarks live under the XDG data dir.
+        let browser_data_dir = dirs::data_dir()
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join(".local/share")
+            })
+            .join("alterm");
+        browser::history::init(&browser_data_dir);
+        // Persist cookies and local storage across restarts.
+        webview_manager::set_data_dir(&browser_data_dir.join("webview"));
 
         // Load config from default path.
         let config = AppConfig::load(&AppConfig::config_path()).unwrap_or_else(|e| {
@@ -769,11 +794,130 @@ impl Alterm {
                     .find(|(p, _)| webview_key(tab_id, **p) == pane_id)
                 {
                     if let Block::Browser { state } = block {
-                        state.on_navigation(&url);
+                        let fresh = state.on_navigation(&url);
+                        if fresh && !url.starts_with("alterm://") && !url.starts_with("about:") {
+                            browser::history::with_stores(|s| {
+                                s.history.record_visit(&url, browser::history::now_ts());
+                            });
+                        }
                     }
                     break;
                 }
             }
+        }
+    }
+
+    /// Resolve a webview key back to its (tab_id, pane). Used when events
+    /// arrive keyed by webview id.
+    fn find_browser_pane(&self, pane_id: u64) -> Option<(u64, pane_grid::Pane)> {
+        for tab in &self.tabs {
+            let tab_id = tab.id;
+            for (pane, block) in tab.panes.iter() {
+                if block.is_browser() && webview_key(tab_id, *pane) == pane_id {
+                    return Some((tab_id, *pane));
+                }
+            }
+        }
+        None
+    }
+
+    /// Drain title, load-state, and IPC events from the webviews and apply
+    /// them to pane state and the global stores.
+    fn apply_browser_webview_events(&mut self) -> Task<Message> {
+        for (pane_id, title) in webview_manager::drain_title_events() {
+            if let Some((tab_id, pane)) = self.find_browser_pane(pane_id) {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                        state.title = title.clone();
+                        if !state.url.starts_with("alterm://") {
+                            let url = state.url.clone();
+                            browser::history::with_stores(|s| {
+                                s.history.set_title(&url, &title);
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        for (pane_id, started) in webview_manager::drain_load_events() {
+            if let Some((tab_id, pane)) = self.find_browser_pane(pane_id) {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                        state.set_loading(started);
+                    }
+                }
+            }
+        }
+
+        let ipc_events = webview_manager::drain_ipc_events();
+        let mut tasks = Vec::new();
+        for (pane_id, body) in ipc_events {
+            tasks.push(self.handle_browser_ipc(pane_id, &body));
+        }
+        Task::batch(tasks)
+    }
+
+    /// Apply one IPC message posted by a page (internal-page actions and
+    /// forwarded keyboard shortcuts).
+    fn handle_browser_ipc(&mut self, pane_id: u64, body: &str) -> Task<Message> {
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(body) else {
+            log::warn!("browser ipc: unparseable message: {body}");
+            return Task::none();
+        };
+        let cmd = msg.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+        match cmd {
+            "history-delete" => {
+                let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                let ts = msg.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
+                browser::history::with_stores(|s| s.history.delete(url, ts));
+                webview_manager::reload(pane_id);
+                Task::none()
+            }
+            "history-clear" => {
+                browser::history::with_stores(|s| s.history.clear());
+                webview_manager::reload(pane_id);
+                Task::none()
+            }
+            "bookmark-remove" => {
+                let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                browser::history::with_stores(|s| {
+                    if s.bookmarks.is_bookmarked(url) {
+                        s.bookmarks.toggle(url, "");
+                    }
+                });
+                webview_manager::reload(pane_id);
+                Task::none()
+            }
+            "shortcut" => {
+                let action = msg.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                self.handle_browser_shortcut_ipc(pane_id, action)
+            }
+            other => {
+                log::warn!("browser ipc: unknown cmd {other:?}");
+                Task::none()
+            }
+        }
+    }
+
+    /// Route a shortcut forwarded from inside a webview page.
+    fn handle_browser_shortcut_ipc(&mut self, pane_id: u64, action: &str) -> Task<Message> {
+        let _ = (pane_id, action);
+        Task::none()
+    }
+
+    /// Step or reset a browser pane's zoom and apply it to the webview.
+    fn browser_zoom(&mut self, pane: pane_grid::Pane, change: ZoomChange) {
+        let tab_id = self.active_tab().id;
+        let pane_id = webview_key(tab_id, pane);
+        let tab = self.active_tab_mut();
+        if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+            state.zoom = match change {
+                ZoomChange::In => (state.zoom * 1.1).min(5.0),
+                ZoomChange::Out => (state.zoom / 1.1).max(0.25),
+                ZoomChange::Reset => 1.0,
+            };
+            webview_manager::set_zoom(pane_id, state.zoom);
         }
     }
 
@@ -906,14 +1050,14 @@ impl Alterm {
     /// Create webviews for all browser panes across all tabs that don't yet have one.
     /// Called once parent_xid becomes available (WindowHandleReady). Idempotent.
     fn ensure_browser_webviews(&mut self) {
-        // Collect tab/pane/url tuples to avoid borrow conflicts.
-        let browser_panes: Vec<(u64, pane_grid::Pane, String)> = self.tabs.iter()
+        // Collect tab/pane/url/zoom tuples to avoid borrow conflicts.
+        let browser_panes: Vec<(u64, pane_grid::Pane, String, f64)> = self.tabs.iter()
             .flat_map(|tab| {
                 let tab_id = tab.id;
                 tab.panes.iter().filter_map(move |(pane, block)| {
                     if let Block::Browser { state } = block {
                         if !webview_manager::exists(webview_key(tab_id, *pane)) {
-                            return Some((tab_id, *pane, state.url.clone()));
+                            return Some((tab_id, *pane, state.url.clone(), state.zoom));
                         }
                     }
                     None
@@ -921,8 +1065,11 @@ impl Alterm {
             })
             .collect();
 
-        for (tab_id, pane, url) in browser_panes {
+        for (tab_id, pane, url, zoom) in browser_panes {
             self.create_browser_webview_for(tab_id, pane, &url);
+            if (zoom - 1.0).abs() > f64::EPSILON {
+                webview_manager::set_zoom(webview_key(tab_id, pane), zoom);
+            }
         }
         self.update_webview_visibility();
     }
@@ -1109,12 +1256,17 @@ impl Alterm {
                 // the URL bar and back/forward buttons stay accurate.
                 self.apply_browser_nav_events();
 
+                // Drain title, load-state, and IPC events from all webviews.
+                let wv_task = self.apply_browser_webview_events();
+
                 // Tick all panes in all tabs.
                 for tab in &mut self.tabs {
                     for (_pane, block) in tab.panes.iter_mut() {
                         block.tick();
                     }
                 }
+
+                return wv_task;
             }
             Message::PaneClicked(pane) => {
                 // Only steer keyboard focus to the pane's text_input when this
@@ -1778,11 +1930,21 @@ impl Alterm {
 
             // -- Browser --
             Message::OpenBrowser => {
-                let url = "https://www.google.com";
+                let url = "alterm://history";
                 let block = Block::new_browser(url);
                 let new_pane = self.add_window(block);
                 // Create the webview against the final (post-rebuild) pane id.
                 self.create_browser_webview(new_pane, url);
+                // Apply persisted zoom if non-default.
+                {
+                    let tab_id = self.active_tab().id;
+                    let tab = self.active_tab();
+                    if let Some(Block::Browser { state }) = tab.panes.get(new_pane) {
+                        if (state.zoom - 1.0).abs() > f64::EPSILON {
+                            webview_manager::set_zoom(webview_key(tab_id, new_pane), state.zoom);
+                        }
+                    }
+                }
                 webview_manager::pump_gtk_events();
                 self.resize_all_panes();
                 return widget_focus(WidgetId::from(
@@ -1790,13 +1952,12 @@ impl Alterm {
                 ));
             }
             Message::BrowserNavigate(pane, url) => {
+                let target = browser::resolve_input(&url, &self.config.browser.search_engine);
                 let tab_id = self.active_tab().id;
                 let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    // navigate() normalises the URL; history is recorded when the
-                    // resulting navigation event flows back via drain_nav_events().
-                    let target = state.navigate(&url);
+                    let target = state.navigate(&target);
                     webview_manager::navigate(pane_id, &target);
                 }
             }
@@ -1836,6 +1997,37 @@ impl Alterm {
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.input_url = url;
                 }
+            }
+            Message::BrowserToggleBookmark(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    let url = state.url.clone();
+                    let title = state.title.clone();
+                    if !url.starts_with("alterm://") {
+                        browser::history::with_stores(|s| s.bookmarks.toggle(&url, &title));
+                    }
+                }
+            }
+            Message::BrowserOpenHistory(pane) => {
+                return self.update(Message::BrowserNavigate(pane, "alterm://history".into()));
+            }
+            Message::BrowserStop(pane) => {
+                let tab_id = self.active_tab().id;
+                let pane_id = webview_key(tab_id, pane);
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    state.set_loading(false);
+                    webview_manager::stop(pane_id);
+                }
+            }
+            Message::BrowserZoomIn(pane) => {
+                self.browser_zoom(pane, ZoomChange::In);
+            }
+            Message::BrowserZoomOut(pane) => {
+                self.browser_zoom(pane, ZoomChange::Out);
+            }
+            Message::BrowserZoomReset(pane) => {
+                self.browser_zoom(pane, ZoomChange::Reset);
             }
 
             // -- Preview --
