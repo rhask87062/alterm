@@ -249,6 +249,8 @@ struct Alterm {
     search: Option<SearchState>,
     /// Persisted per-provider model-list cache (see `ai::model_cache`).
     model_cache: ai::model_cache::ModelCache,
+    /// Frame counter for the browser loading spinner animation.
+    spinner_frame: usize,
 }
 
 /// What an in-progress inline rename is targeting.
@@ -530,6 +532,7 @@ impl Alterm {
             last_pane_click: None,
             search: None,
             model_cache,
+            spinner_frame: 0,
         };
 
         // Request the native window handle from iced — fires WindowHandleReady.
@@ -1271,6 +1274,7 @@ impl Alterm {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
+                self.spinner_frame = self.spinner_frame.wrapping_add(1);
                 // Pump GTK events so webkit2gtk can process network/rendering.
                 webview_manager::pump_gtk_events();
 
@@ -2523,7 +2527,7 @@ impl Alterm {
                         settings_view(pane, state, &self.available_fonts)
                     }
                     Block::Browser { state } => {
-                        browser_view(pane, state)
+                        browser_view(pane, state, self.spinner_frame)
                     }
                     Block::Preview { state } => {
                         preview_view(pane, state)
@@ -3589,6 +3593,7 @@ fn settings_terminal_section<'a>(
 fn browser_view<'a>(
     pane: pane_grid::Pane,
     state: &'a BrowserState,
+    spinner_frame: usize,
 ) -> Element<'a, Message> {
     // ── Navigation bar ──
     let back_label = text("\u{25C0}").size(14).center();
@@ -3607,11 +3612,17 @@ fn browser_view<'a>(
         fwd_btn = fwd_btn.on_press(Message::BrowserForward(pane));
     }
 
-    let reload_label = text("\u{21BB}").size(14).center();
-    let reload_btn = button(reload_label)
-        .on_press(Message::BrowserReload(pane))
-        .padding(Padding::from([4, 8]))
-        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
+    let reload_btn = if state.loading {
+        button(text("\u{2715}").size(14).center()) // ✕ stop
+            .on_press(Message::BrowserStop(pane))
+            .padding(Padding::from([4, 8]))
+            .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status))
+    } else {
+        button(text("\u{21BB}").size(14).center()) // ↻ reload
+            .on_press(Message::BrowserReload(pane))
+            .padding(Padding::from([4, 8]))
+            .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status))
+    };
 
     let url_input = text_input("Enter URL...", &state.input_url)
         .on_input(move |v| Message::BrowserUrlChanged(pane, v))
@@ -3620,8 +3631,32 @@ fn browser_view<'a>(
         .padding(Padding::from([6, 10]))
         .id(WidgetId::from(format!("browser-url-input-{:?}", pane)));
 
+    let bookmarked = browser::history::with_stores(|s| s.bookmarks.is_bookmarked(&state.url))
+        .unwrap_or(false);
+    let star_label = if bookmarked { "\u{2605}" } else { "\u{2606}" }; // ★ / ☆
+    let mut star_btn = button(text(star_label).size(14).center())
+        .padding(Padding::from([4, 8]))
+        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
+    if !state.url.starts_with("alterm://") {
+        star_btn = star_btn.on_press(Message::BrowserToggleBookmark(pane));
+    }
+
+    let history_btn = button(text("\u{1F553}").size(14).center()) // 🕓
+        .on_press(Message::BrowserOpenHistory(pane))
+        .padding(Padding::from([4, 8]))
+        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
+
+    const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+    let spinner: Element<'a, Message> = if state.loading {
+        text(SPINNER[spinner_frame % SPINNER.len()])
+            .size(13)
+            .into()
+    } else {
+        iced::widget::space().width(Length::Fixed(0.0)).into()
+    };
+
     let nav_bar: Element<'a, Message> = container(
-        row![back_btn, fwd_btn, reload_btn, url_input]
+        row![back_btn, fwd_btn, reload_btn, url_input, spinner, star_btn, history_btn]
             .spacing(4)
             .align_y(iced::Alignment::Center),
     )
