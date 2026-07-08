@@ -139,6 +139,12 @@ fn format_day(ts: u64) -> String {
 fn history_row(e: &HistoryEntry) -> String {
     let label = if e.title.is_empty() { &e.url } else { &e.title };
     // JSON-encode the url for the onclick JS string (quotes/backslashes).
+    // SECURITY: the onclick attribute below is deliberately single-quoted.
+    // The JSON encoding produces a double-quoted JS string literal, and
+    // html_escape turns its quotes into entities that the browser decodes
+    // only when parsing the attribute value. Do not change the attribute
+    // quoting without re-checking this chain (same applies in
+    // bookmarks_page's removeBookmark button).
     let js_url = serde_json::to_string(&e.url).unwrap_or_else(|_| "\"\"".into());
     format!(
         r#"<div class="row"><span class="time">{}</span><a href="{}">{}</a><span class="url">{}</span><button class="del" title="Remove from history" onclick='delEntry({}, {})'>&#10005;</button></div>"#,
@@ -275,6 +281,18 @@ mod tests {
         assert!(!html.contains("<img src=x"));
         assert!(html.contains("&lt;img src=x onerror=alert(1)&gt;"));
         assert!(!html.contains(r#"?a=<b>"#));
+    }
+
+    #[test]
+    fn onclick_url_argument_cannot_break_out_of_attribute() {
+        // A URL crafted to escape the single-quoted onclick attribute or the
+        // JS string must arrive fully entity-encoded.
+        let hostile = entry("https://x.com/'); alert(1);//\"<>", "t", 1);
+        let html = history_page(&[hostile], &[], "");
+        // Raw single quote, double quote, or angle brackets from the URL
+        // must never appear inside the emitted markup unescaped.
+        assert!(!html.contains("'); alert(1)"));
+        assert!(html.contains("&#39;); alert(1);//&quot;&lt;&gt;"));
     }
 
     #[test]
