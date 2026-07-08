@@ -902,8 +902,31 @@ impl Alterm {
 
     /// Route a shortcut forwarded from inside a webview page.
     fn handle_browser_shortcut_ipc(&mut self, pane_id: u64, action: &str) -> Task<Message> {
-        let _ = (pane_id, action);
-        Task::none()
+        let Some((tab_id, pane)) = self.find_browser_pane(pane_id) else {
+            return Task::none();
+        };
+        // Shortcuts act on the pane they came from; switch focus if needed.
+        if self.tabs.get(self.active_tab).map(|t| t.id) != Some(tab_id) {
+            return Task::none(); // stale event from a hidden tab's webview
+        }
+        match action {
+            "back" => self.update(Message::BrowserBack(pane)),
+            "forward" => self.update(Message::BrowserForward(pane)),
+            "reload" => self.update(Message::BrowserReload(pane)),
+            "history" => self.update(Message::BrowserOpenHistory(pane)),
+            "bookmark" => self.update(Message::BrowserToggleBookmark(pane)),
+            "zoom-in" => self.update(Message::BrowserZoomIn(pane)),
+            "zoom-out" => self.update(Message::BrowserZoomOut(pane)),
+            "zoom-reset" => self.update(Message::BrowserZoomReset(pane)),
+            "focus-url" => widget_focus(WidgetId::from(
+                format!("browser-url-input-{:?}", pane),
+            )),
+            "find" => Task::none(), // wired in Task 10
+            other => {
+                log::warn!("browser ipc: unknown shortcut {other:?}");
+                Task::none()
+            }
+        }
     }
 
     /// Step or reset a browser pane's zoom and apply it to the webview.
@@ -2202,6 +2225,47 @@ impl Alterm {
                             }
                             // All other keys are handled by the text_input widget.
                             return Task::none();
+                        }
+                    }
+                }
+
+                // Browser-pane shortcuts (when a browser pane is focused and
+                // iced owns the keyboard, e.g. after clicking the chrome).
+                if let Some(focused) = self.active_tab().focus {
+                    let is_browser = self
+                        .active_tab()
+                        .panes
+                        .get(focused)
+                        .is_some_and(|b| b.is_browser());
+                    if is_browser {
+                        let alt = modifiers.alt() && !modifiers.control();
+                        let ctrl = modifiers.control() && !modifiers.alt() && !modifiers.shift();
+                        let msg = match &key {
+                            Key::Named(Named::ArrowLeft) if alt => {
+                                Some(Message::BrowserBack(focused))
+                            }
+                            Key::Named(Named::ArrowRight) if alt => {
+                                Some(Message::BrowserForward(focused))
+                            }
+                            Key::Character(c) if ctrl => match c.as_str() {
+                                "l" => None, // handled below: focus needs a Task
+                                "r" => Some(Message::BrowserReload(focused)),
+                                "h" => Some(Message::BrowserOpenHistory(focused)),
+                                "d" => Some(Message::BrowserToggleBookmark(focused)),
+                                "=" | "+" => Some(Message::BrowserZoomIn(focused)),
+                                "-" => Some(Message::BrowserZoomOut(focused)),
+                                "0" => Some(Message::BrowserZoomReset(focused)),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        if let Some(msg) = msg {
+                            return self.update(msg);
+                        }
+                        if ctrl && matches!(&key, Key::Character(c) if c.as_str() == "l") {
+                            return widget_focus(WidgetId::from(
+                                format!("browser-url-input-{:?}", focused),
+                            ));
                         }
                     }
                 }
