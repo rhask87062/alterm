@@ -27,7 +27,7 @@ pub fn html_escape(s: &str) -> String {
 
 /// Extract and percent-decode the `q` query parameter from a URI.
 pub fn parse_query(uri: &str) -> String {
-    let Some(qs) = uri.splitn(2, '?').nth(1) else { return String::new() };
+    let Some((_before, qs)) = uri.split_once('?') else { return String::new() };
     for pair in qs.split('&') {
         if let Some(v) = pair.strip_prefix("q=") {
             return percent_decode(v);
@@ -237,7 +237,7 @@ pub fn error_page(path: &str) -> String {
 /// Router used by the webview custom-protocol handler. Reads the
 /// thread-local stores (empty view when uninitialised).
 pub fn respond(uri: &str) -> (&'static str, String) {
-    let path = uri.splitn(2, '?').next().unwrap_or(uri);
+    let path = uri.split_once('?').map_or(uri, |(before, _after)| before);
     let path = path.trim_end_matches('/');
     match path {
         "alterm://history" => {

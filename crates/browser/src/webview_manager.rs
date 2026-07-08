@@ -65,8 +65,8 @@ thread_local! {
     static TITLE_EVENTS: RefCell<Vec<(u64, String)>> = const { RefCell::new(Vec::new()) };
     /// Load-state events `(pane_id, started)`; `false` = finished.
     static LOAD_EVENTS: RefCell<Vec<(u64, bool)>> = const { RefCell::new(Vec::new()) };
-    /// IPC messages `(pane_id, json_body)` posted by pages via window.ipc.
-    static IPC_EVENTS: RefCell<Vec<(u64, String)>> = const { RefCell::new(Vec::new()) };
+    /// IPC messages `(pane_id, origin_uri, json_body)` posted by pages via window.ipc.
+    static IPC_EVENTS: RefCell<Vec<(u64, String, String)>> = const { RefCell::new(Vec::new()) };
     /// Find-in-page match counts `(pane_id, count)`.
     static FIND_EVENTS: RefCell<Vec<(u64, u32)>> = const { RefCell::new(Vec::new()) };
     /// Shared WebContext for all webviews. On Linux, wry registers custom URI
@@ -114,9 +114,11 @@ pub fn drain_load_events() -> Vec<(u64, bool)> {
     LOAD_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
 }
 
-/// Drain queued IPC messages (raw JSON bodies posted by internal pages
-/// and the shortcut forwarder script).
-pub fn drain_ipc_events() -> Vec<(u64, String)> {
+/// Drain queued IPC messages posted by pages via window.ipc.
+/// Each element is `(pane_id, origin_uri, json_body)`. The `origin_uri` is
+/// the URL of the page that posted the message (from wry's Request URI), used
+/// by callers to gate destructive commands to trusted internal origins.
+pub fn drain_ipc_events() -> Vec<(u64, String, String)> {
     IPC_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
 }
 
@@ -227,7 +229,7 @@ pub fn create_webview(
                     LOAD_EVENTS.with(|q| q.borrow_mut().push((pane_id, started)));
                 })
                 .with_ipc_handler(move |req: wry::http::Request<String>| {
-                    IPC_EVENTS.with(|q| q.borrow_mut().push((pane_id, req.body().clone())));
+                    IPC_EVENTS.with(|q| q.borrow_mut().push((pane_id, req.uri().to_string(), req.body().clone())));
                 })
                 .with_initialization_script(SHORTCUT_FORWARDER);
 
@@ -275,7 +277,7 @@ pub fn create_webview(
                 LOAD_EVENTS.with(|q| q.borrow_mut().push((pane_id, started)));
             })
             .with_ipc_handler(move |req: wry::http::Request<String>| {
-                IPC_EVENTS.with(|q| q.borrow_mut().push((pane_id, req.body().clone())));
+                IPC_EVENTS.with(|q| q.borrow_mut().push((pane_id, req.uri().to_string(), req.body().clone())));
             })
             .with_initialization_script(SHORTCUT_FORWARDER)
             .build_as_child(&wrapper)

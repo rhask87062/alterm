@@ -896,8 +896,8 @@ impl Alterm {
 
         let ipc_events = webview_manager::drain_ipc_events();
         let mut tasks = Vec::new();
-        for (pane_id, body) in ipc_events {
-            tasks.push(self.handle_browser_ipc(pane_id, &body));
+        for (pane_id, origin, body) in ipc_events {
+            tasks.push(self.handle_browser_ipc(pane_id, &origin, &body));
         }
 
         // Drain find-in-page match counts from webviews.
@@ -927,34 +927,44 @@ impl Alterm {
 
     /// Apply one IPC message posted by a page (internal-page actions and
     /// forwarded keyboard shortcuts).
-    fn handle_browser_ipc(&mut self, pane_id: u64, body: &str) -> Task<Message> {
+    fn handle_browser_ipc(&mut self, pane_id: u64, origin: &str, body: &str) -> Task<Message> {
         let Ok(msg) = serde_json::from_str::<serde_json::Value>(body) else {
             log::warn!("browser ipc: unparseable message: {body}");
             return Task::none();
         };
         let cmd = msg.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
         match cmd {
-            "history-delete" => {
-                let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                let ts = msg.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
-                browser::history::with_stores(|s| s.history.delete(url, ts));
-                webview_manager::reload(pane_id);
-                Task::none()
-            }
-            "history-clear" => {
-                browser::history::with_stores(|s| s.history.clear());
-                webview_manager::reload(pane_id);
-                Task::none()
-            }
-            "bookmark-remove" => {
-                let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                browser::history::with_stores(|s| {
-                    if s.bookmarks.is_bookmarked(url) {
-                        s.bookmarks.toggle(url, "");
+            "history-delete" | "history-clear" | "bookmark-remove" => {
+                // Only trust destructive commands from our own internal pages.
+                if !origin.starts_with("alterm://") {
+                    log::warn!("browser ipc: ignoring {cmd:?} from non-internal origin {origin:?}");
+                    return Task::none();
+                }
+                match cmd {
+                    "history-delete" => {
+                        let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                        let ts = msg.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
+                        browser::history::with_stores(|s| s.history.delete(url, ts));
+                        webview_manager::reload(pane_id);
+                        Task::none()
                     }
-                });
-                webview_manager::reload(pane_id);
-                Task::none()
+                    "history-clear" => {
+                        browser::history::with_stores(|s| s.history.clear());
+                        webview_manager::reload(pane_id);
+                        Task::none()
+                    }
+                    "bookmark-remove" => {
+                        let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                        browser::history::with_stores(|s| {
+                            if s.bookmarks.is_bookmarked(url) {
+                                s.bookmarks.toggle(url, "");
+                            }
+                        });
+                        webview_manager::reload(pane_id);
+                        Task::none()
+                    }
+                    _ => unreachable!(),
+                }
             }
             "shortcut" => {
                 let action = msg.get("action").and_then(|v| v.as_str()).unwrap_or("");
@@ -2136,6 +2146,13 @@ impl Alterm {
             // -- Browser find-in-page --
             Message::BrowserFindOpen(pane) => {
                 let tab_id = self.active_tab().id;
+                // If there is already an active find session on a *different* pane,
+                // end it first so webkit clears its highlights before we open a new one.
+                if let Some(old) = self.browser_find.take() {
+                    if (old.tab_id, old.pane) != (tab_id, pane) {
+                        webview_manager::find_finish(webview_key(old.tab_id, old.pane));
+                    }
+                }
                 self.browser_find = Some(BrowserFindState {
                     tab_id,
                     pane,
