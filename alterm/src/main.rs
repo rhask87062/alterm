@@ -1158,6 +1158,7 @@ impl Alterm {
             })
             .collect();
 
+        let created_any = !browser_panes.is_empty();
         for (tab_id, pane, url, zoom) in browser_panes {
             self.create_browser_webview_for(tab_id, pane, &url);
             if (zoom - 1.0).abs() > f64::EPSILON {
@@ -1165,6 +1166,14 @@ impl Alterm {
             }
         }
         self.update_webview_visibility();
+        // Webviews restored from a session start with whatever bounds were
+        // computable at creation time (often the fallback defaults, since the
+        // pane layout may not be final yet). Re-derive bounds from the real
+        // layout so a restored webview doesn't sit misplaced until the first
+        // manual window resize.
+        if created_any {
+            self.resize_all_panes();
+        }
     }
 
     /// Scroll the focused pane by the given number of lines.

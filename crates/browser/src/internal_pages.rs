@@ -80,11 +80,14 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em;
 .del { visibility: hidden; margin-left: auto; cursor: pointer; color: #666678;
        background: none; border: none; font-size: 13px; }
 .del:hover { color: #ff7b72; }
-.toolbar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
+.toolbar { display: flex; gap: 12px; margin-bottom: 20px; align-items: center;
+       flex-wrap: wrap; }
+.toolbar form { margin: 0; }
 input[type=text] { background: #1e1e28; color: #ccccd6; border: 1px solid #2e2e3a;
-       border-radius: 6px; padding: 6px 10px; width: 320px; font-size: 13px; }
+       border-radius: 6px; padding: 6px 10px; width: min(320px, 55vw); font-size: 13px; }
 .btn { background: #1e1e28; color: #ccccd6; border: 1px solid #2e2e3a;
-       border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+       border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px;
+       white-space: nowrap; }
 .btn:hover { background: #26262f; }
 .empty { color: #666678; padding: 16px 8px; }
 nav { margin-bottom: 20px; font-size: 13px; }
