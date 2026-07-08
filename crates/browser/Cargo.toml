@@ -7,6 +7,7 @@ edition.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+chrono = "0.4"
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 raw-window-handle = "0.6"

@@ -5,6 +5,7 @@
 /// - `webview_manager`: manages real wry `WebView` instances on the main thread.
 
 pub mod history;
+pub mod internal_pages;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod webview_manager;
