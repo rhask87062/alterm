@@ -15,6 +15,7 @@ pub mod webview_manager {
     /// Embedded browser is not supported on this platform.
     pub fn init_gtk() {}
     pub fn pump_gtk_events() {}
+    pub fn set_data_dir(_path: &std::path::Path) {}
     pub fn create_webview(
         _pane_id: u64,
         _parent_window: u64,

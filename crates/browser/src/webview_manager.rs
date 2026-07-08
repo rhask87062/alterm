@@ -77,8 +77,24 @@ thread_local! {
     /// `create_webview` call.
     #[cfg(target_os = "linux")]
     static WEB_CONTEXT: RefCell<Option<wry::WebContext>> = const { RefCell::new(None) };
+    /// Directory for persistent webview profile data (cookies, local
+    /// storage). Consumed when the shared WebContext is first created.
+    #[cfg(target_os = "linux")]
+    static WEBVIEW_DATA_DIR: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
     #[cfg(target_os = "linux")]
     static GTK_INITIALIZED: RefCell<bool> = RefCell::new(false);
+}
+
+/// Set the directory used for persistent webview profile data (cookies,
+/// local storage). Call once at startup, before any webview is created —
+/// once the shared WebContext exists this has no effect.
+pub fn set_data_dir(path: &std::path::Path) {
+    #[cfg(target_os = "linux")]
+    WEBVIEW_DATA_DIR.with(|d| {
+        *d.borrow_mut() = Some(path.to_path_buf());
+    });
+    #[cfg(not(target_os = "linux"))]
+    let _ = path;
 }
 
 /// Drain queued navigation events. Each is `(pane_id, url)` for a navigation
@@ -166,10 +182,13 @@ pub fn create_webview(
     #[cfg(target_os = "linux")]
     let webview = {
         // Initialise the shared WebContext the first time a webview is created.
+        // A data dir set via `set_data_dir` makes cookies/local storage
+        // persist across launches.
         WEB_CONTEXT.with(|ctx| {
             let mut ctx = ctx.borrow_mut();
             if ctx.is_none() {
-                *ctx = Some(wry::WebContext::new(None));
+                let data_dir = WEBVIEW_DATA_DIR.with(|d| d.borrow().clone());
+                *ctx = Some(wry::WebContext::new(data_dir));
             }
         });
 
