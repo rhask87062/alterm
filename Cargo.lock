@@ -610,6 +610,9 @@ dependencies = [
  "gtk",
  "log",
  "raw-window-handle",
+ "serde",
+ "serde_json",
+ "tempfile",
  "wry",
 ]
 

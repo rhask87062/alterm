@@ -4,6 +4,8 @@
 /// - `BrowserState`: tracks URL, navigation history, and loading status.
 /// - `webview_manager`: manages real wry `WebView` instances on the main thread.
 
+pub mod history;
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod webview_manager;
 
