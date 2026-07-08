@@ -201,13 +201,69 @@ impl BrowserState {
     }
 }
 
+/// Resolve text typed in the URL bar into a navigable URL.
+///
+/// Applied ONLY to URL-bar submissions — navigation events reported by the
+/// webview are already real URLs and go through [`normalise_url`] instead.
+///
+/// - Explicit scheme (`http`, `https`, `about`, `alterm`) → unchanged.
+/// - Single token with a dot in its host part, or `localhost[:port]` →
+///   `https://` prefixed.
+/// - Anything else → search via `search_engine` (a URL template whose `{}`
+///   is replaced with the percent-encoded query; appended if no `{}`).
+pub fn resolve_input(input: &str, search_engine: &str) -> String {
+    let t = input.trim();
+    if t.is_empty() {
+        return "about:blank".to_string();
+    }
+    let lower = t.to_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("about:")
+        || lower.starts_with("alterm://")
+    {
+        return t.to_string();
+    }
+    let no_spaces = !t.contains(char::is_whitespace);
+    let host = t.split('/').next().unwrap_or(t);
+    let hostname = host.split(':').next().unwrap_or(host);
+    if no_spaces && (hostname == "localhost" || hostname.contains('.')) {
+        return format!("https://{t}");
+    }
+    let q = percent_encode(t);
+    if search_engine.contains("{}") {
+        search_engine.replacen("{}", &q, 1)
+    } else {
+        format!("{search_engine}{q}")
+    }
+}
+
+/// Percent-encode a query string for use in a URL (RFC 3986 unreserved
+/// characters pass through; everything else is `%XX`-escaped).
+pub fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// Ensure a URL has a scheme. Bare domains get `https://` prepended.
 fn normalise_url(url: &str) -> String {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return "about:blank".to_string();
     }
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") || trimmed.starts_with("about:") {
+    if trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("about:")
+        || trimmed.starts_with("alterm://")
+    {
         trimmed.to_string()
     } else {
         format!("https://{trimmed}")
@@ -333,5 +389,53 @@ mod tests {
         let mut s2 = BrowserState::new("https://example.com");
         s2.title = "Example Domain".to_string();
         assert_eq!(s2.display_title(), "Example Domain");
+    }
+
+    const DDG: &str = "https://duckduckgo.com/?q={}";
+
+    #[test]
+    fn resolve_input_passes_urls_through() {
+        assert_eq!(resolve_input("https://a.com/x", DDG), "https://a.com/x");
+        assert_eq!(resolve_input("http://a.com", DDG), "http://a.com");
+        assert_eq!(resolve_input("about:blank", DDG), "about:blank");
+        assert_eq!(resolve_input("alterm://history", DDG), "alterm://history");
+    }
+
+    #[test]
+    fn resolve_input_prefixes_bare_hosts() {
+        assert_eq!(resolve_input("google.com", DDG), "https://google.com");
+        assert_eq!(resolve_input("docs.rs/serde/latest", DDG), "https://docs.rs/serde/latest");
+        assert_eq!(resolve_input("localhost:3000/app", DDG), "https://localhost:3000/app");
+    }
+
+    #[test]
+    fn resolve_input_searches_everything_else() {
+        assert_eq!(
+            resolve_input("rust lifetimes", DDG),
+            "https://duckduckgo.com/?q=rust%20lifetimes"
+        );
+        assert_eq!(resolve_input("rust", DDG), "https://duckduckgo.com/?q=rust");
+        // Spaces force a search even when a dot is present.
+        assert_eq!(
+            resolve_input("what is docs.rs", DDG),
+            "https://duckduckgo.com/?q=what%20is%20docs.rs"
+        );
+        // Template without {} gets the query appended.
+        assert_eq!(
+            resolve_input("cats", "https://x.com/search?q="),
+            "https://x.com/search?q=cats"
+        );
+        assert_eq!(resolve_input("", DDG), "about:blank");
+    }
+
+    #[test]
+    fn percent_encode_escapes_reserved_bytes() {
+        assert_eq!(percent_encode("a b&c=d?e#f"), "a%20b%26c%3Dd%3Fe%23f");
+        assert_eq!(percent_encode("safe-._~AZaz09"), "safe-._~AZaz09");
+    }
+
+    #[test]
+    fn normalise_url_passes_alterm_scheme() {
+        assert_eq!(normalise_url("alterm://history"), "alterm://history");
     }
 }
