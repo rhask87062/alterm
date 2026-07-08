@@ -2247,7 +2247,9 @@ impl Alterm {
                             Key::Named(Named::ArrowRight) if alt => {
                                 Some(Message::BrowserForward(focused))
                             }
-                            Key::Character(c) if ctrl => match c.as_str() {
+                            // Lowercase like the keybinding registry, in case
+                            // the platform reports the shifted character.
+                            Key::Character(c) if ctrl => match c.as_str().to_ascii_lowercase().as_str() {
                                 "l" => None, // handled below: focus needs a Task
                                 "r" => Some(Message::BrowserReload(focused)),
                                 "h" => Some(Message::BrowserOpenHistory(focused)),
@@ -2262,7 +2264,7 @@ impl Alterm {
                         if let Some(msg) = msg {
                             return self.update(msg);
                         }
-                        if ctrl && matches!(&key, Key::Character(c) if c.as_str() == "l") {
+                        if ctrl && matches!(&key, Key::Character(c) if c.as_str().eq_ignore_ascii_case("l")) {
                             return widget_focus(WidgetId::from(
                                 format!("browser-url-input-{:?}", focused),
                             ));
