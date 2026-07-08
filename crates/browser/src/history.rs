@@ -119,6 +119,11 @@ impl HistoryStore {
     }
 
     /// Retro-fill the title on the most recent entry for `url`.
+    ///
+    /// Empty titles are ignored: webkit emits title-changed events with an
+    /// empty string during page transitions, and those must not clobber a
+    /// previously captured real title. Titles are only ever improved, never
+    /// cleared, through this path.
     pub fn set_title(&mut self, url: &str, title: &str) {
         let Some(e) = self.entries.iter_mut().rev().find(|e| e.url == url) else {
             return;
