@@ -1117,7 +1117,8 @@ impl Alterm {
             .find(|t| t.id == tab_id)
             .map(|t| t.panes.layout().pane_regions(PANE_GRID_SPACING, PANE_GRID_MIN_SIZE, bounds));
 
-        // Freshly created webview never has a find bar open, so use nav height only.
+        // Chrome height includes the find bar if a session is already active
+        // for this pane (e.g. webview re-created while the bar is open).
         let chrome = self.browser_chrome_height(tab_id, pane);
         let (x, y, w, h) = if let Some(regions) = regions {
             if let Some(rect) = regions.get(&pane) {
@@ -2143,7 +2144,7 @@ impl Alterm {
                     if f.query.is_empty() {
                         webview_manager::find_finish(pane_id);
                     } else {
-                        webview_manager::find_start(pane_id, &f.query.clone());
+                        webview_manager::find_start(pane_id, &f.query);
                     }
                 }
             }
