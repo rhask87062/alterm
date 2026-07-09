@@ -15,6 +15,33 @@ use {
     gtk::prelude::ObjectExt,
     raw_window_handle::XlibWindowHandle,
 };
+
+/// Forwards browser shortcuts pressed while the page has keyboard focus.
+/// The capture phase listener beats page handlers; only our exact combos
+/// are intercepted.
+const SHORTCUT_FORWARDER: &str = r#"
+document.addEventListener('keydown', (e) => {
+  const k = e.key;
+  let action = null;
+  if (e.altKey && !e.ctrlKey && k === 'ArrowLeft') action = 'back';
+  else if (e.altKey && !e.ctrlKey && k === 'ArrowRight') action = 'forward';
+  else if (e.ctrlKey && !e.altKey && !e.shiftKey) {
+    if (k === 'l' || k === 'L') action = 'focus-url';
+    else if (k === 'r' || k === 'R') action = 'reload';
+    else if (k === 'h' || k === 'H') action = 'history';
+    else if (k === 'd' || k === 'D') action = 'bookmark';
+    else if (k === 'f' || k === 'F') action = 'find';
+    else if (k === '=' || k === '+') action = 'zoom-in';
+    else if (k === '-') action = 'zoom-out';
+    else if (k === '0') action = 'zoom-reset';
+  }
+  if (action) {
+    e.preventDefault();
+    e.stopPropagation();
+    window.ipc.postMessage(JSON.stringify({cmd: 'shortcut', action: action}));
+  }
+}, true);
+"#;
 #[cfg(target_os = "macos")]
 use {
     raw_window_handle::AppKitWindowHandle,
@@ -34,8 +61,40 @@ thread_local! {
     /// the UI loop share the main thread, so a thread-local queue is sufficient
     /// (no cross-thread channel needed).
     static NAV_EVENTS: RefCell<Vec<(u64, String)>> = const { RefCell::new(Vec::new()) };
+    /// Title-change events `(pane_id, title)`.
+    static TITLE_EVENTS: RefCell<Vec<(u64, String)>> = const { RefCell::new(Vec::new()) };
+    /// Load-state events `(pane_id, started)`; `false` = finished.
+    static LOAD_EVENTS: RefCell<Vec<(u64, bool)>> = const { RefCell::new(Vec::new()) };
+    /// IPC messages `(pane_id, origin_uri, json_body)` posted by pages via window.ipc.
+    static IPC_EVENTS: RefCell<Vec<(u64, String, String)>> = const { RefCell::new(Vec::new()) };
+    /// Find-in-page match counts `(pane_id, count)`.
+    static FIND_EVENTS: RefCell<Vec<(u64, u32)>> = const { RefCell::new(Vec::new()) };
+    /// Shared WebContext for all webviews. On Linux, wry registers custom URI
+    /// schemes at the WebContext level. Sharing one context means the "alterm"
+    /// scheme is only registered once; requests are routed to the right webview
+    /// by the WebViewId embedded in each request. Using a separate context per
+    /// webview would trigger `ContextDuplicateCustomProtocol` on the second
+    /// `create_webview` call.
+    #[cfg(target_os = "linux")]
+    static WEB_CONTEXT: RefCell<Option<wry::WebContext>> = const { RefCell::new(None) };
+    /// Directory for persistent webview profile data (cookies, local
+    /// storage). Consumed when the shared WebContext is first created.
+    #[cfg(target_os = "linux")]
+    static WEBVIEW_DATA_DIR: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
     #[cfg(target_os = "linux")]
     static GTK_INITIALIZED: RefCell<bool> = RefCell::new(false);
+}
+
+/// Set the directory used for persistent webview profile data (cookies,
+/// local storage). Call once at startup, before any webview is created —
+/// once the shared WebContext exists this has no effect.
+pub fn set_data_dir(path: &std::path::Path) {
+    #[cfg(target_os = "linux")]
+    WEBVIEW_DATA_DIR.with(|d| {
+        *d.borrow_mut() = Some(path.to_path_buf());
+    });
+    #[cfg(not(target_os = "linux"))]
+    let _ = path;
 }
 
 /// Drain queued navigation events. Each is `(pane_id, url)` for a navigation
@@ -43,6 +102,29 @@ thread_local! {
 /// confirmed back/forward move). The caller updates the matching pane state.
 pub fn drain_nav_events() -> Vec<(u64, String)> {
     NAV_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// Drain queued title-change events.
+pub fn drain_title_events() -> Vec<(u64, String)> {
+    TITLE_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// Drain queued load-state events (`true` = started, `false` = finished).
+pub fn drain_load_events() -> Vec<(u64, bool)> {
+    LOAD_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// Drain queued IPC messages posted by pages via window.ipc.
+/// Each element is `(pane_id, origin_uri, json_body)`. The `origin_uri` is
+/// the URL of the page that posted the message (from wry's Request URI), used
+/// by callers to gate destructive commands to trusted internal origins.
+pub fn drain_ipc_events() -> Vec<(u64, String, String)> {
+    IPC_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// Drain queued find-in-page match counts.
+pub fn drain_find_events() -> Vec<(u64, u32)> {
+    FIND_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
 }
 
 /// Ensure GTK is initialized. No-op on non-Linux platforms.
@@ -94,23 +176,125 @@ pub fn create_webview(
 
     let wrapper = NativeParent(parent_id);
 
-    let webview = WebViewBuilder::new()
-        .with_url(url)
-        .with_visible(true)
-        .with_bounds(Rect {
-            position: LogicalPosition::new(bounds.0, bounds.1).into(),
-            size: LogicalSize::new(bounds.2, bounds.3).into(),
-        })
-        // Record every navigation (URL-bar submit, link click, redirect, or a
-        // back/forward move) so the UI can keep its history/URL bar accurate.
-        // Returning true allows the navigation to proceed.
-        .with_navigation_handler(move |url| {
-            log::debug!("[nav-diag] navigation_handler fired: pane={pane_id} url={url}");
-            NAV_EVENTS.with(|q| q.borrow_mut().push((pane_id, url)));
-            true
-        })
-        .build_as_child(&wrapper)
-        .map_err(|e| format!("Failed to create webview: {e}"))?;
+    // On Linux we share one WebContext across all webviews so that the
+    // "alterm" custom URI scheme is registered exactly once.  A second
+    // `register_uri_scheme` call on the same context returns
+    // `ContextDuplicateCustomProtocol`; wry dispatches requests to the
+    // correct webview via the WebViewId embedded in each request.
+    #[cfg(target_os = "linux")]
+    let webview = {
+        // Initialise the shared WebContext the first time a webview is created.
+        // A data dir set via `set_data_dir` makes cookies/local storage
+        // persist across launches.
+        WEB_CONTEXT.with(|ctx| {
+            let mut ctx = ctx.borrow_mut();
+            if ctx.is_none() {
+                let data_dir = WEBVIEW_DATA_DIR.with(|d| d.borrow().clone());
+                *ctx = Some(wry::WebContext::new(data_dir));
+            }
+        });
+
+        // Build with the shared context.  We borrow it mutably inside the
+        // closure so the borrow ends before we drop the builder.
+        WEB_CONTEXT.with(|ctx| {
+            let mut ctx = ctx.borrow_mut();
+            let web_ctx = ctx.as_mut().expect("WEB_CONTEXT initialised above");
+
+            // The "alterm" scheme is registered once on the shared WebContext.
+            // Calling with_custom_protocol again on the same context would
+            // return Err(DuplicateCustomProtocol), so we skip it when the
+            // scheme is already registered. Wry dispatches all alterm:// requests
+            // through the single registered handler regardless of which webview
+            // originated the request.
+            let scheme_registered = web_ctx.is_custom_protocol_registered("alterm");
+
+            let builder = WebViewBuilder::new_with_web_context(web_ctx)
+                .with_url(url)
+                .with_visible(true)
+                .with_bounds(Rect {
+                    position: LogicalPosition::new(bounds.0, bounds.1).into(),
+                    size: LogicalSize::new(bounds.2, bounds.3).into(),
+                })
+                // Record every navigation so the UI keeps its history accurate.
+                .with_navigation_handler(move |url| {
+                    log::debug!("[nav-diag] navigation_handler fired: pane={pane_id} url={url}");
+                    NAV_EVENTS.with(|q| q.borrow_mut().push((pane_id, url)));
+                    true
+                })
+                .with_document_title_changed_handler(move |title| {
+                    TITLE_EVENTS.with(|q| q.borrow_mut().push((pane_id, title)));
+                })
+                .with_on_page_load_handler(move |event, _url| {
+                    let started = matches!(event, wry::PageLoadEvent::Started);
+                    LOAD_EVENTS.with(|q| q.borrow_mut().push((pane_id, started)));
+                })
+                .with_ipc_handler(move |req: wry::http::Request<String>| {
+                    IPC_EVENTS.with(|q| q.borrow_mut().push((pane_id, req.uri().to_string(), req.body().clone())));
+                })
+                .with_initialization_script(SHORTCUT_FORWARDER);
+
+            let builder = if !scheme_registered {
+                builder.with_custom_protocol("alterm".into(), |_webview_id, request| {
+                    let uri = request.uri().to_string();
+                    let (mime, body) = crate::internal_pages::respond(&uri);
+                    wry::http::Response::builder()
+                        .header("Content-Type", mime)
+                        .body(std::borrow::Cow::<'static, [u8]>::Owned(body.into_bytes()))
+                        .unwrap_or_else(|_| {
+                            wry::http::Response::new(std::borrow::Cow::Borrowed(&b""[..]))
+                        })
+                })
+            } else {
+                builder
+            };
+
+            builder
+                .build_as_child(&wrapper)
+                .map_err(|e| format!("Failed to create webview: {e}"))
+        })?
+    };
+
+    #[cfg(not(target_os = "linux"))]
+    let webview = {
+        WebViewBuilder::new()
+            .with_url(url)
+            .with_visible(true)
+            .with_bounds(Rect {
+                position: LogicalPosition::new(bounds.0, bounds.1).into(),
+                size: LogicalSize::new(bounds.2, bounds.3).into(),
+            })
+            // Record every navigation so the UI keeps its history accurate.
+            .with_navigation_handler(move |url| {
+                log::debug!("[nav-diag] navigation_handler fired: pane={pane_id} url={url}");
+                NAV_EVENTS.with(|q| q.borrow_mut().push((pane_id, url)));
+                true
+            })
+            .with_document_title_changed_handler(move |title| {
+                TITLE_EVENTS.with(|q| q.borrow_mut().push((pane_id, title)));
+            })
+            .with_on_page_load_handler(move |event, _url| {
+                let started = matches!(event, wry::PageLoadEvent::Started);
+                LOAD_EVENTS.with(|q| q.borrow_mut().push((pane_id, started)));
+            })
+            .with_ipc_handler(move |req: wry::http::Request<String>| {
+                IPC_EVENTS.with(|q| q.borrow_mut().push((pane_id, req.uri().to_string(), req.body().clone())));
+            })
+            .with_initialization_script(SHORTCUT_FORWARDER)
+            .build_as_child(&wrapper)
+            .map_err(|e| format!("Failed to create webview: {e}"))?
+    };
+
+    // Connect find-in-page match-count signal so drain_find_events is populated.
+    #[cfg(target_os = "linux")]
+    {
+        use webkit2gtk::{FindControllerExt, WebViewExt};
+        use wry::WebViewExtUnix;
+        if let Some(fc) = webview.webview().find_controller() {
+            fc.connect_counted_matches(move |_, count| {
+                FIND_EVENTS.with(|q| q.borrow_mut().push((pane_id, count)));
+            });
+        }
+    }
 
     WEBVIEWS.with(|wvs| {
         wvs.borrow_mut().insert(pane_id, webview);
@@ -222,6 +406,98 @@ pub fn go_forward(pane_id: u64) {
             }
         }
     });
+}
+
+/// Stop the current page load (Linux: webkit stop_loading; no-op elsewhere).
+pub fn stop(pane_id: u64) {
+    #[cfg(target_os = "linux")]
+    WEBVIEWS.with(|wvs| {
+        if let Some(wv) = wvs.borrow().get(&pane_id) {
+            use webkit2gtk::WebViewExt;
+            use wry::WebViewExtUnix;
+            wv.webview().stop_loading();
+        }
+    });
+    #[cfg(not(target_os = "linux"))]
+    let _ = pane_id;
+}
+
+/// Set the page zoom factor (1.0 = 100%).
+pub fn set_zoom(pane_id: u64, level: f64) {
+    WEBVIEWS.with(|wvs| {
+        if let Some(wv) = wvs.borrow().get(&pane_id) {
+            if let Err(e) = wv.zoom(level) {
+                log::warn!("WebView zoom failed for pane {pane_id}: {e}");
+            }
+        }
+    });
+}
+
+/// Begin (or update) a find-in-page search. Emits match counts via
+/// `drain_find_events`.
+pub fn find_start(pane_id: u64, text: &str) {
+    #[cfg(target_os = "linux")]
+    WEBVIEWS.with(|wvs| {
+        if let Some(wv) = wvs.borrow().get(&pane_id) {
+            use webkit2gtk::{FindControllerExt, FindOptions, WebViewExt};
+            use wry::WebViewExtUnix;
+            if let Some(fc) = wv.webview().find_controller() {
+                let flags = (FindOptions::CASE_INSENSITIVE | FindOptions::WRAP_AROUND).bits();
+                fc.count_matches(text, flags, u32::MAX);
+                fc.search(text, flags, u32::MAX);
+            }
+        }
+    });
+    #[cfg(not(target_os = "linux"))]
+    let _ = (pane_id, text);
+}
+
+/// Jump to the next find match.
+pub fn find_next(pane_id: u64) {
+    #[cfg(target_os = "linux")]
+    WEBVIEWS.with(|wvs| {
+        if let Some(wv) = wvs.borrow().get(&pane_id) {
+            use webkit2gtk::{FindControllerExt, WebViewExt};
+            use wry::WebViewExtUnix;
+            if let Some(fc) = wv.webview().find_controller() {
+                fc.search_next();
+            }
+        }
+    });
+    #[cfg(not(target_os = "linux"))]
+    let _ = pane_id;
+}
+
+/// Jump to the previous find match.
+pub fn find_prev(pane_id: u64) {
+    #[cfg(target_os = "linux")]
+    WEBVIEWS.with(|wvs| {
+        if let Some(wv) = wvs.borrow().get(&pane_id) {
+            use webkit2gtk::{FindControllerExt, WebViewExt};
+            use wry::WebViewExtUnix;
+            if let Some(fc) = wv.webview().find_controller() {
+                fc.search_previous();
+            }
+        }
+    });
+    #[cfg(not(target_os = "linux"))]
+    let _ = pane_id;
+}
+
+/// End the find session and clear highlights.
+pub fn find_finish(pane_id: u64) {
+    #[cfg(target_os = "linux")]
+    WEBVIEWS.with(|wvs| {
+        if let Some(wv) = wvs.borrow().get(&pane_id) {
+            use webkit2gtk::{FindControllerExt, WebViewExt};
+            use wry::WebViewExtUnix;
+            if let Some(fc) = wv.webview().find_controller() {
+                fc.search_finish();
+            }
+        }
+    });
+    #[cfg(not(target_os = "linux"))]
+    let _ = pane_id;
 }
 
 /// Re-key live webviews when pane ids change (e.g. after a layout rebuild).

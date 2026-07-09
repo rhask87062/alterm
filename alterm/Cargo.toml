@@ -22,3 +22,4 @@ dirs = { workspace = true }
 browser = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
+serde_json = { workspace = true }

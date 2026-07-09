@@ -180,6 +180,8 @@ const PANE_GRID_MIN_SIZE: f32 = 120.0;
 const GRID_PADDING: f32 = 8.0;
 /// Height of the browser nav bar (URL input + padding) in logical pixels.
 const BROWSER_NAV_BAR_HEIGHT: f32 = 40.0;
+/// Height of the browser find bar (search input + padding) in logical pixels.
+const BROWSER_FIND_BAR_HEIGHT: f32 = 36.0;
 /// Max characters shown in a pane title before it's truncated with an ellipsis.
 /// Keeps long titles (e.g. browser URLs) from running off the title bar while
 /// the title button stays Shrink-width (so the rename click target works).
@@ -247,8 +249,12 @@ struct Alterm {
     last_pane_click: Option<(pane_grid::Pane, Instant)>,
     /// Active terminal find-bar search, if open.
     search: Option<SearchState>,
+    /// Active browser find-in-page session, if open.
+    browser_find: Option<BrowserFindState>,
     /// Persisted per-provider model-list cache (see `ai::model_cache`).
     model_cache: ai::model_cache::ModelCache,
+    /// Frame counter for the browser loading spinner animation.
+    spinner_frame: usize,
 }
 
 /// What an in-progress inline rename is targeting.
@@ -293,6 +299,15 @@ struct SearchState {
 /// Widget id of the find-bar text field, so it can be focused on open.
 fn search_input_id() -> WidgetId {
     WidgetId::from("terminal-search-input".to_string())
+}
+
+/// Active find-in-page session for one browser pane.
+struct BrowserFindState {
+    tab_id: u64,
+    pane: pane_grid::Pane,
+    query: String,
+    /// Total matches reported by webkit (None until the first count arrives).
+    matches: Option<u32>,
 }
 
 /// Next/previous index with wraparound; returns 0 for an empty set.
@@ -377,6 +392,18 @@ enum Message {
     BrowserForward(pane_grid::Pane),
     BrowserReload(pane_grid::Pane),
     BrowserUrlChanged(pane_grid::Pane, String),
+    BrowserToggleBookmark(pane_grid::Pane),
+    BrowserOpenHistory(pane_grid::Pane),
+    BrowserStop(pane_grid::Pane),
+    BrowserZoomIn(pane_grid::Pane),
+    BrowserZoomOut(pane_grid::Pane),
+    BrowserZoomReset(pane_grid::Pane),
+    // Browser find-in-page
+    BrowserFindOpen(pane_grid::Pane),
+    BrowserFindChanged(String),
+    BrowserFindNext,
+    BrowserFindPrev,
+    BrowserFindClose,
     // Preview
     OpenPreview,
     PreviewNavigate(pane_grid::Pane, String),
@@ -406,6 +433,13 @@ enum Message {
     NoteEdited(pane_grid::Pane, iced::widget::text_editor::Action),
 }
 
+/// Direction for a browser zoom adjustment.
+enum ZoomChange {
+    In,
+    Out,
+    Reset,
+}
+
 impl Alterm {
     fn new() -> (Self, Task<Message>) {
         let window_width = 900.0_f32;
@@ -413,6 +447,18 @@ impl Alterm {
 
         // Initialize GTK early (required by webkit2gtk before any webview creation).
         webview_manager::init_gtk();
+
+        // Global browser history/bookmarks live under the XDG data dir.
+        let browser_data_dir = dirs::data_dir()
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join(".local/share")
+            })
+            .join("alterm");
+        browser::history::init(&browser_data_dir);
+        // Persist cookies and local storage across restarts.
+        webview_manager::set_data_dir(&browser_data_dir.join("webview"));
 
         // Load config from default path.
         let config = AppConfig::load(&AppConfig::config_path()).unwrap_or_else(|e| {
@@ -504,7 +550,9 @@ impl Alterm {
             last_tab_click: None,
             last_pane_click: None,
             search: None,
+            browser_find: None,
             model_cache,
+            spinner_frame: 0,
         };
 
         // Request the native window handle from iced — fires WindowHandleReady.
@@ -597,6 +645,13 @@ impl Alterm {
             (grid_height - GRID_PADDING * 2.0).max(40.0),
         );
 
+        // Snapshot the find state before taking the mutable tab borrow, so we
+        // can use it inside the loop without a second borrow of self.
+        let find_key: Option<(u64, pane_grid::Pane)> = self
+            .browser_find
+            .as_ref()
+            .map(|f| (f.tab_id, f.pane));
+
         let tab = self.active_tab_mut();
         let tab_id = tab.id;
         let maximized_pane = tab.panes.maximized();
@@ -651,13 +706,15 @@ impl Alterm {
                         webview_manager::exists(pane_id), rect.x, rect.y, rect.width, rect.height
                     );
                     if webview_manager::exists(pane_id) {
+                        let find_active = find_key == Some((tab_id, *pane));
+                        let chrome = BROWSER_NAV_BAR_HEIGHT + if find_active { BROWSER_FIND_BAR_HEIGHT } else { 0.0 };
                         let wv_x = (GRID_PADDING + rect.x) as f64;
-                        let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+                        let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64;
                         let wv_w = rect.width as f64;
                         // The native webview is a plain rectangle and fills to
                         // the pane bottom, so browser panes have square bottom
                         // corners (no rounded clipping for native windows).
-                        let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
+                        let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64;
                         webview_manager::set_bounds(pane_id, wv_x, wv_y, wv_w, wv_h);
                         webview_manager::set_visible(pane_id, true);
                     }
@@ -694,6 +751,16 @@ impl Alterm {
         info.new_pane
     }
 
+    /// Total chrome height (nav bar + optional find bar) above a browser
+    /// pane's webview.
+    fn browser_chrome_height(&self, tab_id: u64, pane: pane_grid::Pane) -> f32 {
+        let find = self
+            .browser_find
+            .as_ref()
+            .is_some_and(|f| f.tab_id == tab_id && f.pane == pane);
+        BROWSER_NAV_BAR_HEIGHT + if find { BROWSER_FIND_BAR_HEIGHT } else { 0.0 }
+    }
+
     /// Create a real wry webview for a browser pane.
     fn create_browser_webview(&self, pane: pane_grid::Pane, url: &str) {
         let Some(xid) = self.parent_xid else {
@@ -720,14 +787,16 @@ impl Alterm {
             bounds,
         );
 
+        let tab_id = self.active_tab().id;
+        let chrome = self.browser_chrome_height(tab_id, pane);
         let (x, y, w, h) = if let Some(rect) = regions.get(&pane) {
             let wv_x = (GRID_PADDING + rect.x) as f64;
-            let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+            let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64;
             let wv_w = rect.width as f64;
-            let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
+            let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64;
             (wv_x, wv_y, wv_w, wv_h)
         } else {
-            // Fallback: reasonable defaults.
+            // Fallback: reasonable defaults (freshly created webview has no find bar).
             (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0)
         };
 
@@ -769,11 +838,186 @@ impl Alterm {
                     .find(|(p, _)| webview_key(tab_id, **p) == pane_id)
                 {
                     if let Block::Browser { state } = block {
-                        state.on_navigation(&url);
+                        let fresh = state.on_navigation(&url);
+                        if fresh && !url.starts_with("alterm://") && !url.starts_with("about:") {
+                            browser::history::with_stores(|s| {
+                                s.history.record_visit(&url, browser::history::now_ts());
+                            });
+                        }
                     }
                     break;
                 }
             }
+        }
+    }
+
+    /// Resolve a webview key back to its (tab_id, pane). Used when events
+    /// arrive keyed by webview id.
+    fn find_browser_pane(&self, pane_id: u64) -> Option<(u64, pane_grid::Pane)> {
+        for tab in &self.tabs {
+            let tab_id = tab.id;
+            for (pane, block) in tab.panes.iter() {
+                if block.is_browser() && webview_key(tab_id, *pane) == pane_id {
+                    return Some((tab_id, *pane));
+                }
+            }
+        }
+        None
+    }
+
+    /// Drain title, load-state, and IPC events from the webviews and apply
+    /// them to pane state and the global stores.
+    fn apply_browser_webview_events(&mut self) -> Task<Message> {
+        for (pane_id, title) in webview_manager::drain_title_events() {
+            if let Some((tab_id, pane)) = self.find_browser_pane(pane_id) {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                        state.title = title.clone();
+                        if !state.url.starts_with("alterm://") {
+                            let url = state.url.clone();
+                            browser::history::with_stores(|s| {
+                                s.history.set_title(&url, &title);
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        for (pane_id, started) in webview_manager::drain_load_events() {
+            if let Some((tab_id, pane)) = self.find_browser_pane(pane_id) {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                    if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                        state.set_loading(started);
+                    }
+                }
+            }
+        }
+
+        let ipc_events = webview_manager::drain_ipc_events();
+        let mut tasks = Vec::new();
+        for (pane_id, origin, body) in ipc_events {
+            tasks.push(self.handle_browser_ipc(pane_id, &origin, &body));
+        }
+
+        // Drain find-in-page match counts from webviews.
+        for (pane_id, count) in webview_manager::drain_find_events() {
+            if let Some(f) = self.browser_find.as_mut() {
+                if webview_key(f.tab_id, f.pane) == pane_id {
+                    f.matches = Some(count);
+                }
+            }
+        }
+
+        // Clear stale find state if the pane or tab no longer exists / is no longer a browser.
+        if let Some(f) = self.browser_find.as_ref() {
+            let alive = self
+                .tabs
+                .iter()
+                .find(|t| t.id == f.tab_id)
+                .and_then(|t| t.panes.get(f.pane))
+                .is_some_and(|b| b.is_browser());
+            if !alive {
+                self.browser_find = None;
+            }
+        }
+
+        Task::batch(tasks)
+    }
+
+    /// Apply one IPC message posted by a page (internal-page actions and
+    /// forwarded keyboard shortcuts).
+    fn handle_browser_ipc(&mut self, pane_id: u64, origin: &str, body: &str) -> Task<Message> {
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(body) else {
+            log::warn!("browser ipc: unparseable message: {body}");
+            return Task::none();
+        };
+        let cmd = msg.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+        match cmd {
+            "history-delete" | "history-clear" | "bookmark-remove" => {
+                // Only trust destructive commands from our own internal pages.
+                if !origin.starts_with("alterm://") {
+                    log::warn!("browser ipc: ignoring {cmd:?} from non-internal origin {origin:?}");
+                    return Task::none();
+                }
+                match cmd {
+                    "history-delete" => {
+                        let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                        let ts = msg.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
+                        browser::history::with_stores(|s| s.history.delete(url, ts));
+                        webview_manager::reload(pane_id);
+                        Task::none()
+                    }
+                    "history-clear" => {
+                        browser::history::with_stores(|s| s.history.clear());
+                        webview_manager::reload(pane_id);
+                        Task::none()
+                    }
+                    "bookmark-remove" => {
+                        let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                        browser::history::with_stores(|s| {
+                            if s.bookmarks.is_bookmarked(url) {
+                                s.bookmarks.toggle(url, "");
+                            }
+                        });
+                        webview_manager::reload(pane_id);
+                        Task::none()
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            "shortcut" => {
+                let action = msg.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                self.handle_browser_shortcut_ipc(pane_id, action)
+            }
+            other => {
+                log::warn!("browser ipc: unknown cmd {other:?}");
+                Task::none()
+            }
+        }
+    }
+
+    /// Route a shortcut forwarded from inside a webview page.
+    fn handle_browser_shortcut_ipc(&mut self, pane_id: u64, action: &str) -> Task<Message> {
+        let Some((tab_id, pane)) = self.find_browser_pane(pane_id) else {
+            return Task::none();
+        };
+        // Shortcuts act on the pane they came from; switch focus if needed.
+        if self.tabs.get(self.active_tab).map(|t| t.id) != Some(tab_id) {
+            return Task::none(); // stale event from a hidden tab's webview
+        }
+        match action {
+            "back" => self.update(Message::BrowserBack(pane)),
+            "forward" => self.update(Message::BrowserForward(pane)),
+            "reload" => self.update(Message::BrowserReload(pane)),
+            "history" => self.update(Message::BrowserOpenHistory(pane)),
+            "bookmark" => self.update(Message::BrowserToggleBookmark(pane)),
+            "zoom-in" => self.update(Message::BrowserZoomIn(pane)),
+            "zoom-out" => self.update(Message::BrowserZoomOut(pane)),
+            "zoom-reset" => self.update(Message::BrowserZoomReset(pane)),
+            "focus-url" => widget_focus(WidgetId::from(
+                format!("browser-url-input-{:?}", pane),
+            )),
+            "find" => self.update(Message::BrowserFindOpen(pane)),
+            other => {
+                log::warn!("browser ipc: unknown shortcut {other:?}");
+                Task::none()
+            }
+        }
+    }
+
+    /// Step or reset a browser pane's zoom and apply it to the webview.
+    fn browser_zoom(&mut self, pane: pane_grid::Pane, change: ZoomChange) {
+        let tab_id = self.active_tab().id;
+        let pane_id = webview_key(tab_id, pane);
+        let tab = self.active_tab_mut();
+        if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+            state.zoom = match change {
+                ZoomChange::In => (state.zoom * 1.1).min(5.0),
+                ZoomChange::Out => (state.zoom / 1.1).max(0.25),
+                ZoomChange::Reset => 1.0,
+            };
+            webview_manager::set_zoom(pane_id, state.zoom);
         }
     }
 
@@ -883,12 +1127,15 @@ impl Alterm {
             .find(|t| t.id == tab_id)
             .map(|t| t.panes.layout().pane_regions(PANE_GRID_SPACING, PANE_GRID_MIN_SIZE, bounds));
 
+        // Chrome height includes the find bar if a session is already active
+        // for this pane (e.g. webview re-created while the bar is open).
+        let chrome = self.browser_chrome_height(tab_id, pane);
         let (x, y, w, h) = if let Some(regions) = regions {
             if let Some(rect) = regions.get(&pane) {
                 let wv_x = (GRID_PADDING + rect.x) as f64;
-                let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64;
+                let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64;
                 let wv_w = rect.width as f64;
-                let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - BROWSER_NAV_BAR_HEIGHT).max(10.0) as f64;
+                let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64;
                 (wv_x, wv_y, wv_w, wv_h)
             } else {
                 // Non-active tab pane — use default bounds; resize_all_panes() corrects when tab is selected.
@@ -906,14 +1153,14 @@ impl Alterm {
     /// Create webviews for all browser panes across all tabs that don't yet have one.
     /// Called once parent_xid becomes available (WindowHandleReady). Idempotent.
     fn ensure_browser_webviews(&mut self) {
-        // Collect tab/pane/url tuples to avoid borrow conflicts.
-        let browser_panes: Vec<(u64, pane_grid::Pane, String)> = self.tabs.iter()
+        // Collect tab/pane/url/zoom tuples to avoid borrow conflicts.
+        let browser_panes: Vec<(u64, pane_grid::Pane, String, f64)> = self.tabs.iter()
             .flat_map(|tab| {
                 let tab_id = tab.id;
                 tab.panes.iter().filter_map(move |(pane, block)| {
                     if let Block::Browser { state } = block {
                         if !webview_manager::exists(webview_key(tab_id, *pane)) {
-                            return Some((tab_id, *pane, state.url.clone()));
+                            return Some((tab_id, *pane, state.url.clone(), state.zoom));
                         }
                     }
                     None
@@ -921,10 +1168,22 @@ impl Alterm {
             })
             .collect();
 
-        for (tab_id, pane, url) in browser_panes {
+        let created_any = !browser_panes.is_empty();
+        for (tab_id, pane, url, zoom) in browser_panes {
             self.create_browser_webview_for(tab_id, pane, &url);
+            if (zoom - 1.0).abs() > f64::EPSILON {
+                webview_manager::set_zoom(webview_key(tab_id, pane), zoom);
+            }
         }
         self.update_webview_visibility();
+        // Webviews restored from a session start with whatever bounds were
+        // computable at creation time (often the fallback defaults, since the
+        // pane layout may not be final yet). Re-derive bounds from the real
+        // layout so a restored webview doesn't sit misplaced until the first
+        // manual window resize.
+        if created_any {
+            self.resize_all_panes();
+        }
     }
 
     /// Scroll the focused pane by the given number of lines.
@@ -1101,6 +1360,7 @@ impl Alterm {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
+                self.spinner_frame = self.spinner_frame.wrapping_add(1);
                 // Pump GTK events so webkit2gtk can process network/rendering.
                 webview_manager::pump_gtk_events();
 
@@ -1109,12 +1369,17 @@ impl Alterm {
                 // the URL bar and back/forward buttons stay accurate.
                 self.apply_browser_nav_events();
 
+                // Drain title, load-state, and IPC events from all webviews.
+                let wv_task = self.apply_browser_webview_events();
+
                 // Tick all panes in all tabs.
                 for tab in &mut self.tabs {
                     for (_pane, block) in tab.panes.iter_mut() {
                         block.tick();
                     }
                 }
+
+                return wv_task;
             }
             Message::PaneClicked(pane) => {
                 // Only steer keyboard focus to the pane's text_input when this
@@ -1778,11 +2043,21 @@ impl Alterm {
 
             // -- Browser --
             Message::OpenBrowser => {
-                let url = "https://www.google.com";
+                let url = "alterm://history";
                 let block = Block::new_browser(url);
                 let new_pane = self.add_window(block);
                 // Create the webview against the final (post-rebuild) pane id.
                 self.create_browser_webview(new_pane, url);
+                // Apply persisted zoom if non-default.
+                {
+                    let tab_id = self.active_tab().id;
+                    let tab = self.active_tab();
+                    if let Some(Block::Browser { state }) = tab.panes.get(new_pane) {
+                        if (state.zoom - 1.0).abs() > f64::EPSILON {
+                            webview_manager::set_zoom(webview_key(tab_id, new_pane), state.zoom);
+                        }
+                    }
+                }
                 webview_manager::pump_gtk_events();
                 self.resize_all_panes();
                 return widget_focus(WidgetId::from(
@@ -1790,13 +2065,12 @@ impl Alterm {
                 ));
             }
             Message::BrowserNavigate(pane, url) => {
+                let target = browser::resolve_input(&url, &self.config.browser.search_engine);
                 let tab_id = self.active_tab().id;
                 let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    // navigate() normalises the URL; history is recorded when the
-                    // resulting navigation event flows back via drain_nav_events().
-                    let target = state.navigate(&url);
+                    let target = state.navigate(&target);
                     webview_manager::navigate(pane_id, &target);
                 }
             }
@@ -1836,6 +2110,85 @@ impl Alterm {
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     state.input_url = url;
                 }
+            }
+            Message::BrowserToggleBookmark(pane) => {
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    let url = state.url.clone();
+                    let title = state.title.clone();
+                    if !url.starts_with("alterm://") {
+                        browser::history::with_stores(|s| s.bookmarks.toggle(&url, &title));
+                    }
+                }
+            }
+            Message::BrowserOpenHistory(pane) => {
+                return self.update(Message::BrowserNavigate(pane, "alterm://history".into()));
+            }
+            Message::BrowserStop(pane) => {
+                let tab_id = self.active_tab().id;
+                let pane_id = webview_key(tab_id, pane);
+                let tab = self.active_tab_mut();
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    state.set_loading(false);
+                    webview_manager::stop(pane_id);
+                }
+            }
+            Message::BrowserZoomIn(pane) => {
+                self.browser_zoom(pane, ZoomChange::In);
+            }
+            Message::BrowserZoomOut(pane) => {
+                self.browser_zoom(pane, ZoomChange::Out);
+            }
+            Message::BrowserZoomReset(pane) => {
+                self.browser_zoom(pane, ZoomChange::Reset);
+            }
+
+            // -- Browser find-in-page --
+            Message::BrowserFindOpen(pane) => {
+                let tab_id = self.active_tab().id;
+                // If there is already an active find session on a *different* pane,
+                // end it first so webkit clears its highlights before we open a new one.
+                if let Some(old) = self.browser_find.take() {
+                    if (old.tab_id, old.pane) != (tab_id, pane) {
+                        webview_manager::find_finish(webview_key(old.tab_id, old.pane));
+                    }
+                }
+                self.browser_find = Some(BrowserFindState {
+                    tab_id,
+                    pane,
+                    query: String::new(),
+                    matches: None,
+                });
+                self.resize_all_panes();
+                return widget_focus(WidgetId::from(format!("browser-find-input-{:?}", pane)));
+            }
+            Message::BrowserFindChanged(q) => {
+                if let Some(f) = self.browser_find.as_mut() {
+                    f.query = q;
+                    f.matches = None;
+                    let pane_id = webview_key(f.tab_id, f.pane);
+                    if f.query.is_empty() {
+                        webview_manager::find_finish(pane_id);
+                    } else {
+                        webview_manager::find_start(pane_id, &f.query);
+                    }
+                }
+            }
+            Message::BrowserFindNext => {
+                if let Some(f) = self.browser_find.as_ref() {
+                    webview_manager::find_next(webview_key(f.tab_id, f.pane));
+                }
+            }
+            Message::BrowserFindPrev => {
+                if let Some(f) = self.browser_find.as_ref() {
+                    webview_manager::find_prev(webview_key(f.tab_id, f.pane));
+                }
+            }
+            Message::BrowserFindClose => {
+                if let Some(f) = self.browser_find.take() {
+                    webview_manager::find_finish(webview_key(f.tab_id, f.pane));
+                }
+                self.resize_all_panes();
             }
 
             // -- Preview --
@@ -1984,6 +2337,19 @@ impl Alterm {
                     }
                 }
 
+                // While the browser find bar is open: Escape closes, Shift+Enter
+                // goes to the previous match; plain Enter is handled by the
+                // text_input's on_submit. Other keys fall through to the input widget.
+                if self.browser_find.is_some() {
+                    match &key {
+                        Key::Named(Named::Escape) => return self.update(Message::BrowserFindClose),
+                        Key::Named(Named::Enter) if modifiers.shift() => {
+                            return self.update(Message::BrowserFindPrev)
+                        }
+                        _ => {}
+                    }
+                }
+
                 // When the palette is open, intercept navigation keys.
                 if self.palette.visible {
                     match &key {
@@ -2010,6 +2376,50 @@ impl Alterm {
                             }
                             // All other keys are handled by the text_input widget.
                             return Task::none();
+                        }
+                    }
+                }
+
+                // Browser-pane shortcuts (when a browser pane is focused and
+                // iced owns the keyboard, e.g. after clicking the chrome).
+                if let Some(focused) = self.active_tab().focus {
+                    let is_browser = self
+                        .active_tab()
+                        .panes
+                        .get(focused)
+                        .is_some_and(|b| b.is_browser());
+                    if is_browser {
+                        let alt = modifiers.alt() && !modifiers.control();
+                        let ctrl = modifiers.control() && !modifiers.alt() && !modifiers.shift();
+                        let msg = match &key {
+                            Key::Named(Named::ArrowLeft) if alt => {
+                                Some(Message::BrowserBack(focused))
+                            }
+                            Key::Named(Named::ArrowRight) if alt => {
+                                Some(Message::BrowserForward(focused))
+                            }
+                            // Lowercase like the keybinding registry, in case
+                            // the platform reports the shifted character.
+                            Key::Character(c) if ctrl => match c.as_str().to_ascii_lowercase().as_str() {
+                                "l" => None, // handled below: focus needs a Task
+                                "r" => Some(Message::BrowserReload(focused)),
+                                "h" => Some(Message::BrowserOpenHistory(focused)),
+                                "d" => Some(Message::BrowserToggleBookmark(focused)),
+                                "f" => Some(Message::BrowserFindOpen(focused)),
+                                "=" | "+" => Some(Message::BrowserZoomIn(focused)),
+                                "-" => Some(Message::BrowserZoomOut(focused)),
+                                "0" => Some(Message::BrowserZoomReset(focused)),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        if let Some(msg) = msg {
+                            return self.update(msg);
+                        }
+                        if ctrl && matches!(&key, Key::Character(c) if c.as_str().eq_ignore_ascii_case("l")) {
+                            return widget_focus(WidgetId::from(
+                                format!("browser-url-input-{:?}", focused),
+                            ));
                         }
                     }
                 }
@@ -2211,6 +2621,7 @@ impl Alterm {
         let light_mode = is_config_light_theme(&self.config.appearance.theme);
         let is_maximized = tab.panes.maximized().is_some();
         let has_terminal_context = self.terminal_context(1).is_some();
+        let browser_find = self.browser_find.as_ref();
         // Inline pane-rename state captured for the pane-grid closure below.
         let editing_pane = match self.rename {
             Some(RenameTarget::Pane(p)) => Some(p),
@@ -2265,7 +2676,8 @@ impl Alterm {
                         settings_view(pane, state, &self.available_fonts)
                     }
                     Block::Browser { state } => {
-                        browser_view(pane, state)
+                        let find = browser_find.filter(|f| f.tab_id == active_tab_id && f.pane == pane);
+                        browser_view(pane, state, self.spinner_frame, find)
                     }
                     Block::Preview { state } => {
                         preview_view(pane, state)
@@ -3331,6 +3743,8 @@ fn settings_terminal_section<'a>(
 fn browser_view<'a>(
     pane: pane_grid::Pane,
     state: &'a BrowserState,
+    spinner_frame: usize,
+    find: Option<&'a BrowserFindState>,
 ) -> Element<'a, Message> {
     // ── Navigation bar ──
     let back_label = text("\u{25C0}").size(14).center();
@@ -3349,11 +3763,17 @@ fn browser_view<'a>(
         fwd_btn = fwd_btn.on_press(Message::BrowserForward(pane));
     }
 
-    let reload_label = text("\u{21BB}").size(14).center();
-    let reload_btn = button(reload_label)
-        .on_press(Message::BrowserReload(pane))
-        .padding(Padding::from([4, 8]))
-        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
+    let reload_btn = if state.loading {
+        button(text("\u{2715}").size(14).center()) // ✕ stop
+            .on_press(Message::BrowserStop(pane))
+            .padding(Padding::from([4, 8]))
+            .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status))
+    } else {
+        button(text("\u{21BB}").size(14).center()) // ↻ reload
+            .on_press(Message::BrowserReload(pane))
+            .padding(Padding::from([4, 8]))
+            .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status))
+    };
 
     let url_input = text_input("Enter URL...", &state.input_url)
         .on_input(move |v| Message::BrowserUrlChanged(pane, v))
@@ -3362,34 +3782,79 @@ fn browser_view<'a>(
         .padding(Padding::from([6, 10]))
         .id(WidgetId::from(format!("browser-url-input-{:?}", pane)));
 
+    let bookmarked = browser::history::with_stores(|s| s.bookmarks.is_bookmarked(&state.url))
+        .unwrap_or(false);
+    let star_label = if bookmarked { "\u{2605}" } else { "\u{2606}" }; // ★ / ☆
+    let mut star_btn = button(text(star_label).size(14).center())
+        .padding(Padding::from([4, 8]))
+        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
+    if !state.url.starts_with("alterm://") {
+        star_btn = star_btn.on_press(Message::BrowserToggleBookmark(pane));
+    }
+
+    let history_btn = button(text("\u{1F553}").size(14).center()) // 🕓
+        .on_press(Message::BrowserOpenHistory(pane))
+        .padding(Padding::from([4, 8]))
+        .style(|theme: &Theme, status: button::Status| nav_button_style(theme, status));
+
+    const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+    let spinner: Element<'a, Message> = if state.loading {
+        text(SPINNER[spinner_frame % SPINNER.len()])
+            .size(13)
+            .into()
+    } else {
+        iced::widget::space().width(Length::Fixed(0.0)).into()
+    };
+
     let nav_bar: Element<'a, Message> = container(
-        row![back_btn, fwd_btn, reload_btn, url_input]
+        row![back_btn, fwd_btn, reload_btn, url_input, spinner, star_btn, history_btn]
             .spacing(4)
             .align_y(iced::Alignment::Center),
     )
     .width(Fill)
     .padding(Padding::from([4, 8]))
-    .style(|theme: &Theme| {
-        let light = is_light_theme(theme);
-        iced::widget::container::Style {
-            background: Some(Background::Color(if light {
-                Color::from_rgb(0.92, 0.92, 0.94)
-            } else {
-                Color::from_rgb(0.08, 0.08, 0.11)
-            })),
-            border: Border {
-                color: if light {
-                    Color::from_rgb(0.80, 0.80, 0.85)
-                } else {
-                    Color::from_rgb(0.15, 0.15, 0.20)
-                },
-                width: 0.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        }
-    })
+    .style(browser_chrome_style)
     .into();
+
+    // ── Find bar (optional) ──
+    let find_bar: Option<Element<'a, Message>> = find.map(|f| {
+        let count_label = match f.matches {
+            Some(0) => "No matches".to_string(),
+            Some(n) => format!("{n} matches"),
+            None => String::new(),
+        };
+        container(
+            row![
+                text_input("Find in page...", &f.query)
+                    .on_input(Message::BrowserFindChanged)
+                    .on_submit(Message::BrowserFindNext)
+                    .size(13)
+                    .padding(Padding::from([4, 10]))
+                    .width(Length::Fixed(260.0))
+                    .id(WidgetId::from(format!("browser-find-input-{:?}", pane))),
+                button(text("\u{25B2}").size(12).center())
+                    .on_press(Message::BrowserFindPrev)
+                    .padding(Padding::from([4, 8]))
+                    .style(|t: &Theme, s: button::Status| nav_button_style(t, s)),
+                button(text("\u{25BC}").size(12).center())
+                    .on_press(Message::BrowserFindNext)
+                    .padding(Padding::from([4, 8]))
+                    .style(|t: &Theme, s: button::Status| nav_button_style(t, s)),
+                text(count_label).size(12),
+                iced::widget::space().width(Fill),
+                button(text("\u{2715}").size(12).center())
+                    .on_press(Message::BrowserFindClose)
+                    .padding(Padding::from([4, 8]))
+                    .style(|t: &Theme, s: button::Status| nav_button_style(t, s)),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        )
+        .width(Fill)
+        .padding(Padding::from([4, 8]))
+        .style(browser_chrome_style)
+        .into()
+    });
 
     // ── Content area ──
     // The real wry webview is rendered as an X11 child window that overlays this area.
@@ -3406,8 +3871,12 @@ fn browser_view<'a>(
     })
     .into();
 
-    // ── Layout: nav bar on top, webview area fills the rest ──
-    container(column![nav_bar, webview_area])
+    // ── Layout: nav bar (+ optional find bar) on top, webview area fills the rest ──
+    let mut chrome = column![nav_bar];
+    if let Some(fb) = find_bar {
+        chrome = chrome.push(fb);
+    }
+    container(chrome.push(webview_area))
         .width(Fill)
         .height(Fill)
         .clip(true)
@@ -3420,6 +3889,28 @@ fn browser_view<'a>(
             ..Default::default()
         })
         .into()
+}
+
+/// Background/border style shared by the browser nav bar and find bar rows.
+fn browser_chrome_style(theme: &Theme) -> iced::widget::container::Style {
+    let light = is_light_theme(theme);
+    iced::widget::container::Style {
+        background: Some(Background::Color(if light {
+            Color::from_rgb(0.92, 0.92, 0.94)
+        } else {
+            Color::from_rgb(0.08, 0.08, 0.11)
+        })),
+        border: Border {
+            color: if light {
+                Color::from_rgb(0.80, 0.80, 0.85)
+            } else {
+                Color::from_rgb(0.15, 0.15, 0.20)
+            },
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
 }
 
 /// Style for browser navigation buttons (back, forward, reload).

@@ -4,6 +4,9 @@
 /// - `BrowserState`: tracks URL, navigation history, and loading status.
 /// - `webview_manager`: manages real wry `WebView` instances on the main thread.
 
+pub mod history;
+pub mod internal_pages;
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod webview_manager;
 
@@ -12,6 +15,7 @@ pub mod webview_manager {
     /// Embedded browser is not supported on this platform.
     pub fn init_gtk() {}
     pub fn pump_gtk_events() {}
+    pub fn set_data_dir(_path: &std::path::Path) {}
     pub fn create_webview(
         _pane_id: u64,
         _parent_window: u64,
@@ -29,6 +33,16 @@ pub mod webview_manager {
     pub fn go_back(_pane_id: u64) {}
     pub fn go_forward(_pane_id: u64) {}
     pub fn drain_nav_events() -> Vec<(u64, String)> { Vec::new() }
+    pub fn drain_title_events() -> Vec<(u64, String)> { Vec::new() }
+    pub fn drain_load_events() -> Vec<(u64, bool)> { Vec::new() }
+    pub fn drain_ipc_events() -> Vec<(u64, String, String)> { Vec::new() }
+    pub fn drain_find_events() -> Vec<(u64, u32)> { Vec::new() }
+    pub fn stop(_pane_id: u64) {}
+    pub fn set_zoom(_pane_id: u64, _level: f64) {}
+    pub fn find_start(_pane_id: u64, _text: &str) {}
+    pub fn find_next(_pane_id: u64) {}
+    pub fn find_prev(_pane_id: u64) {}
+    pub fn find_finish(_pane_id: u64) {}
 }
 
 /// Manages the state for a single browser pane.
@@ -56,6 +70,8 @@ pub struct BrowserState {
     /// index without discarding the other direction's history) apart from a
     /// fresh navigation (link click / URL bar) which truncates forward history.
     pub pending_move: i8,
+    /// Page zoom factor (1.0 = 100%). Applied via the webview manager.
+    pub zoom: f64,
 }
 
 impl BrowserState {
@@ -72,6 +88,7 @@ impl BrowserState {
             history: vec![url],
             history_index: 0,
             pending_move: 0,
+            zoom: 1.0,
         }
     }
 
@@ -93,16 +110,21 @@ impl BrowserState {
     /// Record a navigation that actually occurred in the webview (URL-bar
     /// submit, link click, redirect, or a confirmed back/forward move).
     ///
+    /// Returns `true` when the navigation was fresh (recorded a new history
+    /// entry), `false` for confirmed back/forward moves and duplicate reports.
+    /// Callers use this to decide global-history recording.
+    ///
     /// This is the single place history is mutated, so every navigation —
     /// however it was triggered — keeps the stack and nav flags accurate.
-    pub fn on_navigation(&mut self, url: &str) {
+    pub fn on_navigation(&mut self, url: &str) -> bool {
         let url = normalise_url(url);
 
-        match self.pending_move {
+        let fresh = match self.pending_move {
             -1 => {
                 // Confirmed Back: move the index, keep forward history intact.
                 self.history_index = self.history_index.saturating_sub(1);
                 self.pending_move = 0;
+                false
             }
             1 => {
                 // Confirmed Forward: move the index, keep back history intact.
@@ -110,6 +132,7 @@ impl BrowserState {
                     self.history_index += 1;
                 }
                 self.pending_move = 0;
+                false
             }
             _ => {
                 // Fresh navigation. Ignore a duplicate of the current page
@@ -118,9 +141,12 @@ impl BrowserState {
                     self.history.truncate(self.history_index + 1);
                     self.history.push(url.clone());
                     self.history_index = self.history.len() - 1;
+                    true
+                } else {
+                    false
                 }
             }
-        }
+        };
 
         self.url = url.clone();
         self.input_url = url;
@@ -132,6 +158,7 @@ impl BrowserState {
             self.history_index,
             self.history.len()
         );
+        fresh
     }
 
     /// Move Back one entry. Returns `true` if there was somewhere to go, in
@@ -178,6 +205,11 @@ impl BrowserState {
         log::debug!("Browser reload: {}", self.url);
     }
 
+    /// Update the loading flag from a webview load-state event.
+    pub fn set_loading(&mut self, loading: bool) {
+        self.loading = loading;
+    }
+
     /// The URL of the currently loaded page.
     pub fn current_url(&self) -> &str {
         &self.url
@@ -199,13 +231,69 @@ impl BrowserState {
     }
 }
 
+/// Resolve text typed in the URL bar into a navigable URL.
+///
+/// Applied ONLY to URL-bar submissions — navigation events reported by the
+/// webview are already real URLs and go through [`normalise_url`] instead.
+///
+/// - Explicit scheme (`http`, `https`, `about`, `alterm`) → unchanged.
+/// - Single token with a dot in its host part, or `localhost[:port]` →
+///   `https://` prefixed.
+/// - Anything else → search via `search_engine` (a URL template whose `{}`
+///   is replaced with the percent-encoded query; appended if no `{}`).
+pub fn resolve_input(input: &str, search_engine: &str) -> String {
+    let t = input.trim();
+    if t.is_empty() {
+        return "about:blank".to_string();
+    }
+    let lower = t.to_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("about:")
+        || lower.starts_with("alterm://")
+    {
+        return t.to_string();
+    }
+    let no_spaces = !t.contains(char::is_whitespace);
+    let host = t.split('/').next().unwrap_or(t);
+    let hostname = host.split(':').next().unwrap_or(host);
+    if no_spaces && (hostname == "localhost" || hostname.contains('.')) {
+        return format!("https://{t}");
+    }
+    let q = percent_encode(t);
+    if search_engine.contains("{}") {
+        search_engine.replacen("{}", &q, 1)
+    } else {
+        format!("{search_engine}{q}")
+    }
+}
+
+/// Percent-encode a query string for use in a URL (RFC 3986 unreserved
+/// characters pass through; everything else is `%XX`-escaped).
+pub fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// Ensure a URL has a scheme. Bare domains get `https://` prepended.
 fn normalise_url(url: &str) -> String {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return "about:blank".to_string();
     }
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") || trimmed.starts_with("about:") {
+    if trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("about:")
+        || trimmed.starts_with("alterm://")
+    {
         trimmed.to_string()
     } else {
         format!("https://{trimmed}")
@@ -317,6 +405,30 @@ mod tests {
     }
 
     #[test]
+    fn on_navigation_reports_freshness() {
+        let mut s = BrowserState::new("https://a.com");
+        assert!(s.on_navigation("https://b.com"));   // fresh
+        assert!(!s.on_navigation("https://b.com"));  // duplicate of current
+        assert!(s.begin_back());
+        assert!(!s.on_navigation("https://a.com"));  // late back-report, not fresh
+    }
+
+    #[test]
+    fn zoom_defaults_to_one() {
+        let s = BrowserState::new("https://a.com");
+        assert_eq!(s.zoom, 1.0);
+    }
+
+    #[test]
+    fn set_loading_toggles() {
+        let mut s = BrowserState::new("https://a.com");
+        s.set_loading(true);
+        assert!(s.loading);
+        s.set_loading(false);
+        assert!(!s.loading);
+    }
+
+    #[test]
     fn normalise_adds_scheme() {
         assert_eq!(normalise_url("google.com"), "https://google.com");
         assert_eq!(normalise_url("http://foo.bar"), "http://foo.bar");
@@ -331,5 +443,53 @@ mod tests {
         let mut s2 = BrowserState::new("https://example.com");
         s2.title = "Example Domain".to_string();
         assert_eq!(s2.display_title(), "Example Domain");
+    }
+
+    const DDG: &str = "https://duckduckgo.com/?q={}";
+
+    #[test]
+    fn resolve_input_passes_urls_through() {
+        assert_eq!(resolve_input("https://a.com/x", DDG), "https://a.com/x");
+        assert_eq!(resolve_input("http://a.com", DDG), "http://a.com");
+        assert_eq!(resolve_input("about:blank", DDG), "about:blank");
+        assert_eq!(resolve_input("alterm://history", DDG), "alterm://history");
+    }
+
+    #[test]
+    fn resolve_input_prefixes_bare_hosts() {
+        assert_eq!(resolve_input("google.com", DDG), "https://google.com");
+        assert_eq!(resolve_input("docs.rs/serde/latest", DDG), "https://docs.rs/serde/latest");
+        assert_eq!(resolve_input("localhost:3000/app", DDG), "https://localhost:3000/app");
+    }
+
+    #[test]
+    fn resolve_input_searches_everything_else() {
+        assert_eq!(
+            resolve_input("rust lifetimes", DDG),
+            "https://duckduckgo.com/?q=rust%20lifetimes"
+        );
+        assert_eq!(resolve_input("rust", DDG), "https://duckduckgo.com/?q=rust");
+        // Spaces force a search even when a dot is present.
+        assert_eq!(
+            resolve_input("what is docs.rs", DDG),
+            "https://duckduckgo.com/?q=what%20is%20docs.rs"
+        );
+        // Template without {} gets the query appended.
+        assert_eq!(
+            resolve_input("cats", "https://x.com/search?q="),
+            "https://x.com/search?q=cats"
+        );
+        assert_eq!(resolve_input("", DDG), "about:blank");
+    }
+
+    #[test]
+    fn percent_encode_escapes_reserved_bytes() {
+        assert_eq!(percent_encode("a b&c=d?e#f"), "a%20b%26c%3Dd%3Fe%23f");
+        assert_eq!(percent_encode("safe-._~AZaz09"), "safe-._~AZaz09");
+    }
+
+    #[test]
+    fn normalise_url_passes_alterm_scheme() {
+        assert_eq!(normalise_url("alterm://history"), "alterm://history");
     }
 }
