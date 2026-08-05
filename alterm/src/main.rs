@@ -805,6 +805,27 @@ impl Alterm {
         }
     }
 
+    /// Open `url` as a browser pane in a fresh tab and focus that tab. Used
+    /// by target="_blank" links clicked inside webviews.
+    fn open_url_in_new_tab(&mut self, url: &str) {
+        let block = Block::new_browser(url);
+        let (panes, pane) = pane_grid::State::new(block);
+        let tab = Tab::from_parts("Browser".to_string(), panes, Some(pane));
+        self.tabs.push(tab);
+        self.active_tab = self.tabs.len() - 1;
+        self.create_browser_webview(pane, url);
+        // Apply persisted zoom if non-default (mirrors Message::OpenBrowser).
+        let tab_id = self.active_tab().id;
+        if let Some(Block::Browser { state }) = self.active_tab().panes.get(pane) {
+            if (state.zoom - 1.0).abs() > f64::EPSILON {
+                webview_manager::set_zoom(webview_key(tab_id, pane), state.zoom);
+            }
+        }
+        webview_manager::pump_gtk_events();
+        self.resize_all_panes();
+        self.update_webview_visibility();
+    }
+
     /// Show webviews in the active tab, hide webviews in all other tabs.
     fn update_webview_visibility(&self) {
         for (tab_idx, tab) in self.tabs.iter().enumerate() {
@@ -898,6 +919,11 @@ impl Alterm {
         let mut tasks = Vec::new();
         for (pane_id, origin, body) in ipc_events {
             tasks.push(self.handle_browser_ipc(pane_id, &origin, &body));
+        }
+
+        // Open new tabs requested by target="_blank" link clicks.
+        for (_opener, url) in webview_manager::drain_new_tab_events() {
+            self.open_url_in_new_tab(&url);
         }
 
         // Drain find-in-page match counts from webviews.
