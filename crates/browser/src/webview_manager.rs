@@ -85,7 +85,11 @@ thread_local! {
     #[cfg(target_os = "linux")]
     static WEBVIEW_DATA_DIR: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
     #[cfg(target_os = "linux")]
-    static GTK_INITIALIZED: RefCell<bool> = RefCell::new(false);
+    static GTK_INITIALIZED: RefCell<bool> = const { RefCell::new(false) };
+    /// Open popup windows `(opener_pane_id, window)` so a pane's popups can
+    /// be closed when the pane is destroyed.
+    #[cfg(target_os = "linux")]
+    static POPUPS: RefCell<Vec<(u64, gtk::Window)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Set the directory used for persistent webview profile data (cookies,
@@ -324,6 +328,9 @@ pub fn create_webview(
                 FIND_EVENTS.with(|q| q.borrow_mut().push((pane_id, count)));
             });
         }
+        // Handle window.open popups and target="_blank" links (Google
+        // sign-in and friends). See connect_create_handler.
+        connect_create_handler(&webview.webview(), pane_id);
     }
 
     WEBVIEWS.with(|wvs| {
@@ -385,6 +392,24 @@ pub fn destroy(pane_id: u64) {
             let _ = wv.set_visible(false);
         }
     });
+
+    // Close any popup windows this pane opened; each window's destroy
+    // handler removes its own POPUPS entry. Collect first, then close:
+    // close() re-enters POPUPS via that handler, so no borrow may be held.
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::GtkWindowExt;
+        let orphans: Vec<gtk::Window> = POPUPS.with(|p| {
+            p.borrow()
+                .iter()
+                .filter(|(owner, _)| *owner == pane_id)
+                .map(|(_, w)| w.clone())
+                .collect()
+        });
+        for w in orphans {
+            w.close();
+        }
+    }
 
     #[cfg(target_os = "linux")]
     GTK_INITIALIZED.with(|init| {
@@ -538,6 +563,97 @@ pub fn remap(mapping: &[(u64, u64)]) {
     WEBVIEWS.with(|wvs| {
         remap_map(&mut wvs.borrow_mut(), mapping);
     });
+}
+
+/// Route WebKit "create" (new window) requests for the webview belonging to
+/// `pane_id`: scripted popups get a floating related-webview window; clicked
+/// `_blank` links are queued for the app layer to open as a new tab.
+///
+/// wry only connects this signal itself when a `new_window_req_handler` is
+/// set (we never set one), and wry's decide-policy handler ignores
+/// new-window decisions, so this handler has the signal to itself.
+#[cfg(target_os = "linux")]
+fn connect_create_handler(webview: &webkit2gtk::WebView, pane_id: u64) {
+    use webkit2gtk::{URIRequestExt, WebViewExt};
+    webview.connect_create(move |view, action| {
+        let url = action
+            .request()
+            .and_then(|r| r.uri())
+            .map(|u| u.to_string())
+            .unwrap_or_default();
+        let is_link =
+            action.navigation_type() == webkit2gtk::NavigationType::LinkClicked;
+        match classify_create(is_link, &url) {
+            CreateDisposition::NewTab => {
+                log::info!("[popup] _blank link -> new tab: pane={pane_id} url={url}");
+                NEW_TAB_EVENTS.with(|q| q.borrow_mut().push((pane_id, url)));
+                None
+            }
+            CreateDisposition::Popup => {
+                use gtk::prelude::Cast;
+                log::info!("[popup] window.open -> popup: pane={pane_id} url={url:?}");
+                Some(build_popup(view, pane_id).upcast::<gtk::Widget>())
+            }
+        }
+    });
+}
+
+/// Build a popup webview **related** to `opener` (same web process and
+/// session — required so window.opener/postMessage reach the opener page)
+/// inside its own floating window. Returns the webview; WebKit loads the
+/// popup content into it. Deliberately gets NO wry IPC handler.
+#[cfg(target_os = "linux")]
+fn build_popup(opener: &webkit2gtk::WebView, opener_pane: u64) -> webkit2gtk::WebView {
+    use gtk::prelude::{ContainerExt, GtkWindowExt, WidgetExt};
+    use webkit2gtk::WebViewExt;
+
+    let popup = webkit2gtk::WebView::builder().related_view(opener).build();
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+    window.set_title("alterm");
+    window.add(&popup);
+
+    // Show only once WebKit has applied the site's window features; size
+    // from the requested geometry when given, else a sensible OAuth default.
+    let win = window.clone();
+    popup.connect_ready_to_show(move |wv| {
+        let (mut w, mut h) = (500, 640);
+        if let Some(props) = wv.window_properties() {
+            if let Ok(geo) = props.property_value("geometry").get::<gtk::gdk::Rectangle>() {
+                if geo.width() > 0 && geo.height() > 0 {
+                    w = geo.width().clamp(200, 1600);
+                    h = geo.height().clamp(200, 1200);
+                }
+            }
+        }
+        win.set_default_size(w, h);
+        win.set_position(gtk::WindowPosition::Center);
+        win.show_all();
+    });
+
+    // Keep the window title in sync with the page.
+    let win = window.clone();
+    popup.connect_title_notify(move |wv| {
+        if let Some(t) = wv.title() {
+            win.set_title(&t);
+        }
+    });
+
+    // The page called window.close() (OAuth popups do this when done).
+    let win = window.clone();
+    popup.connect_close(move |_| win.close());
+
+    // Popups can themselves open popups or _blank links; attribute them to
+    // the original opener pane.
+    connect_create_handler(&popup, opener_pane);
+
+    // Track for cleanup; self-remove when the window is destroyed (either
+    // via window.close() above or the user closing it).
+    POPUPS.with(|p| p.borrow_mut().push((opener_pane, window.clone())));
+    window.connect_destroy(|w| {
+        POPUPS.with(|p| p.borrow_mut().retain(|(_, win)| win != w));
+    });
+
+    popup
 }
 
 /// Pure two-phase key remap, extracted for testing.
