@@ -1,7 +1,7 @@
 # Browser Popups and New-Tab Links — Design
 
 **Date:** 2026-08-05
-**Status:** Approved
+**Status:** Implemented (2026-08-05)
 **Problem:** "Sign in with Google" fails in browser panes. The in-page Google
 account-chooser overlay appears, but clicking Continue calls `window.open()`,
 which alterm's webviews do not handle — the call silently returns `null` and
