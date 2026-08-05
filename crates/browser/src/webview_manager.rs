@@ -69,6 +69,9 @@ thread_local! {
     static IPC_EVENTS: RefCell<Vec<(u64, String, String)>> = const { RefCell::new(Vec::new()) };
     /// Find-in-page match counts `(pane_id, count)`.
     static FIND_EVENTS: RefCell<Vec<(u64, u32)>> = const { RefCell::new(Vec::new()) };
+    /// New-tab requests `(opener_pane_id, url)` queued when a clicked
+    /// `target="_blank"` link asks for a new window.
+    static NEW_TAB_EVENTS: RefCell<Vec<(u64, String)>> = const { RefCell::new(Vec::new()) };
     /// Shared WebContext for all webviews. On Linux, wry registers custom URI
     /// schemes at the WebContext level. Sharing one context means the "alterm"
     /// scheme is only registered once; requests are routed to the right webview
@@ -125,6 +128,33 @@ pub fn drain_ipc_events() -> Vec<(u64, String, String)> {
 /// Drain queued find-in-page match counts.
 pub fn drain_find_events() -> Vec<(u64, u32)> {
     FIND_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// Drain queued open-in-new-tab requests from `target="_blank"` links.
+pub fn drain_new_tab_events() -> Vec<(u64, String)> {
+    NEW_TAB_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// Where a WebKit `create` (new window) request should be routed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateDisposition {
+    /// Scripted `window.open` — needs a floating popup window backed by a
+    /// process-related webview (OAuth relies on window.opener/postMessage).
+    Popup,
+    /// Clicked link targeting a new window — open the URL as a new tab.
+    NewTab,
+}
+
+/// Classify a `create` request. `is_link_clicked` = navigation type was
+/// `LinkClicked`; `url` may be empty for scripted about:blank popups.
+/// Unexpected combinations fall back to `Popup`: a floating window that
+/// works beats a dead click.
+pub fn classify_create(is_link_clicked: bool, url: &str) -> CreateDisposition {
+    if is_link_clicked && !url.is_empty() {
+        CreateDisposition::NewTab
+    } else {
+        CreateDisposition::Popup
+    }
 }
 
 /// Ensure GTK is initialized. No-op on non-Linux platforms.
@@ -530,8 +560,39 @@ fn remap_map<V>(map: &mut HashMap<u64, V>, mapping: &[(u64, u64)]) {
 
 #[cfg(test)]
 mod tests {
-    use super::remap_map;
+    use super::{classify_create, drain_new_tab_events, remap_map, CreateDisposition, NEW_TAB_EVENTS};
     use std::collections::HashMap;
+
+    #[test]
+    fn classify_link_clicks_open_new_tab() {
+        assert_eq!(
+            classify_create(true, "https://example.com/"),
+            CreateDisposition::NewTab
+        );
+    }
+
+    #[test]
+    fn classify_scripted_opens_are_popups() {
+        // Google's account chooser does window.open() — must be a popup.
+        assert_eq!(
+            classify_create(false, "https://accounts.google.com/o/oauth2/auth"),
+            CreateDisposition::Popup
+        );
+        // Scripted about:blank popups have no URL yet.
+        assert_eq!(classify_create(false, ""), CreateDisposition::Popup);
+    }
+
+    #[test]
+    fn classify_link_without_url_falls_back_to_popup() {
+        assert_eq!(classify_create(true, ""), CreateDisposition::Popup);
+    }
+
+    #[test]
+    fn new_tab_events_drain_and_clear() {
+        NEW_TAB_EVENTS.with(|q| q.borrow_mut().push((7, "https://a.com/".into())));
+        assert_eq!(drain_new_tab_events(), vec![(7, "https://a.com/".to_string())]);
+        assert!(drain_new_tab_events().is_empty());
+    }
 
     #[test]
     fn remap_moves_values_to_new_keys() {

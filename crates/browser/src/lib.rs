@@ -37,6 +37,7 @@ pub mod webview_manager {
     pub fn drain_load_events() -> Vec<(u64, bool)> { Vec::new() }
     pub fn drain_ipc_events() -> Vec<(u64, String, String)> { Vec::new() }
     pub fn drain_find_events() -> Vec<(u64, u32)> { Vec::new() }
+    pub fn drain_new_tab_events() -> Vec<(u64, String)> { Vec::new() }
     pub fn stop(_pane_id: u64) {}
     pub fn set_zoom(_pane_id: u64, _level: f64) {}
     pub fn find_start(_pane_id: u64, _text: &str) {}
