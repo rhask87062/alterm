@@ -18,9 +18,9 @@ use iced::{Background, Border, Color, Element, Event, Fill, Length, Padding, Poi
 use gpu_renderer::widget::TerminalView;
 use gpu_renderer::grid::{CellHighlight, RenderGrid};
 use workspace::{
-    all_palette_actions, match_shortcut, sidebar_view, tab_bar_view, Action, Block, BrowserState,
-    CommandPalette, PreviewState, SearchMatch, SettingsField, SettingsSection, SidebarAction, Tab,
-    TabBarAction, CELL_HEIGHT,
+    all_palette_actions, match_shortcut, sidebar_view, tab_bar_view, Action, Block, BrowserPaneState,
+    BrowserState, CommandPalette, PreviewState, SearchMatch, SettingsField, SettingsSection,
+    SidebarAction, Tab, TabBarAction, CELL_HEIGHT,
 };
 use workspace::chrome;
 use workspace::grid;
@@ -178,6 +178,8 @@ const PANE_GRID_MIN_SIZE: f32 = 120.0;
 /// chrome). Must match the container padding wrapping the PaneGrid in `view`;
 /// the browser-webview positioning math offsets by it to stay aligned.
 const GRID_PADDING: f32 = 8.0;
+/// Height of the browser tab strip (tab buttons + padding) in logical pixels.
+const BROWSER_TAB_BAR_HEIGHT: f32 = 30.0;
 /// Height of the browser nav bar (URL input + padding) in logical pixels.
 const BROWSER_NAV_BAR_HEIGHT: f32 = 40.0;
 /// Height of the browser find bar (search input + padding) in logical pixels.
@@ -391,6 +393,13 @@ enum Message {
     BrowserZoomIn(pane_grid::Pane),
     BrowserZoomOut(pane_grid::Pane),
     BrowserZoomReset(pane_grid::Pane),
+    // In-pane browser tabs
+    BrowserTabSelected(pane_grid::Pane, usize),
+    BrowserTabNew(pane_grid::Pane),
+    BrowserTabClose(pane_grid::Pane, usize),
+    BrowserTabCloseActive(pane_grid::Pane),
+    BrowserTabNext(pane_grid::Pane),
+    BrowserTabPrev(pane_grid::Pane),
     // Browser find-in-page
     BrowserFindOpen(pane_grid::Pane),
     BrowserFindChanged(String),
@@ -692,7 +701,7 @@ impl Alterm {
 
                 if let Block::Browser { state } = block {
                     let find_active = find_key == Some((tab_id, *pane));
-                    let chrome = BROWSER_NAV_BAR_HEIGHT
+                    let chrome = BROWSER_TAB_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT
                         + if find_active { BROWSER_FIND_BAR_HEIGHT } else { 0.0 };
                     let wv_x = (GRID_PADDING + rect.x) as f64;
                     let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64;
@@ -737,7 +746,7 @@ impl Alterm {
             .browser_find
             .as_ref()
             .is_some_and(|f| f.tab_id == tab_id && f.pane == pane);
-        BROWSER_NAV_BAR_HEIGHT + if find { BROWSER_FIND_BAR_HEIGHT } else { 0.0 }
+        BROWSER_TAB_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT + if find { BROWSER_FIND_BAR_HEIGHT } else { 0.0 }
     }
 
     /// Create the native webview for one browser tab. Bounds come from the
@@ -777,23 +786,6 @@ impl Alterm {
         if let Err(e) = webview_manager::create_webview(webview_id, xid, url, (x, y, w, h)) {
             log::error!("Failed to create webview {webview_id}: {e}");
         }
-    }
-
-    /// Open `url` as a browser pane in a fresh tab and focus that tab. Used
-    /// by target="_blank" links clicked inside webviews.
-    fn open_url_in_new_tab(&mut self, url: &str) {
-        let block = Block::new_browser(url);
-        let (panes, pane) = pane_grid::State::new(block);
-        let tab = Tab::from_parts("Browser".to_string(), panes, Some(pane));
-        self.tabs.push(tab);
-        self.active_tab = self.tabs.len() - 1;
-        let tab_id = self.active_tab().id;
-        if let Some(Block::Browser { state }) = self.active_tab().panes.get(pane) {
-            self.create_webview_for_tab(tab_id, pane, state.active_webview_id(), url);
-        }
-        webview_manager::pump_gtk_events();
-        self.resize_all_panes();
-        self.update_webview_visibility();
     }
 
     /// Show webviews in the active tab, hide webviews in all other tabs.
@@ -855,6 +847,59 @@ impl Alterm {
             })
     }
 
+    /// If a find session is open on this pane, finish it (webkit clears the
+    /// highlights on the outgoing tab's webview) and drop the bar.
+    fn finish_find_for_pane(&mut self, tab_id: u64, pane: pane_grid::Pane) {
+        let matches = self
+            .browser_find
+            .as_ref()
+            .is_some_and(|f| f.tab_id == tab_id && f.pane == pane);
+        if matches {
+            if let Some(id) = self.browser_active_webview_id(tab_id, pane) {
+                webview_manager::find_finish(id);
+            }
+            self.browser_find = None;
+            self.resize_all_panes(); // find bar row is gone
+        }
+    }
+
+    /// Open a new in-pane browser tab and focus it. `at_end` picks strip
+    /// placement: true = appended (Ctrl+T / + button), false = right after
+    /// the active tab (_blank links). Works for panes in background
+    /// workspace tabs (their webview stays hidden until the tab is shown).
+    fn open_browser_tab_in(&mut self, tab_id: u64, pane: pane_grid::Pane, url: &str, at_end: bool) {
+        self.finish_find_for_pane(tab_id, pane);
+        let webview_id = {
+            let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) else { return };
+            match tab.panes.get_mut(pane) {
+                Some(Block::Browser { state }) => {
+                    if at_end { state.open_at_end(url) } else { state.open_after_active(url) }
+                }
+                _ => return,
+            }
+        };
+        self.create_webview_for_tab(tab_id, pane, webview_id, url);
+        webview_manager::pump_gtk_events();
+        self.resize_all_panes();
+        self.update_webview_visibility();
+    }
+
+    /// Activate in-pane tab `idx`, closing any find session first.
+    fn switch_browser_tab(&mut self, tab_id: u64, pane: pane_grid::Pane, idx: usize) {
+        self.finish_find_for_pane(tab_id, pane);
+        let changed = {
+            let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) else { return };
+            match tab.panes.get_mut(pane) {
+                Some(Block::Browser { state }) => state.select(idx),
+                _ => false,
+            }
+        };
+        if changed {
+            self.resize_all_panes();
+            self.update_webview_visibility();
+        }
+    }
+
     /// Drain title, load-state, and IPC events from the webviews and apply
     /// them to pane state and the global stores.
     fn apply_browser_webview_events(&mut self) -> Task<Message> {
@@ -896,9 +941,13 @@ impl Alterm {
             tasks.push(self.handle_browser_ipc(webview_id, &origin, &body));
         }
 
-        // Open new tabs requested by target="_blank" link clicks.
-        for (_opener, url) in webview_manager::drain_new_tab_events() {
-            self.open_url_in_new_tab(&url);
+        // target="_blank" links open as a new tab in the pane they came from.
+        for (opener, url) in webview_manager::drain_new_tab_events() {
+            if let Some((tab_id, pane, _)) = self.find_browser_tab(opener) {
+                self.open_browser_tab_in(tab_id, pane, &url, false);
+            } else {
+                log::warn!("_blank link from unknown webview {opener}; dropping {url}");
+            }
         }
 
         // Drain find-in-page match counts from webviews.
@@ -2074,6 +2123,65 @@ impl Alterm {
             Message::BrowserZoomReset(pane) => {
                 self.browser_zoom(pane, ZoomChange::Reset);
             }
+            Message::BrowserTabNew(pane) => {
+                let tab_id = self.active_tab().id;
+                self.open_browser_tab_in(tab_id, pane, "alterm://history", true);
+                return widget_focus(WidgetId::from(
+                    format!("browser-url-input-{:?}", pane),
+                ));
+            }
+            Message::BrowserTabSelected(pane, idx) => {
+                let tab_id = self.active_tab().id;
+                self.switch_browser_tab(tab_id, pane, idx);
+            }
+            Message::BrowserTabNext(pane) => {
+                let tab_id = self.active_tab().id;
+                self.finish_find_for_pane(tab_id, pane);
+                if let Some(Block::Browser { state }) = self.active_tab_mut().panes.get_mut(pane) {
+                    state.next();
+                }
+                self.resize_all_panes();
+            }
+            Message::BrowserTabPrev(pane) => {
+                let tab_id = self.active_tab().id;
+                self.finish_find_for_pane(tab_id, pane);
+                if let Some(Block::Browser { state }) = self.active_tab_mut().panes.get_mut(pane) {
+                    state.prev();
+                }
+                self.resize_all_panes();
+            }
+            Message::BrowserTabCloseActive(pane) => {
+                let idx = match self.active_tab().panes.get(pane) {
+                    Some(Block::Browser { state }) => state.active,
+                    _ => return Task::none(),
+                };
+                return self.update(Message::BrowserTabClose(pane, idx));
+            }
+            Message::BrowserTabClose(pane, idx) => {
+                let tab_id = self.active_tab().id;
+                self.finish_find_for_pane(tab_id, pane);
+                let result = match self.active_tab_mut().panes.get_mut(pane) {
+                    Some(Block::Browser { state }) => state.close(idx),
+                    _ => None,
+                };
+                if let Some(r) = result {
+                    if r.pane_empty {
+                        // Last tab: close the pane like its × button would. If
+                        // it's the tab's only pane, close the workspace tab
+                        // instead; if that's the last workspace tab, do nothing
+                        // (same refusal as CloseTab on the final tab).
+                        if self.active_tab().panes.len() > 1 {
+                            return self.update(Message::ClosePaneId(pane));
+                        } else if self.tabs.len() > 1 {
+                            let idx = self.active_tab;
+                            return self.update(Message::CloseTab(idx));
+                        }
+                    } else {
+                        webview_manager::destroy(r.closed_webview_id);
+                        self.resize_all_panes();
+                    }
+                }
+            }
 
             // -- Browser find-in-page --
             Message::BrowserFindOpen(pane) => {
@@ -2620,7 +2728,7 @@ impl Alterm {
                     }
                     Block::Browser { state } => {
                         let find = browser_find.filter(|f| f.tab_id == active_tab_id && f.pane == pane);
-                        browser_view(pane, state.active_state(), self.spinner_frame, find)
+                        browser_view(pane, state, self.spinner_frame, find)
                     }
                     Block::Preview { state } => {
                         preview_view(pane, state)
@@ -3682,13 +3790,60 @@ fn settings_terminal_section<'a>(
 // Browser view
 // ---------------------------------------------------------------------------
 
-/// Build the browser view for a pane.
+/// Build the browser view for a pane: tab strip, nav bar for the active
+/// tab, optional find bar, and the transparent webview placeholder.
 fn browser_view<'a>(
     pane: pane_grid::Pane,
-    state: &'a BrowserState,
+    pane_state: &'a BrowserPaneState,
     spinner_frame: usize,
     find: Option<&'a BrowserFindState>,
 ) -> Element<'a, Message> {
+    let state = pane_state.active_state();
+
+    // ── Tab strip ──
+    let mut strip = row![].spacing(4).align_y(iced::Alignment::Center);
+    for (i, t) in pane_state.tabs.iter().enumerate() {
+        let active = i == pane_state.active;
+        let title_btn = button(
+            text(tab_strip_title(&t.state))
+                .size(12)
+                .wrapping(iced::widget::text::Wrapping::None),
+        )
+        .on_press(Message::BrowserTabSelected(pane, i))
+        .padding(Padding::from([3, 8]))
+        .width(Fill)
+        .style(move |th: &Theme, s: button::Status| browser_tab_style(th, s, active));
+        let close_btn = button(text("\u{2715}").size(10).center())
+            .on_press(Message::BrowserTabClose(pane, i))
+            .padding(Padding::from([3, 6]))
+            .style(|th: &Theme, s: button::Status| nav_button_style(th, s));
+        strip = strip.push(
+            mouse_area(
+                container(
+                    row![title_btn, close_btn]
+                        .spacing(2)
+                        .align_y(iced::Alignment::Center),
+                )
+                .width(Length::FillPortion(1))
+                .max_width(220.0),
+            )
+            .on_middle_press(Message::BrowserTabClose(pane, i)),
+        );
+    }
+    strip = strip.push(
+        button(text("+").size(14).center())
+            .on_press(Message::BrowserTabNew(pane))
+            .padding(Padding::from([2, 8]))
+            .style(|th: &Theme, s: button::Status| nav_button_style(th, s)),
+    );
+    strip = strip.push(iced::widget::space().width(Fill));
+    let tab_bar: Element<'a, Message> = container(strip)
+        .width(Fill)
+        .height(Length::Fixed(BROWSER_TAB_BAR_HEIGHT))
+        .padding(Padding::from([3, 6]))
+        .style(browser_chrome_style)
+        .into();
+
     // ── Navigation bar ──
     let back_label = text("\u{25C0}").size(14).center();
     let mut back_btn = button(back_label)
@@ -3814,8 +3969,8 @@ fn browser_view<'a>(
     })
     .into();
 
-    // ── Layout: nav bar (+ optional find bar) on top, webview area fills the rest ──
-    let mut chrome = column![nav_bar];
+    // ── Layout: tab strip, nav bar (+ optional find bar) on top, webview area fills the rest ──
+    let mut chrome = column![tab_bar, nav_bar];
     if let Some(fb) = find_bar {
         chrome = chrome.push(fb);
     }
@@ -3889,6 +4044,30 @@ fn nav_button_style(theme: &Theme, status: button::Status) -> button::Style {
         },
         ..Default::default()
     }
+}
+
+/// Tab-strip label: the page title (or URL), truncated to fit the strip.
+fn tab_strip_title(state: &BrowserState) -> String {
+    let full = state.display_title();
+    let mut s: String = full.chars().take(24).collect();
+    if s.len() < full.len() {
+        s.push('…');
+    }
+    s
+}
+
+/// Style for a tab-strip button; the active tab is lifted above the strip
+/// with a brighter background.
+fn browser_tab_style(theme: &Theme, status: button::Status, active: bool) -> button::Style {
+    let mut style = nav_button_style(theme, status);
+    if active {
+        style.background = Some(Background::Color(if is_light_theme(theme) {
+            Color::from_rgb(0.97, 0.97, 0.99)
+        } else {
+            Color::from_rgb(0.16, 0.16, 0.22)
+        }));
+    }
+    style
 }
 
 // ---------------------------------------------------------------------------
