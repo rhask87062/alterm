@@ -723,8 +723,8 @@ impl Alterm {
     /// Add a new window (pane) to the active tab as a wide-first balanced grid.
     ///
     /// Rebuilds the active tab's layout from its existing windows plus `block`,
-    /// re-keys any browser webviews to their new pane ids, focuses the new
-    /// window, and returns its pane. All "new window" actions funnel through here.
+    /// focuses the new window, and returns its pane. All "new window" actions
+    /// funnel through here.
     fn add_window(&mut self, block: Block) -> pane_grid::Pane {
         let tab = self.active_tab_mut();
         // Compute the grid against the full layout, not a maximized view.
@@ -790,11 +790,14 @@ impl Alterm {
 
     /// Show webviews in the active tab, hide webviews in all other tabs.
     /// Within a visible browser pane only the active in-pane tab is shown.
+    /// When the tab's layout is maximized, only the maximized pane may be visible.
     fn update_webview_visibility(&self) {
         for (tab_idx, tab) in self.tabs.iter().enumerate() {
             let is_active = tab_idx == self.active_tab;
-            for (_pane, block) in tab.panes.iter() {
-                set_browser_pane_visible(block, is_active);
+            let maximized = tab.panes.maximized();
+            for (pane, block) in tab.panes.iter() {
+                let visible = is_active && maximized.is_none_or(|m| m == *pane);
+                set_browser_pane_visible(block, visible);
             }
         }
     }
