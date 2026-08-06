@@ -61,7 +61,7 @@ export const FEATURES = [
   {
     icon: "browser",
     title: "Embedded browser",
-    body: "A real webview pane — docs and dashboards alongside your shell, using the system's native engine, with back/forward history and drag-aware placement.",
+    body: "A real webview pane — docs and dashboards alongside your shell, using the system's native engine, with in-pane tabs, back/forward history, and drag-aware placement.",
     status: "core",
   },
   {

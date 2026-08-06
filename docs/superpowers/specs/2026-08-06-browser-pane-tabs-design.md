@@ -1,7 +1,7 @@
 # Browser Pane Tabs — Design
 
 **Date:** 2026-08-06
-**Status:** Approved
+**Status:** Implemented (2026-08-06)
 **Branch:** `feature/browser-pane-tabs` (based on
 `feature/browser-popups-new-tab-links`, which merges with it)
 **Problem:** A browser pane can show exactly one website. Users who want
