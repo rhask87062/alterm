@@ -9,7 +9,7 @@ use gpu_renderer::colors::AnsiPalette;
 use gpu_renderer::grid::RenderGrid;
 use terminal::{PtyHandle, TerminalEvent, TerminalState};
 
-use browser::BrowserState;
+use browser::{BrowserPaneState, BrowserState};
 use preview::PreviewState;
 
 use crate::ai_chat::AIChatState;
@@ -50,7 +50,7 @@ pub enum Block {
         state: SettingsState,
     },
     Browser {
-        state: BrowserState,
+        state: BrowserPaneState,
     },
     Preview {
         state: PreviewState,
@@ -125,11 +125,9 @@ impl Block {
         }
     }
 
-    /// Create a new browser block navigated to `url`.
+    /// Create a new browser block with a single tab navigated to `url`.
     pub fn new_browser(url: &str) -> Self {
-        Block::Browser {
-            state: BrowserState::new(url),
-        }
+        Block::Browser { state: BrowserPaneState::new(url) }
     }
 
     /// Create a new file preview block at the given path.
@@ -172,16 +170,24 @@ impl Block {
                 }
                 block
             }
-            BlockState::Browser { url, history, history_index, zoom, tabs: _, active_tab: _ } => {
-                let mut block = Block::new_browser(url);
-                if let Block::Browser { state } = &mut block {
+            BlockState::Browser { url, history, history_index, zoom, tabs, active_tab } => {
+                let restore_one = |url: &str, history: &[String], history_index: usize, zoom: f64| {
+                    let mut s = BrowserState::new(url);
                     if !history.is_empty() {
-                        state.history = history.clone();
-                        state.history_index = (*history_index).min(history.len() - 1);
+                        s.history = history.to_vec();
+                        s.history_index = history_index.min(history.len() - 1);
                     }
-                    state.zoom = *zoom;
-                }
-                block
+                    s.zoom = zoom;
+                    s
+                };
+                let states: Vec<BrowserState> = if tabs.is_empty() {
+                    vec![restore_one(url, history, *history_index, *zoom)]
+                } else {
+                    tabs.iter()
+                        .map(|t| restore_one(&t.url, &t.history, t.history_index, t.zoom))
+                        .collect()
+                };
+                Block::Browser { state: BrowserPaneState::from_states(states, *active_tab) }
             }
             BlockState::AiChat { provider, model, messages, input } => {
                 let mut block = Block::new_ai_chat(provider.clone(), model.clone());
@@ -332,7 +338,7 @@ impl Block {
                 if state.dirty { "Settings *".to_string() } else { "Settings".to_string() }
             }
             Block::Browser { state } => {
-                format!("Browser — {}", state.display_title())
+                format!("Browser — {}", state.active_state().display_title())
             }
             Block::Preview { state } => {
                 let name = state.path.file_name()
@@ -519,19 +525,26 @@ impl Block {
                 rows: state.rows() as u16,
                 cols: state.cols() as u16,
             },
-            Block::Browser { state } => BlockState::Browser {
-                url: state.url.clone(),
-                history: state.history.clone(),
-                history_index: state.history_index,
-                zoom: state.zoom,
-                tabs: vec![crate::session::BrowserTabState {
-                    url: state.url.clone(),
-                    history: state.history.clone(),
-                    history_index: state.history_index,
-                    zoom: state.zoom,
-                }],
-                active_tab: 0,
-            },
+            Block::Browser { state } => {
+                let active = state.active_state();
+                BlockState::Browser {
+                    url: active.url.clone(),
+                    history: active.history.clone(),
+                    history_index: active.history_index,
+                    zoom: active.zoom,
+                    tabs: state
+                        .tabs
+                        .iter()
+                        .map(|t| crate::session::BrowserTabState {
+                            url: t.state.url.clone(),
+                            history: t.state.history.clone(),
+                            history_index: t.state.history_index,
+                            zoom: t.state.zoom,
+                        })
+                        .collect(),
+                    active_tab: state.active,
+                }
+            }
             Block::AIChat { state } => BlockState::AiChat {
                 provider: state.provider_name.clone(),
                 model: state.model_name.clone(),

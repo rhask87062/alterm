@@ -19,7 +19,7 @@ pub use ai_chat::{AIChatState, SelectorMode};
 pub use note::NoteState;
 pub use block::{Block, CELL_HEIGHT, CELL_WIDTH};
 pub use terminal::term::{build_search_pattern, SearchMatch};
-pub use browser::BrowserState;
+pub use browser::{BrowserPaneState, BrowserState, BrowserTab, TabClose};
 pub use preview::PreviewState;
 pub use command_palette::CommandPalette;
 pub use grid::grid_dims;

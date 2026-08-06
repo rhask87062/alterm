@@ -187,32 +187,25 @@ const BROWSER_FIND_BAR_HEIGHT: f32 = 36.0;
 /// the title button stays Shrink-width (so the rename click target works).
 const PANE_TITLE_MAX_CHARS: usize = 48;
 
-/// Extract a numeric ID from a `pane_grid::Pane` for use as a webview key.
-///
-/// `Pane` wraps a `usize` but the field is `pub(super)`. We parse it
-/// from the Debug output (`Pane(N)`).
-fn pane_to_id(pane: pane_grid::Pane) -> u64 {
-    let dbg = format!("{pane:?}");
-    dbg.trim_start_matches("Pane(")
-        .trim_end_matches(')')
-        .parse::<u64>()
-        .unwrap_or(0)
+/// Show or hide a browser pane's native webviews. Hiding hides every tab's
+/// webview; showing shows only the active tab's (background tabs stay hidden).
+/// No-op for non-browser blocks.
+fn set_browser_pane_visible(block: &Block, visible: bool) {
+    if let Block::Browser { state } = block {
+        for (i, t) in state.tabs.iter().enumerate() {
+            webview_manager::set_visible(t.webview_id, visible && i == state.active);
+        }
+    }
 }
 
-/// Compose a tab-unique webview map key from a tab id and a pane index.
-///
-/// Pane ids restart at 0 in every tab, so the bare pane id collides across
-/// tabs; namespacing with the (stable) tab id keeps webview keys unique.
-fn compose_key(tab_id: u64, pane_index: u64) -> u64 {
-    (tab_id << 32) | (pane_index & 0xFFFF_FFFF)
-}
-
-/// Compose a tab-unique webview map key from a tab id and a pane.
-///
-/// Pane ids restart at 0 in every tab, so the bare pane id collides across
-/// tabs; namespacing with the (stable) tab id keeps webview keys unique.
-fn webview_key(tab_id: u64, pane: pane_grid::Pane) -> u64 {
-    compose_key(tab_id, pane_to_id(pane))
+/// Destroy every native webview owned by a block (all of a browser pane's
+/// tabs). No-op for non-browser blocks.
+fn destroy_browser_pane_webviews(block: &Block) {
+    if let Block::Browser { state } = block {
+        for t in &state.tabs {
+            webview_manager::destroy(t.webview_id);
+        }
+    }
 }
 
 struct Alterm {
@@ -678,9 +671,7 @@ impl Alterm {
                 // Another pane is maximized — this one is hidden.
                 // Hide its webview if it's a browser.
                 if let Some(block) = tab.panes.get(*pane) {
-                    if block.is_browser() {
-                        webview_manager::set_visible(webview_key(tab_id, *pane), false);
-                    }
+                    set_browser_pane_visible(block, false);
                 }
                 continue;
             } else {
@@ -699,24 +690,21 @@ impl Alterm {
                     }
                 }
 
-                if block.is_browser() {
-                    let pane_id = webview_key(tab_id, *pane);
-                    log::debug!(
-                        "[wv-diag] resize: key={pane_id} exists={} rect=({:.0},{:.0},{:.0},{:.0})",
-                        webview_manager::exists(pane_id), rect.x, rect.y, rect.width, rect.height
-                    );
-                    if webview_manager::exists(pane_id) {
-                        let find_active = find_key == Some((tab_id, *pane));
-                        let chrome = BROWSER_NAV_BAR_HEIGHT + if find_active { BROWSER_FIND_BAR_HEIGHT } else { 0.0 };
-                        let wv_x = (GRID_PADDING + rect.x) as f64;
-                        let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64;
-                        let wv_w = rect.width as f64;
-                        // The native webview is a plain rectangle and fills to
-                        // the pane bottom, so browser panes have square bottom
-                        // corners (no rounded clipping for native windows).
-                        let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64;
-                        webview_manager::set_bounds(pane_id, wv_x, wv_y, wv_w, wv_h);
-                        webview_manager::set_visible(pane_id, true);
+                if let Block::Browser { state } = block {
+                    let find_active = find_key == Some((tab_id, *pane));
+                    let chrome = BROWSER_NAV_BAR_HEIGHT
+                        + if find_active { BROWSER_FIND_BAR_HEIGHT } else { 0.0 };
+                    let wv_x = (GRID_PADDING + rect.x) as f64;
+                    let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64;
+                    let wv_w = rect.width as f64;
+                    let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64;
+                    for (i, t) in state.tabs.iter().enumerate() {
+                        if i == state.active {
+                            webview_manager::set_bounds(t.webview_id, wv_x, wv_y, wv_w, wv_h);
+                            webview_manager::set_visible(t.webview_id, true);
+                        } else {
+                            webview_manager::set_visible(t.webview_id, false);
+                        }
                     }
                 }
             }
@@ -730,7 +718,6 @@ impl Alterm {
     /// window, and returns its pane. All "new window" actions funnel through here.
     fn add_window(&mut self, block: Block) -> pane_grid::Pane {
         let tab = self.active_tab_mut();
-        let tab_id = tab.id;
         // Compute the grid against the full layout, not a maximized view.
         if tab.panes.maximized().is_some() {
             tab.panes.restore();
@@ -738,14 +725,6 @@ impl Alterm {
 
         let info = grid::rebuild_with_new(&mut tab.panes, block, || Block::HotkeyInfo);
         tab.focus = Some(info.new_pane);
-
-        // Carry existing webviews across to their new pane ids.
-        let remap_ids: Vec<(u64, u64)> = info
-            .remap
-            .iter()
-            .map(|(old, new)| (webview_key(tab_id, *old), webview_key(tab_id, *new)))
-            .collect();
-        webview_manager::remap(&remap_ids);
 
         self.resize_all_panes();
         info.new_pane
@@ -761,17 +740,16 @@ impl Alterm {
         BROWSER_NAV_BAR_HEIGHT + if find { BROWSER_FIND_BAR_HEIGHT } else { 0.0 }
     }
 
-    /// Create a real wry webview for a browser pane.
-    fn create_browser_webview(&self, pane: pane_grid::Pane, url: &str) {
+    /// Create the native webview for one browser tab. Bounds come from the
+    /// pane's layout region when available; panes outside the active
+    /// workspace tab get fallback bounds that resize_all_panes corrects when
+    /// their tab is selected.
+    fn create_webview_for_tab(&self, tab_id: u64, pane: pane_grid::Pane, webview_id: u64, url: &str) {
         let Some(xid) = self.parent_xid else {
             log::warn!("Cannot create webview: parent XID not yet available");
             return;
         };
 
-        let tab_id = self.active_tab().id;
-        let pane_id = webview_key(tab_id, pane);
-
-        // Calculate initial bounds for this pane.
         use iced::Size;
         let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
         let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
@@ -779,29 +757,25 @@ impl Alterm {
             (grid_width - GRID_PADDING * 2.0).max(40.0),
             (grid_height - GRID_PADDING * 2.0).max(40.0),
         );
+        let regions = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .map(|t| t.panes.layout().pane_regions(PANE_GRID_SPACING, PANE_GRID_MIN_SIZE, bounds));
 
-        let tab = self.active_tab();
-        let regions = tab.panes.layout().pane_regions(
-            PANE_GRID_SPACING,
-            PANE_GRID_MIN_SIZE,
-            bounds,
-        );
-
-        let tab_id = self.active_tab().id;
         let chrome = self.browser_chrome_height(tab_id, pane);
-        let (x, y, w, h) = if let Some(rect) = regions.get(&pane) {
-            let wv_x = (GRID_PADDING + rect.x) as f64;
-            let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64;
-            let wv_w = rect.width as f64;
-            let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64;
-            (wv_x, wv_y, wv_w, wv_h)
-        } else {
-            // Fallback: reasonable defaults (freshly created webview has no find bar).
-            (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0)
+        let (x, y, w, h) = match regions.as_ref().and_then(|r| r.get(&pane)) {
+            Some(rect) => (
+                (GRID_PADDING + rect.x) as f64,
+                (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64,
+                rect.width as f64,
+                (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64,
+            ),
+            None => (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0),
         };
 
-        if let Err(e) = webview_manager::create_webview(pane_id, xid, url, (x, y, w, h)) {
-            log::error!("Failed to create webview for pane {pane_id}: {e}");
+        if let Err(e) = webview_manager::create_webview(webview_id, xid, url, (x, y, w, h)) {
+            log::error!("Failed to create webview {webview_id}: {e}");
         }
     }
 
@@ -813,13 +787,9 @@ impl Alterm {
         let tab = Tab::from_parts("Browser".to_string(), panes, Some(pane));
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
-        self.create_browser_webview(pane, url);
-        // Apply persisted zoom if non-default (mirrors Message::OpenBrowser).
         let tab_id = self.active_tab().id;
         if let Some(Block::Browser { state }) = self.active_tab().panes.get(pane) {
-            if (state.zoom - 1.0).abs() > f64::EPSILON {
-                webview_manager::set_zoom(webview_key(tab_id, pane), state.zoom);
-            }
+            self.create_webview_for_tab(tab_id, pane, state.active_webview_id(), url);
         }
         webview_manager::pump_gtk_events();
         self.resize_all_panes();
@@ -827,75 +797,77 @@ impl Alterm {
     }
 
     /// Show webviews in the active tab, hide webviews in all other tabs.
+    /// Within a visible browser pane only the active in-pane tab is shown.
     fn update_webview_visibility(&self) {
         for (tab_idx, tab) in self.tabs.iter().enumerate() {
             let is_active = tab_idx == self.active_tab;
-            for (pane, block) in tab.panes.iter() {
-                if block.is_browser() {
-                    log::debug!(
-                        "[wv-diag] visibility: tab_idx={tab_idx} active={is_active} key={}",
-                        webview_key(tab.id, *pane)
-                    );
-                    webview_manager::set_visible(webview_key(tab.id, *pane), is_active);
-                }
+            for (_pane, block) in tab.panes.iter() {
+                set_browser_pane_visible(block, is_active);
             }
         }
     }
 
-    /// Drain navigation events reported by the webviews and apply each to the
-    /// matching browser pane's state. Events are keyed by `webview_key`, so we
-    /// resolve each back to its (tab, pane) by recomputing the key.
+    /// Drain navigation events reported by the webviews and apply each to
+    /// the owning in-pane tab's state (which may be a background tab).
     fn apply_browser_nav_events(&mut self) {
-        let events = webview_manager::drain_nav_events();
-        if events.is_empty() {
-            return;
-        }
-        for (pane_id, url) in events {
-            for tab in &mut self.tabs {
-                let tab_id = tab.id;
-                if let Some((_, block)) = tab
-                    .panes
-                    .iter_mut()
-                    .find(|(p, _)| webview_key(tab_id, **p) == pane_id)
-                {
-                    if let Block::Browser { state } = block {
-                        let fresh = state.on_navigation(&url);
+        for (webview_id, url) in webview_manager::drain_nav_events() {
+            let Some((tab_id, pane, idx)) = self.find_browser_tab(webview_id) else {
+                continue; // stale event from an already-closed tab
+            };
+            if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    if let Some(t) = state.tabs.get_mut(idx) {
+                        let fresh = t.state.on_navigation(&url);
                         if fresh && !url.starts_with("alterm://") && !url.starts_with("about:") {
                             browser::history::with_stores(|s| {
                                 s.history.record_visit(&url, browser::history::now_ts());
                             });
                         }
                     }
-                    break;
                 }
             }
         }
     }
 
-    /// Resolve a webview key back to its (tab_id, pane). Used when events
-    /// arrive keyed by webview id.
-    fn find_browser_pane(&self, pane_id: u64) -> Option<(u64, pane_grid::Pane)> {
+    /// Resolve a webview id to its (workspace tab id, pane, in-pane tab index).
+    fn find_browser_tab(&self, webview_id: u64) -> Option<(u64, pane_grid::Pane, usize)> {
         for tab in &self.tabs {
-            let tab_id = tab.id;
             for (pane, block) in tab.panes.iter() {
-                if block.is_browser() && webview_key(tab_id, *pane) == pane_id {
-                    return Some((tab_id, *pane));
+                if let Block::Browser { state } = block {
+                    if let Some(idx) = state.index_of_webview(webview_id) {
+                        return Some((tab.id, *pane, idx));
+                    }
                 }
             }
         }
         None
     }
 
+    /// The webview id of a browser pane's active tab, if the pane exists.
+    fn browser_active_webview_id(&self, tab_id: u64, pane: pane_grid::Pane) -> Option<u64> {
+        self.tabs
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| t.panes.get(pane))
+            .and_then(|b| match b {
+                Block::Browser { state } => Some(state.active_webview_id()),
+                _ => None,
+            })
+    }
+
     /// Drain title, load-state, and IPC events from the webviews and apply
     /// them to pane state and the global stores.
     fn apply_browser_webview_events(&mut self) -> Task<Message> {
-        for (pane_id, title) in webview_manager::drain_title_events() {
-            if let Some((tab_id, pane)) = self.find_browser_pane(pane_id) {
-                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
-                    if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                        state.title = title.clone();
-                        if !state.url.starts_with("alterm://") {
-                            let url = state.url.clone();
+        for (webview_id, title) in webview_manager::drain_title_events() {
+            let Some((tab_id, pane, idx)) = self.find_browser_tab(webview_id) else {
+                continue;
+            };
+            if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    if let Some(t) = state.tabs.get_mut(idx) {
+                        t.state.title = title.clone();
+                        if !t.state.url.starts_with("alterm://") {
+                            let url = t.state.url.clone();
                             browser::history::with_stores(|s| {
                                 s.history.set_title(&url, &title);
                             });
@@ -905,11 +877,14 @@ impl Alterm {
             }
         }
 
-        for (pane_id, started) in webview_manager::drain_load_events() {
-            if let Some((tab_id, pane)) = self.find_browser_pane(pane_id) {
-                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
-                    if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                        state.set_loading(started);
+        for (webview_id, started) in webview_manager::drain_load_events() {
+            let Some((tab_id, pane, idx)) = self.find_browser_tab(webview_id) else {
+                continue;
+            };
+            if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
+                    if let Some(t) = state.tabs.get_mut(idx) {
+                        t.state.set_loading(started);
                     }
                 }
             }
@@ -917,8 +892,8 @@ impl Alterm {
 
         let ipc_events = webview_manager::drain_ipc_events();
         let mut tasks = Vec::new();
-        for (pane_id, origin, body) in ipc_events {
-            tasks.push(self.handle_browser_ipc(pane_id, &origin, &body));
+        for (webview_id, origin, body) in ipc_events {
+            tasks.push(self.handle_browser_ipc(webview_id, &origin, &body));
         }
 
         // Open new tabs requested by target="_blank" link clicks.
@@ -927,9 +902,13 @@ impl Alterm {
         }
 
         // Drain find-in-page match counts from webviews.
-        for (pane_id, count) in webview_manager::drain_find_events() {
-            if let Some(f) = self.browser_find.as_mut() {
-                if webview_key(f.tab_id, f.pane) == pane_id {
+        for (webview_id, count) in webview_manager::drain_find_events() {
+            let target = self
+                .browser_find
+                .as_ref()
+                .and_then(|f| self.browser_active_webview_id(f.tab_id, f.pane));
+            if target == Some(webview_id) {
+                if let Some(f) = self.browser_find.as_mut() {
                     f.matches = Some(count);
                 }
             }
@@ -953,7 +932,7 @@ impl Alterm {
 
     /// Apply one IPC message posted by a page (internal-page actions and
     /// forwarded keyboard shortcuts).
-    fn handle_browser_ipc(&mut self, pane_id: u64, origin: &str, body: &str) -> Task<Message> {
+    fn handle_browser_ipc(&mut self, webview_id: u64, origin: &str, body: &str) -> Task<Message> {
         let Ok(msg) = serde_json::from_str::<serde_json::Value>(body) else {
             log::warn!("browser ipc: unparseable message: {body}");
             return Task::none();
@@ -971,12 +950,12 @@ impl Alterm {
                         let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
                         let ts = msg.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
                         browser::history::with_stores(|s| s.history.delete(url, ts));
-                        webview_manager::reload(pane_id);
+                        webview_manager::reload(webview_id);
                         Task::none()
                     }
                     "history-clear" => {
                         browser::history::with_stores(|s| s.history.clear());
-                        webview_manager::reload(pane_id);
+                        webview_manager::reload(webview_id);
                         Task::none()
                     }
                     "bookmark-remove" => {
@@ -986,7 +965,7 @@ impl Alterm {
                                 s.bookmarks.toggle(url, "");
                             }
                         });
-                        webview_manager::reload(pane_id);
+                        webview_manager::reload(webview_id);
                         Task::none()
                     }
                     _ => unreachable!(),
@@ -994,7 +973,7 @@ impl Alterm {
             }
             "shortcut" => {
                 let action = msg.get("action").and_then(|v| v.as_str()).unwrap_or("");
-                self.handle_browser_shortcut_ipc(pane_id, action)
+                self.handle_browser_shortcut_ipc(webview_id, action)
             }
             other => {
                 log::warn!("browser ipc: unknown cmd {other:?}");
@@ -1004,13 +983,16 @@ impl Alterm {
     }
 
     /// Route a shortcut forwarded from inside a webview page.
-    fn handle_browser_shortcut_ipc(&mut self, pane_id: u64, action: &str) -> Task<Message> {
-        let Some((tab_id, pane)) = self.find_browser_pane(pane_id) else {
+    fn handle_browser_shortcut_ipc(&mut self, webview_id: u64, action: &str) -> Task<Message> {
+        let Some((tab_id, pane, _idx)) = self.find_browser_tab(webview_id) else {
             return Task::none();
         };
-        // Shortcuts act on the pane they came from; switch focus if needed.
         if self.tabs.get(self.active_tab).map(|t| t.id) != Some(tab_id) {
-            return Task::none(); // stale event from a hidden tab's webview
+            return Task::none(); // stale event from a hidden workspace tab
+        }
+        // Only the pane's active tab has a visible webview; drop anything else.
+        if self.browser_active_webview_id(tab_id, pane) != Some(webview_id) {
+            return Task::none();
         }
         match action {
             "back" => self.update(Message::BrowserBack(pane)),
@@ -1034,16 +1016,18 @@ impl Alterm {
 
     /// Step or reset a browser pane's zoom and apply it to the webview.
     fn browser_zoom(&mut self, pane: pane_grid::Pane, change: ZoomChange) {
-        let tab_id = self.active_tab().id;
-        let pane_id = webview_key(tab_id, pane);
         let tab = self.active_tab_mut();
         if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-            state.zoom = match change {
-                ZoomChange::In => (state.zoom * 1.1).min(5.0),
-                ZoomChange::Out => (state.zoom / 1.1).max(0.25),
-                ZoomChange::Reset => 1.0,
+            let zoom = {
+                let s = state.active_state_mut();
+                s.zoom = match change {
+                    ZoomChange::In => (s.zoom * 1.1).min(5.0),
+                    ZoomChange::Out => (s.zoom / 1.1).max(0.25),
+                    ZoomChange::Reset => 1.0,
+                };
+                s.zoom
             };
-            webview_manager::set_zoom(pane_id, state.zoom);
+            webview_manager::set_zoom(state.active_webview_id(), zoom);
         }
     }
 
@@ -1129,76 +1113,26 @@ impl Alterm {
         }
     }
 
-    /// Create a webview for a browser pane in any tab, keyed by the explicit tab id.
-    /// Non-active tabs' panes won't appear in the active layout so fall back to default bounds.
-    fn create_browser_webview_for(&self, tab_id: u64, pane: pane_grid::Pane, url: &str) {
-        let Some(xid) = self.parent_xid else {
-            log::warn!("Cannot create webview: parent XID not yet available");
-            return;
-        };
-
-        let pane_id = webview_key(tab_id, pane);
-
-        // Try to get real bounds from the pane layout (works for active tab panes).
-        use iced::Size;
-        let grid_width = (self.window_width - SIDEBAR_WIDTH).max(80.0);
-        let grid_height = (self.window_height - TAB_BAR_HEIGHT).max(40.0);
-        let bounds = Size::new(
-            (grid_width - GRID_PADDING * 2.0).max(40.0),
-            (grid_height - GRID_PADDING * 2.0).max(40.0),
-        );
-
-        // Find the tab by id to look up its pane layout.
-        let regions = self.tabs.iter()
-            .find(|t| t.id == tab_id)
-            .map(|t| t.panes.layout().pane_regions(PANE_GRID_SPACING, PANE_GRID_MIN_SIZE, bounds));
-
-        // Chrome height includes the find bar if a session is already active
-        // for this pane (e.g. webview re-created while the bar is open).
-        let chrome = self.browser_chrome_height(tab_id, pane);
-        let (x, y, w, h) = if let Some(regions) = regions {
-            if let Some(rect) = regions.get(&pane) {
-                let wv_x = (GRID_PADDING + rect.x) as f64;
-                let wv_y = (TAB_BAR_HEIGHT + GRID_PADDING + rect.y + PANE_TITLE_BAR_HEIGHT + chrome) as f64;
-                let wv_w = rect.width as f64;
-                let wv_h = (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64;
-                (wv_x, wv_y, wv_w, wv_h)
-            } else {
-                // Non-active tab pane — use default bounds; resize_all_panes() corrects when tab is selected.
-                (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0)
-            }
-        } else {
-            (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0)
-        };
-
-        if let Err(e) = webview_manager::create_webview(pane_id, xid, url, (x, y, w, h)) {
-            log::error!("Failed to create webview for pane {pane_id}: {e}");
-        }
-    }
-
     /// Create webviews for all browser panes across all tabs that don't yet have one.
     /// Called once parent_xid becomes available (WindowHandleReady). Idempotent.
     fn ensure_browser_webviews(&mut self) {
-        // Collect tab/pane/url/zoom tuples to avoid borrow conflicts.
-        let browser_panes: Vec<(u64, pane_grid::Pane, String, f64)> = self.tabs.iter()
-            .flat_map(|tab| {
-                let tab_id = tab.id;
-                tab.panes.iter().filter_map(move |(pane, block)| {
-                    if let Block::Browser { state } = block {
-                        if !webview_manager::exists(webview_key(tab_id, *pane)) {
-                            return Some((tab_id, *pane, state.url.clone(), state.zoom));
+        let mut missing: Vec<(u64, pane_grid::Pane, u64, String, f64)> = Vec::new();
+        for tab in &self.tabs {
+            for (pane, block) in tab.panes.iter() {
+                if let Block::Browser { state } = block {
+                    for t in &state.tabs {
+                        if !webview_manager::exists(t.webview_id) {
+                            missing.push((tab.id, *pane, t.webview_id, t.state.url.clone(), t.state.zoom));
                         }
                     }
-                    None
-                })
-            })
-            .collect();
-
-        let created_any = !browser_panes.is_empty();
-        for (tab_id, pane, url, zoom) in browser_panes {
-            self.create_browser_webview_for(tab_id, pane, &url);
+                }
+            }
+        }
+        let created_any = !missing.is_empty();
+        for (tab_id, pane, webview_id, url, zoom) in missing {
+            self.create_webview_for_tab(tab_id, pane, webview_id, &url);
             if (zoom - 1.0).abs() > f64::EPSILON {
-                webview_manager::set_zoom(webview_key(tab_id, pane), zoom);
+                webview_manager::set_zoom(webview_id, zoom);
             }
         }
         self.update_webview_visibility();
@@ -1439,11 +1373,8 @@ impl Alterm {
                 // drag-over/drop near a browser pane. Hide them for the duration
                 // of the drag; resize_all_panes() re-shows them on drop/cancel.
                 let tab = self.active_tab();
-                let tab_id = tab.id;
-                for (pane, block) in tab.panes.iter() {
-                    if block.is_browser() {
-                        webview_manager::set_visible(webview_key(tab_id, *pane), false);
-                    }
+                for (_pane, block) in tab.panes.iter() {
+                    set_browser_pane_visible(block, false);
                 }
             }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
@@ -1472,10 +1403,10 @@ impl Alterm {
             }
             Message::ClosePane => {
                 let tab = self.active_tab_mut();
-                let tab_id = tab.id;
                 if let Some(focused) = tab.focus {
-                    // Destroy any webview associated with this pane.
-                    webview_manager::destroy(webview_key(tab_id, focused));
+                    if let Some(block) = tab.panes.get(focused) {
+                        destroy_browser_pane_webviews(block);
+                    }
 
                     if tab.panes.len() > 1 {
                         if let Some((_closed_block, sibling)) = tab.panes.close(focused) {
@@ -1487,21 +1418,18 @@ impl Alterm {
             }
             Message::MaximizeToggle => {
                 let tab = self.active_tab_mut();
-                let tab_id = tab.id;
                 if let Some(focused) = tab.focus {
                     if tab.panes.maximized().is_some() {
                         tab.panes.restore();
                         // Show all browser webviews in this tab.
-                        for (pane, block) in tab.panes.iter() {
-                            if block.is_browser() {
-                                webview_manager::set_visible(webview_key(tab_id, *pane), true);
-                            }
+                        for (_pane, block) in tab.panes.iter() {
+                            set_browser_pane_visible(block, true);
                         }
                     } else {
                         // Hide all non-focused browser webviews before maximizing.
                         for (pane, block) in tab.panes.iter() {
-                            if block.is_browser() && *pane != focused {
-                                webview_manager::set_visible(webview_key(tab_id, *pane), false);
+                            if *pane != focused {
+                                set_browser_pane_visible(block, false);
                             }
                         }
                         tab.panes.maximize(focused);
@@ -1519,8 +1447,9 @@ impl Alterm {
             }
             Message::ClosePaneId(pane) => {
                 // Destroy any webview associated with this pane before removing it.
-                let tab_id = self.active_tab().id;
-                webview_manager::destroy(webview_key(tab_id, pane));
+                if let Some(block) = self.active_tab().panes.get(pane) {
+                    destroy_browser_pane_webviews(block);
+                }
 
                 let tab = self.active_tab_mut();
                 tab.pane_labels.remove(&pane);
@@ -1536,20 +1465,17 @@ impl Alterm {
             }
             Message::MaximizeTogglePane(pane) => {
                 let tab = self.active_tab_mut();
-                let tab_id = tab.id;
                 if tab.panes.maximized().is_some() {
                     tab.panes.restore();
                     // Show all browser webviews in this tab.
-                    for (p, block) in tab.panes.iter() {
-                        if block.is_browser() {
-                            webview_manager::set_visible(webview_key(tab_id, *p), true);
-                        }
+                    for (_p, block) in tab.panes.iter() {
+                        set_browser_pane_visible(block, true);
                     }
                 } else {
                     // Hide non-target browser webviews.
                     for (p, block) in tab.panes.iter() {
-                        if block.is_browser() && *p != pane {
-                            webview_manager::set_visible(webview_key(tab_id, *p), false);
+                        if *p != pane {
+                            set_browser_pane_visible(block, false);
                         }
                     }
                     tab.panes.maximize(pane);
@@ -1575,11 +1501,8 @@ impl Alterm {
             Message::CloseTab(index) => {
                 if self.tabs.len() > 1 && index < self.tabs.len() {
                     // Destroy all webviews in the tab being closed.
-                    let closing_tab_id = self.tabs[index].id;
-                    for (pane, block) in self.tabs[index].panes.iter() {
-                        if block.is_browser() {
-                            webview_manager::destroy(webview_key(closing_tab_id, *pane));
-                        }
+                    for (_pane, block) in self.tabs[index].panes.iter() {
+                        destroy_browser_pane_webviews(block);
                     }
 
                     self.tabs.remove(index);
@@ -2072,17 +1995,9 @@ impl Alterm {
                 let url = "alterm://history";
                 let block = Block::new_browser(url);
                 let new_pane = self.add_window(block);
-                // Create the webview against the final (post-rebuild) pane id.
-                self.create_browser_webview(new_pane, url);
-                // Apply persisted zoom if non-default.
-                {
-                    let tab_id = self.active_tab().id;
-                    let tab = self.active_tab();
-                    if let Some(Block::Browser { state }) = tab.panes.get(new_pane) {
-                        if (state.zoom - 1.0).abs() > f64::EPSILON {
-                            webview_manager::set_zoom(webview_key(tab_id, new_pane), state.zoom);
-                        }
-                    }
+                let tab_id = self.active_tab().id;
+                if let Some(Block::Browser { state }) = self.active_tab().panes.get(new_pane) {
+                    self.create_webview_for_tab(tab_id, new_pane, state.active_webview_id(), url);
                 }
                 webview_manager::pump_gtk_events();
                 self.resize_all_panes();
@@ -2092,56 +2007,49 @@ impl Alterm {
             }
             Message::BrowserNavigate(pane, url) => {
                 let target = browser::resolve_input(&url, &self.config.browser.search_engine);
-                let tab_id = self.active_tab().id;
-                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    let target = state.navigate(&target);
-                    webview_manager::navigate(pane_id, &target);
+                    let target = state.active_state_mut().navigate(&target);
+                    webview_manager::navigate(state.active_webview_id(), &target);
                 }
             }
             Message::BrowserBack(pane) => {
-                let tab_id = self.active_tab().id;
-                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
                     // Drive the webview's *real* history; the index move is
                     // confirmed when the navigation event comes back.
-                    if state.begin_back() {
-                        webview_manager::go_back(pane_id);
+                    if state.active_state_mut().begin_back() {
+                        webview_manager::go_back(state.active_webview_id());
                     }
                 }
             }
             Message::BrowserForward(pane) => {
-                let tab_id = self.active_tab().id;
-                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    if state.begin_forward() {
-                        webview_manager::go_forward(pane_id);
+                    if state.active_state_mut().begin_forward() {
+                        webview_manager::go_forward(state.active_webview_id());
                     }
                 }
             }
             Message::BrowserReload(pane) => {
-                let tab_id = self.active_tab().id;
-                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.reload();
-                    webview_manager::reload(pane_id);
+                    state.active_state_mut().reload();
+                    webview_manager::reload(state.active_webview_id());
                 }
             }
             Message::BrowserUrlChanged(pane, url) => {
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.input_url = url;
+                    state.active_state_mut().input_url = url;
                 }
             }
             Message::BrowserToggleBookmark(pane) => {
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    let url = state.url.clone();
-                    let title = state.title.clone();
+                    let active = state.active_state();
+                    let url = active.url.clone();
+                    let title = active.title.clone();
                     if !url.starts_with("alterm://") {
                         browser::history::with_stores(|s| s.bookmarks.toggle(&url, &title));
                     }
@@ -2151,12 +2059,10 @@ impl Alterm {
                 return self.update(Message::BrowserNavigate(pane, "alterm://history".into()));
             }
             Message::BrowserStop(pane) => {
-                let tab_id = self.active_tab().id;
-                let pane_id = webview_key(tab_id, pane);
                 let tab = self.active_tab_mut();
                 if let Some(Block::Browser { state }) = tab.panes.get_mut(pane) {
-                    state.set_loading(false);
-                    webview_manager::stop(pane_id);
+                    state.active_state_mut().set_loading(false);
+                    webview_manager::stop(state.active_webview_id());
                 }
             }
             Message::BrowserZoomIn(pane) => {
@@ -2176,7 +2082,9 @@ impl Alterm {
                 // end it first so webkit clears its highlights before we open a new one.
                 if let Some(old) = self.browser_find.take() {
                     if (old.tab_id, old.pane) != (tab_id, pane) {
-                        webview_manager::find_finish(webview_key(old.tab_id, old.pane));
+                        if let Some(id) = self.browser_active_webview_id(old.tab_id, old.pane) {
+                            webview_manager::find_finish(id);
+                        }
                     }
                 }
                 self.browser_find = Some(BrowserFindState {
@@ -2192,27 +2100,36 @@ impl Alterm {
                 if let Some(f) = self.browser_find.as_mut() {
                     f.query = q;
                     f.matches = None;
-                    let pane_id = webview_key(f.tab_id, f.pane);
-                    if f.query.is_empty() {
-                        webview_manager::find_finish(pane_id);
-                    } else {
-                        webview_manager::find_start(pane_id, &f.query);
+                }
+                if let Some(f) = self.browser_find.as_ref() {
+                    if let Some(id) = self.browser_active_webview_id(f.tab_id, f.pane) {
+                        if f.query.is_empty() {
+                            webview_manager::find_finish(id);
+                        } else {
+                            webview_manager::find_start(id, &f.query);
+                        }
                     }
                 }
             }
             Message::BrowserFindNext => {
                 if let Some(f) = self.browser_find.as_ref() {
-                    webview_manager::find_next(webview_key(f.tab_id, f.pane));
+                    if let Some(id) = self.browser_active_webview_id(f.tab_id, f.pane) {
+                        webview_manager::find_next(id);
+                    }
                 }
             }
             Message::BrowserFindPrev => {
                 if let Some(f) = self.browser_find.as_ref() {
-                    webview_manager::find_prev(webview_key(f.tab_id, f.pane));
+                    if let Some(id) = self.browser_active_webview_id(f.tab_id, f.pane) {
+                        webview_manager::find_prev(id);
+                    }
                 }
             }
             Message::BrowserFindClose => {
                 if let Some(f) = self.browser_find.take() {
-                    webview_manager::find_finish(webview_key(f.tab_id, f.pane));
+                    if let Some(id) = self.browser_active_webview_id(f.tab_id, f.pane) {
+                        webview_manager::find_finish(id);
+                    }
                 }
                 self.resize_all_panes();
             }
@@ -2703,7 +2620,7 @@ impl Alterm {
                     }
                     Block::Browser { state } => {
                         let find = browser_find.filter(|f| f.tab_id == active_tab_id && f.pane == pane);
-                        browser_view(pane, state, self.spinner_frame, find)
+                        browser_view(pane, state.active_state(), self.spinner_frame, find)
                     }
                     Block::Preview { state } => {
                         preview_view(pane, state)
@@ -5157,17 +5074,7 @@ fn extract_native_window_handle(w: &dyn iced::window::Window) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{compose_key, wrap_index};
-
-    #[test]
-    fn same_pane_index_distinct_across_tabs() {
-        // Pane(0) in tab 0 vs tab 1 must not collide.
-        assert_ne!(compose_key(0, 0), compose_key(1, 0));
-        // Distinct panes within a tab stay distinct.
-        assert_ne!(compose_key(7, 0), compose_key(7, 1));
-        // Low bits preserve the pane index.
-        assert_eq!(compose_key(3, 5) & 0xFFFF_FFFF, 5);
-    }
+    use super::wrap_index;
 
     #[test]
     fn wrap_index_wraps_both_directions() {
