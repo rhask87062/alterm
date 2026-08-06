@@ -31,6 +31,10 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'h' || k === 'H') action = 'history';
     else if (k === 'd' || k === 'D') action = 'bookmark';
     else if (k === 'f' || k === 'F') action = 'find';
+    else if (k === 't' || k === 'T') action = 'tab-new';
+    else if (k === 'w' || k === 'W') action = 'tab-close';
+    else if (k === 'PageDown') action = 'tab-next';
+    else if (k === 'PageUp') action = 'tab-prev';
     else if (k === '=' || k === '+') action = 'zoom-in';
     else if (k === '-') action = 'zoom-out';
     else if (k === '0') action = 'zoom-reset';

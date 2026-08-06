@@ -780,7 +780,7 @@ impl Alterm {
                 rect.width as f64,
                 (rect.height - PANE_TITLE_BAR_HEIGHT - chrome).max(10.0) as f64,
             ),
-            None => (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0),
+            None => (0.0, (TAB_BAR_HEIGHT + PANE_TITLE_BAR_HEIGHT + BROWSER_TAB_BAR_HEIGHT + BROWSER_NAV_BAR_HEIGHT) as f64, 600.0, 400.0),
         };
 
         if let Err(e) = webview_manager::create_webview(webview_id, xid, url, (x, y, w, h)) {
@@ -1056,6 +1056,10 @@ impl Alterm {
                 format!("browser-url-input-{:?}", pane),
             )),
             "find" => self.update(Message::BrowserFindOpen(pane)),
+            "tab-new" => self.update(Message::BrowserTabNew(pane)),
+            "tab-close" => self.update(Message::BrowserTabCloseActive(pane)),
+            "tab-next" => self.update(Message::BrowserTabNext(pane)),
+            "tab-prev" => self.update(Message::BrowserTabPrev(pane)),
             other => {
                 log::warn!("browser ipc: unknown shortcut {other:?}");
                 Task::none()
@@ -2449,6 +2453,12 @@ impl Alterm {
                             Key::Named(Named::ArrowRight) if alt => {
                                 Some(Message::BrowserForward(focused))
                             }
+                            Key::Named(Named::PageDown) if ctrl => {
+                                Some(Message::BrowserTabNext(focused))
+                            }
+                            Key::Named(Named::PageUp) if ctrl => {
+                                Some(Message::BrowserTabPrev(focused))
+                            }
                             // Lowercase like the keybinding registry, in case
                             // the platform reports the shifted character.
                             Key::Character(c) if ctrl => match c.as_str().to_ascii_lowercase().as_str() {
@@ -2457,6 +2467,8 @@ impl Alterm {
                                 "h" => Some(Message::BrowserOpenHistory(focused)),
                                 "d" => Some(Message::BrowserToggleBookmark(focused)),
                                 "f" => Some(Message::BrowserFindOpen(focused)),
+                                "t" => Some(Message::BrowserTabNew(focused)),
+                                "w" => Some(Message::BrowserTabCloseActive(focused)),
                                 "=" | "+" => Some(Message::BrowserZoomIn(focused)),
                                 "-" => Some(Message::BrowserZoomOut(focused)),
                                 "0" => Some(Message::BrowserZoomReset(focused)),
