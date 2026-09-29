@@ -180,6 +180,30 @@ const PANE_GRID_MIN_SIZE: f32 = 120.0;
 const GRID_PADDING: f32 = 8.0;
 /// Height of the browser tab strip (tab buttons + padding) in logical pixels.
 const BROWSER_TAB_BAR_HEIGHT: f32 = 30.0;
+
+// Browser tab-strip geometry. Tab widths are computed from the strip's measured
+// width rather than left to FillPortion, because the title has to be elided to
+// the pixels the tab actually has — see the tab strip in `browser_view`.
+//
+/// Widest a single browser tab gets, however few tabs are open.
+const BROWSER_TAB_MAX_WIDTH: f32 = 220.0;
+/// Width of a tab's close (✕) button.
+const BROWSER_TAB_CLOSE_WIDTH: f32 = 20.0;
+/// Width of the "new tab" (+) button at the end of the strip.
+const BROWSER_TAB_NEW_WIDTH: f32 = 24.0;
+/// Gap between adjacent children of the tab strip row.
+const BROWSER_TAB_SPACING: f32 = 4.0;
+/// Gap between a tab's title button and its close button.
+const BROWSER_TAB_INNER_SPACING: f32 = 2.0;
+/// Horizontal padding inside a tab's title button, per side.
+const BROWSER_TAB_LABEL_PADDING: f32 = 8.0;
+/// Font size of a tab's title. The elision math measures against this.
+const BROWSER_TAB_FONT_SIZE: f32 = 12.0;
+/// Label room a tab needs before it's worth keeping the close button; below
+/// this the button would crowd the title out entirely, so it's dropped and the
+/// tab is closed via middle-click or Ctrl+W instead.
+const BROWSER_TAB_CLOSE_MIN_LABEL: f32 = 28.0;
+
 /// Height of the browser nav bar (URL input + padding) in logical pixels.
 const BROWSER_NAV_BAR_HEIGHT: f32 = 40.0;
 /// Height of the browser find bar (search input + padding) in logical pixels.
@@ -3816,46 +3840,72 @@ fn browser_view<'a>(
     let state = pane_state.active_state();
 
     // ── Tab strip ──
-    let mut strip = row![].spacing(4).align_y(iced::Alignment::Center);
-    for (i, t) in pane_state.tabs.iter().enumerate() {
-        let active = i == pane_state.active;
-        let title_btn = button(
-            text(tab_strip_title(&t.state))
-                .size(12)
-                .wrapping(iced::widget::text::Wrapping::None),
-        )
-        .on_press(Message::BrowserTabSelected(pane, i))
-        .padding(Padding::from([3, 8]))
-        .width(Fill)
-        .style(move |th: &Theme, s: button::Status| browser_tab_style(th, s, active));
-        let close_btn = button(text("\u{2715}").size(10).center())
-            .on_press(Message::BrowserTabClose(pane, i))
-            .padding(Padding::from([3, 6]))
-            .style(|th: &Theme, s: button::Status| nav_button_style(th, s));
-        strip = strip.push(
-            mouse_area(
-                container(
-                    row![title_btn, close_btn]
-                        .spacing(2)
-                        .align_y(iced::Alignment::Center),
-                )
-                .width(Length::FillPortion(1))
-                .max_width(220.0),
+    // Tabs are laid out at explicitly computed widths instead of FillPortion,
+    // so each title can be elided to the pixels its own tab has. `responsive`
+    // supplies the strip's width; without it the labels would have to guess,
+    // and a guess that runs long is painted straight over the next tab.
+    let tab_count = pane_state.tabs.len();
+    let active_idx = pane_state.active;
+    let strip = iced::widget::responsive(move |size| {
+        let TabMetrics {
+            tab_w,
+            label_w,
+            text_w,
+            spacing,
+            show_close,
+        } = browser_tab_metrics(size.width, tab_count);
+
+        let mut strip = row![].spacing(spacing).align_y(iced::Alignment::Center);
+        for (i, t) in pane_state.tabs.iter().enumerate() {
+            let active = i == active_idx;
+            let title_btn = button(
+                text(tab_strip_title(&t.state, text_w))
+                    .size(BROWSER_TAB_FONT_SIZE)
+                    .wrapping(iced::widget::text::Wrapping::None),
             )
-            .on_middle_press(Message::BrowserTabClose(pane, i)),
+            .on_press(Message::BrowserTabSelected(pane, i))
+            .padding(Padding::from([3.0, BROWSER_TAB_LABEL_PADDING]))
+            .width(Length::Fixed(label_w))
+            .style(move |th: &Theme, s: button::Status| browser_tab_style(th, s, active));
+
+            let mut tab_row = row![title_btn]
+                .spacing(BROWSER_TAB_INNER_SPACING)
+                .align_y(iced::Alignment::Center);
+            if show_close {
+                tab_row = tab_row.push(
+                    button(text("\u{2715}").size(10).center())
+                        .on_press(Message::BrowserTabClose(pane, i))
+                        .padding(Padding::from([3.0, 4.0]))
+                        .width(Length::Fixed(BROWSER_TAB_CLOSE_WIDTH))
+                        .style(|th: &Theme, s: button::Status| nav_button_style(th, s)),
+                );
+            }
+
+            strip = strip.push(
+                mouse_area(
+                    // `clip` is the backstop: if a label ever measures short of
+                    // what it paints, it's cut at the tab edge rather than drawn
+                    // over the neighbouring tab.
+                    container(tab_row).width(Length::Fixed(tab_w)).clip(true),
+                )
+                .on_middle_press(Message::BrowserTabClose(pane, i)),
+            );
+        }
+        strip = strip.push(
+            button(text("+").size(14).center())
+                .on_press(Message::BrowserTabNew(pane))
+                .padding(Padding::from([2.0, 4.0]))
+                .width(Length::Fixed(BROWSER_TAB_NEW_WIDTH))
+                .style(|th: &Theme, s: button::Status| nav_button_style(th, s)),
         );
-    }
-    strip = strip.push(
-        button(text("+").size(14).center())
-            .on_press(Message::BrowserTabNew(pane))
-            .padding(Padding::from([2, 8]))
-            .style(|th: &Theme, s: button::Status| nav_button_style(th, s)),
-    );
-    strip = strip.push(iced::widget::space().width(Fill));
+        strip = strip.push(iced::widget::space().width(Fill));
+        strip.into()
+    });
     let tab_bar: Element<'a, Message> = container(strip)
         .width(Fill)
         .height(Length::Fixed(BROWSER_TAB_BAR_HEIGHT))
         .padding(Padding::from([3, 6]))
+        .clip(true) // nothing escapes the strip, whatever the tab count
         .style(browser_chrome_style)
         .into();
 
@@ -4061,14 +4111,131 @@ fn nav_button_style(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-/// Tab-strip label: the page title (or URL), truncated to fit the strip.
-fn tab_strip_title(state: &BrowserState) -> String {
-    let full = state.display_title();
-    let mut s: String = full.chars().take(24).collect();
-    if s.len() < full.len() {
-        s.push('…');
+/// Width in logical pixels that `content` occupies when rendered unwrapped in
+/// the default UI font at `size`.
+///
+/// Measured against the same process-global font system the renderer draws
+/// with, and with the same defaults the `text` widget uses, so the answer
+/// matches what actually gets painted.
+fn ui_text_width(content: &str, size: f32) -> f32 {
+    use iced::advanced::graphics::text::Paragraph;
+    use iced::advanced::text::Paragraph as _;
+
+    if content.is_empty() {
+        return 0.0;
     }
-    s
+    Paragraph::with_text(iced::advanced::text::Text {
+        content,
+        bounds: iced::Size::INFINITE,
+        size: iced::Pixels(size),
+        line_height: iced::advanced::text::LineHeight::default(),
+        font: iced::Font::default(),
+        align_x: iced::advanced::text::Alignment::Default,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: iced::advanced::text::Shaping::default(),
+        wrapping: iced::advanced::text::Wrapping::None,
+    })
+    .min_bounds()
+    .width
+}
+
+/// Shorten `full` so it renders within `max_width` logical pixels at `size`,
+/// appending an ellipsis whenever anything was dropped.
+///
+/// iced has no ellipsis mode of its own: a `Wrapping::None` label wider than
+/// its bounds is simply painted past them. So the string is cut to fit here,
+/// by measurement rather than by a character count — a character budget can't
+/// be right for a proportional font at a width that changes with the tab count.
+///
+/// Returns an empty string when there isn't even room for the ellipsis.
+fn elide_to_width(full: &str, size: f32, max_width: f32) -> String {
+    if max_width <= 0.0 {
+        return String::new();
+    }
+    if ui_text_width(full, size) <= max_width {
+        return full.to_string();
+    }
+    if ui_text_width("…", size) > max_width {
+        return String::new();
+    }
+
+    // Find the longest prefix whose "prefix…" still fits. Fitting is monotonic
+    // in the prefix length, so binary search: `lo` always fits (the bare
+    // ellipsis, checked above), `hi` never does (the whole string doesn't even
+    // fit without the ellipsis).
+    let chars: Vec<char> = full.chars().collect();
+    let mut lo = 0;
+    let mut hi = chars.len();
+    while lo + 1 < hi {
+        let mid = lo + (hi - lo) / 2;
+        let mut candidate: String = chars[..mid].iter().collect();
+        candidate.push('…');
+        if ui_text_width(&candidate, size) <= max_width {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+
+    let mut out: String = chars[..lo].iter().collect();
+    // Don't leave the ellipsis floating after a space.
+    while out.ends_with(char::is_whitespace) {
+        out.pop();
+    }
+    out.push('…');
+    out
+}
+
+/// Tab-strip label: the page title (or URL), elided with an ellipsis to the
+/// `max_width` logical pixels this tab actually has for its label.
+fn tab_strip_title(state: &BrowserState, max_width: f32) -> String {
+    elide_to_width(&state.display_title(), BROWSER_TAB_FONT_SIZE, max_width)
+}
+
+/// Widths, in logical pixels, of one browser tab and the pieces inside it.
+struct TabMetrics {
+    /// The tab as a whole.
+    tab_w: f32,
+    /// The title button within the tab.
+    label_w: f32,
+    /// The title text within that button, i.e. what the label must be elided to.
+    text_w: f32,
+    /// Gap to put between tabs — normally `BROWSER_TAB_SPACING`, less when the
+    /// strip is too cramped to afford it.
+    spacing: f32,
+    /// Whether this tab is wide enough to be worth keeping its close button.
+    show_close: bool,
+}
+
+/// Divide a tab strip `strip_width` pixels wide between `tab_count` tabs.
+///
+/// Tabs share the strip evenly (up to `BROWSER_TAB_MAX_WIDTH` each) and the
+/// total never exceeds `strip_width`, so nothing is laid out past the strip's
+/// edge no matter how many tabs are open. `text_w` is what the title has to be
+/// elided to; it shrinks to 0 rather than letting a tab overflow.
+fn browser_tab_metrics(strip_width: f32, tab_count: usize) -> TabMetrics {
+    let n = tab_count.max(1) as f32;
+    // The strip row holds n tabs, the "+" button and a trailing Fill spacer —
+    // so n + 1 gaps between children.
+    let gaps = n + 1.0;
+    let budget = (strip_width - BROWSER_TAB_NEW_WIDTH).max(0.0);
+    // With enough tabs in a narrow pane the gaps alone would outgrow the strip,
+    // and tab widths can't go below zero to make up for it — so the gaps give
+    // way first.
+    let spacing = BROWSER_TAB_SPACING.min(budget / gaps);
+    let tab_w = ((budget - gaps * spacing) / n).clamp(0.0, BROWSER_TAB_MAX_WIDTH);
+
+    let label_w_with_close = tab_w - BROWSER_TAB_CLOSE_WIDTH - BROWSER_TAB_INNER_SPACING;
+    let show_close = label_w_with_close >= BROWSER_TAB_CLOSE_MIN_LABEL;
+    let label_w = if show_close { label_w_with_close } else { tab_w };
+
+    TabMetrics {
+        tab_w,
+        label_w,
+        text_w: (label_w - 2.0 * BROWSER_TAB_LABEL_PADDING).max(0.0),
+        spacing,
+        show_close,
+    }
 }
 
 /// Style for a tab-strip button; the active tab is lifted above the strip
@@ -5268,7 +5435,11 @@ fn extract_native_window_handle(w: &dyn iced::window::Window) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::wrap_index;
+    use super::{
+        browser_tab_metrics, elide_to_width, ui_text_width, wrap_index,
+        BROWSER_TAB_FONT_SIZE, BROWSER_TAB_MAX_WIDTH, BROWSER_TAB_NEW_WIDTH,
+        BROWSER_TAB_SPACING,
+    };
 
     #[test]
     fn wrap_index_wraps_both_directions() {
@@ -5276,5 +5447,124 @@ mod tests {
         assert_eq!(wrap_index(2, 3, true), 0); // wrap forward
         assert_eq!(wrap_index(0, 3, false), 2); // wrap backward
         assert_eq!(wrap_index(0, 0, true), 0); // empty is safe
+    }
+
+    /// A title that already fits is left exactly as-is — no stray ellipsis.
+    #[test]
+    fn elide_keeps_titles_that_fit() {
+        let title = "Docs";
+        let wide = ui_text_width(title, BROWSER_TAB_FONT_SIZE) + 10.0;
+        assert_eq!(elide_to_width(title, BROWSER_TAB_FONT_SIZE, wide), title);
+    }
+
+    /// The regression this guards: as tabs shrink, the label must shrink with
+    /// them. Previously the title was cut at a fixed 24 characters regardless of
+    /// the tab's width, so it was painted past the tab's edge.
+    #[test]
+    fn elide_never_exceeds_the_width_it_is_given() {
+        let title = "Extremely Long Page Title That Will Never Fit In A Narrow Tab";
+        for max_width in [6.0, 12.0, 20.0, 40.0, 60.0, 90.0, 140.0, 200.0] {
+            let shown = elide_to_width(title, BROWSER_TAB_FONT_SIZE, max_width);
+            let width = ui_text_width(&shown, BROWSER_TAB_FONT_SIZE);
+            assert!(
+                width <= max_width,
+                "{shown:?} measured {width} > {max_width} available"
+            );
+        }
+    }
+
+    /// Anything dropped is signalled with an ellipsis, and a narrower tab never
+    /// shows more text than a wider one.
+    #[test]
+    fn elide_marks_truncation_and_is_monotonic() {
+        let title = "Extremely Long Page Title That Will Never Fit In A Narrow Tab";
+        let narrow = elide_to_width(title, BROWSER_TAB_FONT_SIZE, 60.0);
+        let wide = elide_to_width(title, BROWSER_TAB_FONT_SIZE, 150.0);
+
+        assert!(narrow.ends_with('…'), "{narrow:?} should signal truncation");
+        assert!(wide.ends_with('…'), "{wide:?} should signal truncation");
+        assert!(
+            narrow.chars().count() < wide.chars().count(),
+            "narrow {narrow:?} should show less than wide {wide:?}"
+        );
+    }
+
+    /// Degenerate widths: too small for even an ellipsis means show nothing,
+    /// rather than overflowing the tab.
+    #[test]
+    fn elide_yields_nothing_when_there_is_no_room() {
+        assert_eq!(elide_to_width("Anything", BROWSER_TAB_FONT_SIZE, 0.0), "");
+        assert_eq!(elide_to_width("Anything", BROWSER_TAB_FONT_SIZE, -5.0), "");
+    }
+
+    /// Multi-byte titles must be sliced on character boundaries, not bytes.
+    #[test]
+    fn elide_handles_multibyte_titles() {
+        let title = "日本語のページタイトルがとても長い場合";
+        let shown = elide_to_width(title, BROWSER_TAB_FONT_SIZE, 50.0);
+        assert!(ui_text_width(&shown, BROWSER_TAB_FONT_SIZE) <= 50.0);
+        assert!(title.starts_with(shown.trim_end_matches('…')));
+    }
+
+    /// The invariant behind the bug: however many tabs are open, the tabs plus
+    /// their gaps plus the "+" button never add up to more than the strip, so no
+    /// tab is ever laid out past the strip's edge.
+    #[test]
+    fn tab_metrics_always_fit_the_strip() {
+        // 108 is the narrowest strip a pane can produce: PANE_GRID_MIN_SIZE (120)
+        // less the tab bar's horizontal padding.
+        for strip_width in [108.0, 120.0, 300.0, 640.0, 900.0, 1440.0, 2560.0] {
+            for tab_count in 1..=40 {
+                let m = browser_tab_metrics(strip_width, tab_count);
+                let n = tab_count as f32;
+                let laid_out =
+                    n * m.tab_w + (n + 1.0) * m.spacing + BROWSER_TAB_NEW_WIDTH;
+                assert!(
+                    laid_out <= strip_width + 0.01,
+                    "{tab_count} tabs laid out to {laid_out} in a {strip_width} strip"
+                );
+                assert!(m.tab_w >= 0.0 && m.text_w >= 0.0 && m.spacing >= 0.0);
+                assert!(m.spacing <= BROWSER_TAB_SPACING);
+                assert!(m.label_w <= m.tab_w + 0.01);
+            }
+        }
+    }
+
+    /// More tabs means narrower tabs, until the per-tab cap stops applying.
+    #[test]
+    fn tab_metrics_shrink_as_tabs_are_added() {
+        let one = browser_tab_metrics(900.0, 1);
+        let six = browser_tab_metrics(900.0, 6);
+        let twenty = browser_tab_metrics(900.0, 20);
+
+        assert_eq!(one.tab_w, BROWSER_TAB_MAX_WIDTH); // capped, not stretched
+        assert!(six.tab_w < one.tab_w);
+        assert!(twenty.tab_w < six.tab_w);
+        assert!(twenty.text_w < six.text_w);
+    }
+
+    /// A roomy tab keeps its close button; a cramped one drops it rather than
+    /// letting it squeeze the title out.
+    #[test]
+    fn tab_metrics_drop_close_button_when_cramped() {
+        assert!(browser_tab_metrics(900.0, 3).show_close);
+        assert!(!browser_tab_metrics(900.0, 30).show_close);
+    }
+
+    /// End to end: at every tab count the elided title fits the room the
+    /// geometry gave it. This is the overlap the bug report described.
+    #[test]
+    fn tab_titles_fit_their_tabs_at_every_tab_count() {
+        let title = "Some Rather Long Page Title — Example Dot Com";
+        for tab_count in 1..=30 {
+            let m = browser_tab_metrics(900.0, tab_count);
+            let shown = elide_to_width(title, BROWSER_TAB_FONT_SIZE, m.text_w);
+            let width = ui_text_width(&shown, BROWSER_TAB_FONT_SIZE);
+            assert!(
+                width <= m.text_w,
+                "{tab_count} tabs: {shown:?} is {width} wide, tab allows {}",
+                m.text_w
+            );
+        }
     }
 }

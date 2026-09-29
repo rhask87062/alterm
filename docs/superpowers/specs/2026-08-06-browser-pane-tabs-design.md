@@ -76,6 +76,13 @@ become permanent per-tab ids, deleting the remap-on-layout-change machinery
 - Contents: one button per tab (equal widths, ellipsized `display_title()`,
   active tab visually distinct, × close button, middle-click closes) plus a
   `+` new-tab button at the end.
+- Tab widths are computed from the strip's own width (via `responsive`), not
+  left to `FillPortion`: iced has no ellipsis mode, so a label wider than its
+  bounds is painted straight over the next tab. `browser_tab_metrics` divides
+  the strip up and `elide_to_width` cuts each title to the pixels its tab
+  actually has, measured in the real font. Once tabs get too narrow to hold a
+  close button and any title, the × is dropped (middle-click and Ctrl+W still
+  close); the strip itself never overflows the pane.
 - `browser_chrome_height` and the webview-bounds math in `resize_all_panes`
   gain the tab-bar height. Nav bar, find bar, and zoom all show/drive the
   active tab's state.
