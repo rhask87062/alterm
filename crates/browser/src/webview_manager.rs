@@ -31,6 +31,10 @@ document.addEventListener('keydown', (e) => {
     else if (k === 'h' || k === 'H') action = 'history';
     else if (k === 'd' || k === 'D') action = 'bookmark';
     else if (k === 'f' || k === 'F') action = 'find';
+    else if (k === 't' || k === 'T') action = 'tab-new';
+    else if (k === 'w' || k === 'W') action = 'tab-close';
+    else if (k === 'PageDown') action = 'tab-next';
+    else if (k === 'PageUp') action = 'tab-prev';
     else if (k === '=' || k === '+') action = 'zoom-in';
     else if (k === '-') action = 'zoom-out';
     else if (k === '0') action = 'zoom-reset';
@@ -69,6 +73,9 @@ thread_local! {
     static IPC_EVENTS: RefCell<Vec<(u64, String, String)>> = const { RefCell::new(Vec::new()) };
     /// Find-in-page match counts `(pane_id, count)`.
     static FIND_EVENTS: RefCell<Vec<(u64, u32)>> = const { RefCell::new(Vec::new()) };
+    /// New-tab requests `(opener_pane_id, url)` queued when a clicked
+    /// `target="_blank"` link asks for a new window.
+    static NEW_TAB_EVENTS: RefCell<Vec<(u64, String)>> = const { RefCell::new(Vec::new()) };
     /// Shared WebContext for all webviews. On Linux, wry registers custom URI
     /// schemes at the WebContext level. Sharing one context means the "alterm"
     /// scheme is only registered once; requests are routed to the right webview
@@ -82,7 +89,11 @@ thread_local! {
     #[cfg(target_os = "linux")]
     static WEBVIEW_DATA_DIR: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
     #[cfg(target_os = "linux")]
-    static GTK_INITIALIZED: RefCell<bool> = RefCell::new(false);
+    static GTK_INITIALIZED: RefCell<bool> = const { RefCell::new(false) };
+    /// Open popup windows `(opener_pane_id, window)` so a pane's popups can
+    /// be closed when the pane is destroyed.
+    #[cfg(target_os = "linux")]
+    static POPUPS: RefCell<Vec<(u64, gtk::Window)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Set the directory used for persistent webview profile data (cookies,
@@ -125,6 +136,33 @@ pub fn drain_ipc_events() -> Vec<(u64, String, String)> {
 /// Drain queued find-in-page match counts.
 pub fn drain_find_events() -> Vec<(u64, u32)> {
     FIND_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// Drain queued open-in-new-tab requests from `target="_blank"` links.
+pub fn drain_new_tab_events() -> Vec<(u64, String)> {
+    NEW_TAB_EVENTS.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+/// Where a WebKit `create` (new window) request should be routed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateDisposition {
+    /// Scripted `window.open` — needs a floating popup window backed by a
+    /// process-related webview (OAuth relies on window.opener/postMessage).
+    Popup,
+    /// Clicked link targeting a new window — open the URL as a new tab.
+    NewTab,
+}
+
+/// Classify a `create` request. `is_link_clicked` = navigation type was
+/// `LinkClicked`; `url` may be empty for scripted about:blank popups.
+/// Unexpected combinations fall back to `Popup`: a floating window that
+/// works beats a dead click.
+pub fn classify_create(is_link_clicked: bool, url: &str) -> CreateDisposition {
+    if is_link_clicked && !url.is_empty() {
+        CreateDisposition::NewTab
+    } else {
+        CreateDisposition::Popup
+    }
 }
 
 /// Ensure GTK is initialized. No-op on non-Linux platforms.
@@ -294,6 +332,9 @@ pub fn create_webview(
                 FIND_EVENTS.with(|q| q.borrow_mut().push((pane_id, count)));
             });
         }
+        // Handle window.open popups and target="_blank" links (Google
+        // sign-in and friends). See connect_create_handler.
+        connect_create_handler(&webview.webview(), pane_id);
     }
 
     WEBVIEWS.with(|wvs| {
@@ -355,6 +396,24 @@ pub fn destroy(pane_id: u64) {
             let _ = wv.set_visible(false);
         }
     });
+
+    // Close any popup windows this pane opened; each window's destroy
+    // handler removes its own POPUPS entry. Collect first, then close:
+    // close() re-enters POPUPS via that handler, so no borrow may be held.
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::GtkWindowExt;
+        let orphans: Vec<gtk::Window> = POPUPS.with(|p| {
+            p.borrow()
+                .iter()
+                .filter(|(owner, _)| *owner == pane_id)
+                .map(|(_, w)| w.clone())
+                .collect()
+        });
+        for w in orphans {
+            w.close();
+        }
+    }
 
     #[cfg(target_os = "linux")]
     GTK_INITIALIZED.with(|init| {
@@ -500,71 +559,130 @@ pub fn find_finish(pane_id: u64) {
     let _ = pane_id;
 }
 
-/// Re-key live webviews when pane ids change (e.g. after a layout rebuild).
+/// Route WebKit "create" (new window) requests for the webview belonging to
+/// `pane_id`: scripted popups get a floating related-webview window; clicked
+/// `_blank` links are queued for the app layer to open as a new tab.
 ///
-/// `mapping` is a list of `(old_pane_id, new_pane_id)` pairs. Done in two phases
-/// (remove all sources, then insert at targets) so overlapping ids can't clobber.
-pub fn remap(mapping: &[(u64, u64)]) {
-    WEBVIEWS.with(|wvs| {
-        remap_map(&mut wvs.borrow_mut(), mapping);
+/// wry only connects this signal itself when a `new_window_req_handler` is
+/// set (we never set one), and wry's decide-policy handler ignores
+/// new-window decisions, so this handler has the signal to itself.
+#[cfg(target_os = "linux")]
+fn connect_create_handler(webview: &webkit2gtk::WebView, pane_id: u64) {
+    use webkit2gtk::{URIRequestExt, WebViewExt};
+    webview.connect_create(move |view, action| {
+        let url = action
+            .request()
+            .and_then(|r| r.uri())
+            .map(|u| u.to_string())
+            .unwrap_or_default();
+        let is_link =
+            action.navigation_type() == webkit2gtk::NavigationType::LinkClicked;
+        match classify_create(is_link, &url) {
+            CreateDisposition::NewTab => {
+                log::info!("[popup] _blank link -> new tab: pane={pane_id} url={url}");
+                NEW_TAB_EVENTS.with(|q| q.borrow_mut().push((pane_id, url)));
+                None
+            }
+            CreateDisposition::Popup => {
+                use gtk::prelude::Cast;
+                log::info!("[popup] window.open -> popup: pane={pane_id} url={url:?}");
+                Some(build_popup(view, pane_id).upcast::<gtk::Widget>())
+            }
+        }
     });
 }
 
-/// Pure two-phase key remap, extracted for testing.
-fn remap_map<V>(map: &mut HashMap<u64, V>, mapping: &[(u64, u64)]) {
-    // Phase 1: remove every source (skip identity / missing).
-    let mut moved: Vec<(u64, V)> = Vec::new();
-    for &(old, new) in mapping {
-        if old == new {
-            continue;
+/// Build a popup webview **related** to `opener` (same web process and
+/// session — required so window.opener/postMessage reach the opener page)
+/// inside its own floating window. Returns the webview; WebKit loads the
+/// popup content into it. Deliberately gets NO wry IPC handler.
+#[cfg(target_os = "linux")]
+fn build_popup(opener: &webkit2gtk::WebView, opener_pane: u64) -> webkit2gtk::WebView {
+    use gtk::prelude::{ContainerExt, GtkWindowExt, WidgetExt};
+    use webkit2gtk::WebViewExt;
+
+    let popup = webkit2gtk::WebView::builder().related_view(opener).build();
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+    window.set_title("alterm");
+    window.add(&popup);
+
+    // Show only once WebKit has applied the site's window features; size
+    // from the requested geometry when given, else a sensible OAuth default.
+    let win = window.clone();
+    popup.connect_ready_to_show(move |wv| {
+        let (mut w, mut h) = (500, 640);
+        if let Some(props) = wv.window_properties() {
+            if let Ok(geo) = props.property_value("geometry").get::<gtk::gdk::Rectangle>() {
+                if geo.width() > 0 && geo.height() > 0 {
+                    w = geo.width().clamp(200, 1600);
+                    h = geo.height().clamp(200, 1200);
+                }
+            }
         }
-        if let Some(v) = map.remove(&old) {
-            moved.push((new, v));
+        win.set_default_size(w, h);
+        win.set_position(gtk::WindowPosition::Center);
+        win.show_all();
+    });
+
+    // Keep the window title in sync with the page.
+    let win = window.clone();
+    popup.connect_title_notify(move |wv| {
+        if let Some(t) = wv.title() {
+            win.set_title(&t);
         }
-    }
-    // Phase 2: insert each value at its new key.
-    for (new, v) in moved {
-        map.insert(new, v);
-    }
+    });
+
+    // The page called window.close() (OAuth popups do this when done).
+    let win = window.clone();
+    popup.connect_close(move |_| win.close());
+
+    // Popups can themselves open popups or _blank links; attribute them to
+    // the original opener pane.
+    connect_create_handler(&popup, opener_pane);
+
+    // Track for cleanup; self-remove when the window is destroyed (either
+    // via window.close() above or the user closing it).
+    POPUPS.with(|p| p.borrow_mut().push((opener_pane, window.clone())));
+    window.connect_destroy(|w| {
+        POPUPS.with(|p| p.borrow_mut().retain(|(_, win)| win != w));
+    });
+
+    popup
 }
 
 #[cfg(test)]
 mod tests {
-    use super::remap_map;
-    use std::collections::HashMap;
+    use super::{classify_create, drain_new_tab_events, CreateDisposition, NEW_TAB_EVENTS};
 
     #[test]
-    fn remap_moves_values_to_new_keys() {
-        let mut m: HashMap<u64, u32> = HashMap::new();
-        m.insert(5, 105);
-        m.insert(8, 108);
-        // 5 -> 0, 8 -> 2
-        remap_map(&mut m, &[(5, 0), (8, 2)]);
-        assert_eq!(m.get(&0), Some(&105));
-        assert_eq!(m.get(&2), Some(&108));
-        assert_eq!(m.get(&5), None);
-        assert_eq!(m.get(&8), None);
+    fn classify_link_clicks_open_new_tab() {
+        assert_eq!(
+            classify_create(true, "https://example.com/"),
+            CreateDisposition::NewTab
+        );
     }
 
     #[test]
-    fn remap_handles_swaps_without_clobbering() {
-        let mut m: HashMap<u64, u32> = HashMap::new();
-        m.insert(0, 100);
-        m.insert(1, 101);
-        // swap 0 <-> 1
-        remap_map(&mut m, &[(0, 1), (1, 0)]);
-        assert_eq!(m.get(&0), Some(&101));
-        assert_eq!(m.get(&1), Some(&100));
+    fn classify_scripted_opens_are_popups() {
+        // Google's account chooser does window.open() — must be a popup.
+        assert_eq!(
+            classify_create(false, "https://accounts.google.com/o/oauth2/auth"),
+            CreateDisposition::Popup
+        );
+        // Scripted about:blank popups have no URL yet.
+        assert_eq!(classify_create(false, ""), CreateDisposition::Popup);
     }
 
     #[test]
-    fn remap_ignores_missing_and_identity() {
-        let mut m: HashMap<u64, u32> = HashMap::new();
-        m.insert(3, 103);
-        remap_map(&mut m, &[(3, 3), (9, 4)]); // identity + missing source
-        assert_eq!(m.get(&3), Some(&103));
-        assert_eq!(m.get(&4), None);
-        assert_eq!(m.len(), 1);
+    fn classify_link_without_url_falls_back_to_popup() {
+        assert_eq!(classify_create(true, ""), CreateDisposition::Popup);
+    }
+
+    #[test]
+    fn new_tab_events_drain_and_clear() {
+        NEW_TAB_EVENTS.with(|q| q.borrow_mut().push((7, "https://a.com/".into())));
+        assert_eq!(drain_new_tab_events(), vec![(7, "https://a.com/".to_string())]);
+        assert!(drain_new_tab_events().is_empty());
     }
 }
 

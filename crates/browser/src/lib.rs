@@ -37,6 +37,7 @@ pub mod webview_manager {
     pub fn drain_load_events() -> Vec<(u64, bool)> { Vec::new() }
     pub fn drain_ipc_events() -> Vec<(u64, String, String)> { Vec::new() }
     pub fn drain_find_events() -> Vec<(u64, u32)> { Vec::new() }
+    pub fn drain_new_tab_events() -> Vec<(u64, String)> { Vec::new() }
     pub fn stop(_pane_id: u64) {}
     pub fn set_zoom(_pane_id: u64, _level: f64) {}
     pub fn find_start(_pane_id: u64, _text: &str) {}
@@ -228,6 +229,153 @@ impl BrowserState {
     fn update_nav_flags(&mut self) {
         self.can_go_back = self.history_index > 0;
         self.can_go_forward = self.history_index + 1 < self.history.len();
+    }
+}
+
+/// Monotonic allocator for browser-tab webview ids. Ids are unique for the
+/// process lifetime and are the keys for every `webview_manager` call — they
+/// never change when panes or workspace tabs move.
+static NEXT_WEBVIEW_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn alloc_webview_id() -> u64 {
+    NEXT_WEBVIEW_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// One tab inside a browser pane: its page state plus the id of the native
+/// webview that renders it.
+pub struct BrowserTab {
+    /// Permanent key for this tab's native webview (allocated once).
+    pub webview_id: u64,
+    /// Per-page state: URL, history, zoom, loading, title.
+    pub state: BrowserState,
+}
+
+impl BrowserTab {
+    fn new(url: &str) -> Self {
+        BrowserTab { webview_id: alloc_webview_id(), state: BrowserState::new(url) }
+    }
+}
+
+/// Result of closing a tab via [`BrowserPaneState::close`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TabClose {
+    /// Webview id of the closed tab — the caller destroys the native webview.
+    pub closed_webview_id: u64,
+    /// True when this was the pane's last tab. The tab is left in place; the
+    /// caller closes the whole pane, which destroys all remaining webviews.
+    pub pane_empty: bool,
+}
+
+/// All tabs of one browser pane plus which one is active. Pure logic — no
+/// GTK/webview calls — so every operation is unit-testable.
+pub struct BrowserPaneState {
+    pub tabs: Vec<BrowserTab>,
+    pub active: usize,
+}
+
+impl BrowserPaneState {
+    /// A pane with a single tab at `url`.
+    pub fn new(url: &str) -> Self {
+        BrowserPaneState { tabs: vec![BrowserTab::new(url)], active: 0 }
+    }
+
+    /// Rebuild from restored per-tab states (session restore). Allocates
+    /// fresh webview ids, clamps `active`, and falls back to a single blank
+    /// tab if `states` is empty — a pane never has zero tabs.
+    pub fn from_states(states: Vec<BrowserState>, active: usize) -> Self {
+        let tabs: Vec<BrowserTab> = states
+            .into_iter()
+            .map(|state| BrowserTab { webview_id: alloc_webview_id(), state })
+            .collect();
+        if tabs.is_empty() {
+            return BrowserPaneState::new("about:blank");
+        }
+        let active = active.min(tabs.len() - 1);
+        BrowserPaneState { tabs, active }
+    }
+
+    pub fn active_tab(&self) -> &BrowserTab {
+        &self.tabs[self.active]
+    }
+
+    pub fn active_state(&self) -> &BrowserState {
+        &self.tabs[self.active].state
+    }
+
+    pub fn active_state_mut(&mut self) -> &mut BrowserState {
+        &mut self.tabs[self.active].state
+    }
+
+    pub fn active_webview_id(&self) -> u64 {
+        self.tabs[self.active].webview_id
+    }
+
+    /// Append a new tab at the end of the strip (Ctrl+T / `+` button) and
+    /// activate it. Returns the new tab's webview id.
+    pub fn open_at_end(&mut self, url: &str) -> u64 {
+        let tab = BrowserTab::new(url);
+        let id = tab.webview_id;
+        self.tabs.push(tab);
+        self.active = self.tabs.len() - 1;
+        id
+    }
+
+    /// Insert a new tab right after the active one (`_blank` links) and
+    /// activate it. Returns the new tab's webview id.
+    pub fn open_after_active(&mut self, url: &str) -> u64 {
+        let tab = BrowserTab::new(url);
+        let id = tab.webview_id;
+        let at = self.active + 1;
+        self.tabs.insert(at, tab);
+        self.active = at;
+        id
+    }
+
+    /// Close the tab at `idx`. Returns `None` if out of range. When closing
+    /// the last remaining tab, reports `pane_empty` WITHOUT removing it (see
+    /// [`TabClose`]); otherwise removes the tab and fixes `active` so the
+    /// selection stays sensible (right neighbor when closing the active tab).
+    pub fn close(&mut self, idx: usize) -> Option<TabClose> {
+        if idx >= self.tabs.len() {
+            return None;
+        }
+        if self.tabs.len() == 1 {
+            return Some(TabClose {
+                closed_webview_id: self.tabs[0].webview_id,
+                pane_empty: true,
+            });
+        }
+        let closed = self.tabs.remove(idx);
+        if idx < self.active {
+            self.active -= 1;
+        } else {
+            self.active = self.active.min(self.tabs.len() - 1);
+        }
+        Some(TabClose { closed_webview_id: closed.webview_id, pane_empty: false })
+    }
+
+    /// Activate the tab at `idx`. Returns true when the active tab changed.
+    pub fn select(&mut self, idx: usize) -> bool {
+        if idx >= self.tabs.len() || idx == self.active {
+            return false;
+        }
+        self.active = idx;
+        true
+    }
+
+    /// Activate the next tab, wrapping past the end.
+    pub fn next(&mut self) {
+        self.active = (self.active + 1) % self.tabs.len();
+    }
+
+    /// Activate the previous tab, wrapping past the start.
+    pub fn prev(&mut self) {
+        self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
+    }
+
+    /// Which tab (index) owns `webview_id`, if any.
+    pub fn index_of_webview(&self, webview_id: u64) -> Option<usize> {
+        self.tabs.iter().position(|t| t.webview_id == webview_id)
     }
 }
 
@@ -491,5 +639,139 @@ mod tests {
     #[test]
     fn normalise_url_passes_alterm_scheme() {
         assert_eq!(normalise_url("alterm://history"), "alterm://history");
+    }
+
+    // ── BrowserPaneState (in-pane tabs) ─────────────────────────────
+
+    #[test]
+    fn pane_state_starts_with_one_tab() {
+        let p = BrowserPaneState::new("https://a.com");
+        assert_eq!(p.tabs.len(), 1);
+        assert_eq!(p.active, 0);
+        assert_eq!(p.active_state().url, "https://a.com");
+        assert_eq!(p.active_webview_id(), p.tabs[0].webview_id);
+    }
+
+    #[test]
+    fn webview_ids_are_unique() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        let id1 = p.tabs[0].webview_id;
+        let id2 = p.open_at_end("https://b.com");
+        let id3 = p.open_after_active("https://c.com");
+        assert!(id1 != id2 && id2 != id3 && id1 != id3);
+    }
+
+    #[test]
+    fn open_at_end_appends_and_activates() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        let id = p.open_at_end("https://b.com");
+        assert_eq!(p.tabs.len(), 2);
+        assert_eq!(p.active, 1);
+        assert_eq!(p.active_webview_id(), id);
+        assert_eq!(p.active_state().url, "https://b.com");
+    }
+
+    #[test]
+    fn open_after_active_inserts_next_to_active() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        p.open_at_end("https://b.com"); // [a, b], active=1
+        p.select(0);                    // active=0
+        let id = p.open_after_active("https://c.com"); // [a, c, b]
+        assert_eq!(p.active, 1);
+        assert_eq!(p.active_webview_id(), id);
+        assert_eq!(p.tabs[2].state.url, "https://b.com");
+    }
+
+    #[test]
+    fn close_left_of_active_shifts_active_down() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        p.open_at_end("https://b.com");
+        p.open_at_end("https://c.com"); // [a, b, c], active=2
+        let closed = p.close(0).unwrap();
+        assert!(!closed.pane_empty);
+        assert_eq!(p.tabs.len(), 2);
+        assert_eq!(p.active, 1);
+        assert_eq!(p.active_state().url, "https://c.com");
+    }
+
+    #[test]
+    fn close_active_activates_right_neighbor() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        p.open_at_end("https://b.com");
+        p.open_at_end("https://c.com"); // [a, b, c]
+        p.select(1);
+        let closed = p.close(1).unwrap(); // [a, c]
+        assert!(!closed.pane_empty);
+        assert_eq!(p.active, 1);
+        assert_eq!(p.active_state().url, "https://c.com");
+    }
+
+    #[test]
+    fn close_last_position_activates_new_last() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        p.open_at_end("https://b.com"); // [a, b], active=1
+        p.close(1).unwrap();
+        assert_eq!(p.active, 0);
+        assert_eq!(p.active_state().url, "https://a.com");
+    }
+
+    #[test]
+    fn close_final_tab_reports_pane_empty_without_removing() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        let id = p.tabs[0].webview_id;
+        let closed = p.close(0).unwrap();
+        assert!(closed.pane_empty);
+        assert_eq!(closed.closed_webview_id, id);
+        // Caller closes the whole pane; the tab list is left intact so the
+        // close-pane path can destroy every remaining webview uniformly.
+        assert_eq!(p.tabs.len(), 1);
+    }
+
+    #[test]
+    fn close_out_of_range_is_none() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        assert!(p.close(5).is_none());
+    }
+
+    #[test]
+    fn select_reports_change_and_ignores_bad_index() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        p.open_at_end("https://b.com"); // active=1
+        assert!(p.select(0));
+        assert!(!p.select(0)); // already active
+        assert!(!p.select(9)); // out of range
+        assert_eq!(p.active, 0);
+    }
+
+    #[test]
+    fn next_and_prev_wrap_around() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        p.open_at_end("https://b.com");
+        p.open_at_end("https://c.com"); // active=2
+        p.next();
+        assert_eq!(p.active, 0);
+        p.prev();
+        assert_eq!(p.active, 2);
+        p.prev();
+        assert_eq!(p.active, 1);
+    }
+
+    #[test]
+    fn index_of_webview_resolves_ids() {
+        let mut p = BrowserPaneState::new("https://a.com");
+        let id_b = p.open_at_end("https://b.com");
+        assert_eq!(p.index_of_webview(id_b), Some(1));
+        assert_eq!(p.index_of_webview(id_b + 999_999), None);
+    }
+
+    #[test]
+    fn from_states_clamps_active_and_survives_empty() {
+        let states = vec![BrowserState::new("https://a.com"), BrowserState::new("https://b.com")];
+        let p = BrowserPaneState::from_states(states, 7);
+        assert_eq!(p.active, 1); // clamped to last
+
+        let empty = BrowserPaneState::from_states(Vec::new(), 0);
+        assert_eq!(empty.tabs.len(), 1); // fallback tab, never zero tabs
+        assert_eq!(empty.active, 0);
     }
 }

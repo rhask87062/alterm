@@ -14,6 +14,16 @@ fn default_zoom() -> f64 {
     1.0
 }
 
+/// Persisted state of one in-pane browser tab.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BrowserTabState {
+    pub url: String,
+    pub history: Vec<String>,
+    pub history_index: usize,
+    #[serde(default = "default_zoom")]
+    pub zoom: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SerAxis {
     Horizontal,
@@ -24,11 +34,19 @@ pub enum SerAxis {
 pub enum BlockState {
     Terminal { cwd: Option<PathBuf>, scrollback_ansi: String, rows: u16, cols: u16 },
     Browser {
+        // Legacy flat fields: mirror the active tab so pre-tabs binaries can
+        // still read new session files (they restore the active tab only).
         url: String,
         history: Vec<String>,
         history_index: usize,
         #[serde(default = "default_zoom")]
         zoom: f64,
+        /// All in-pane tabs. Empty in pre-tabs session files — restore then
+        /// falls back to the legacy flat fields as a single tab.
+        #[serde(default)]
+        tabs: Vec<BrowserTabState>,
+        #[serde(default)]
+        active_tab: usize,
     },
     AiChat { provider: String, model: String, messages: Vec<DisplayMessage>, input: String },
     Preview { path: PathBuf },
@@ -240,6 +258,8 @@ mod tests {
                             url: "https://example.com".into(),
                             history: vec!["https://example.com".into()], history_index: 0,
                             zoom: 1.0,
+                            tabs: Vec::new(),
+                            active_tab: 0,
                         })),
                         b: Box::new(PaneNode::Leaf(BlockState::AiChat {
                             provider: "openai".into(), model: "gpt-4o".into(),
@@ -324,6 +344,49 @@ mod tests {
             BlockState::Browser { zoom, .. } => assert_eq!(zoom, 1.0),
             other => panic!("expected browser, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn legacy_browser_block_state_decodes_with_empty_tabs() {
+        // A pre-tabs session file: no `tabs`, no `active_tab`.
+        let json = r#"{"Browser":{"url":"https://a.com","history":["https://a.com"],"history_index":0}}"#;
+        let bs: BlockState = serde_json::from_str(json).unwrap();
+        match &bs {
+            BlockState::Browser { tabs, active_tab, zoom, .. } => {
+                assert!(tabs.is_empty());
+                assert_eq!(*active_tab, 0);
+                assert_eq!(*zoom, 1.0);
+            }
+            _ => panic!("expected Browser"),
+        }
+    }
+
+    #[test]
+    fn browser_tabs_round_trip_through_json() {
+        let bs = BlockState::Browser {
+            url: "https://b.com".into(),
+            history: vec!["https://b.com".into()],
+            history_index: 0,
+            zoom: 1.25,
+            tabs: vec![
+                BrowserTabState {
+                    url: "https://a.com".into(),
+                    history: vec!["https://a.com".into()],
+                    history_index: 0,
+                    zoom: 1.0,
+                },
+                BrowserTabState {
+                    url: "https://b.com".into(),
+                    history: vec!["https://a.com".into(), "https://b.com".into()],
+                    history_index: 1,
+                    zoom: 1.25,
+                },
+            ],
+            active_tab: 1,
+        };
+        let json = serde_json::to_string(&bs).unwrap();
+        let back: BlockState = serde_json::from_str(&json).unwrap();
+        assert_eq!(bs, back);
     }
 
     #[test]
