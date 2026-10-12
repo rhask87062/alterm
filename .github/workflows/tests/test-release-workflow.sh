@@ -61,5 +61,12 @@ assert 'tag' in cond, cond
 check "verifies download URLs after publish" \
     "grep -q 'releases/latest/download' '${WF}'"
 
-[ "${fail}" -eq 0 ] && echo "PASS: release.yml structure is sound"
+DEPLOY="${REPO_ROOT}/.github/workflows/deploy-site.yml"
+echo "deploy-site.yml runs the download checks:"
+check "parses"           "python3 -c \"import yaml; yaml.safe_load(open('${DEPLOY}'))\""
+check "check:downloads"  "grep -q 'check:downloads' '${DEPLOY}'"
+check "check:page"       "grep -q 'check:page' '${DEPLOY}'"
+check "check:copy"       "grep -q 'check:copy' '${DEPLOY}'"
+
+[ "${fail}" -eq 0 ] && echo "PASS: release and deploy workflow structure is sound"
 exit "${fail}"
