@@ -11,10 +11,42 @@ export const SITE = {
   license: "MIT",
 };
 
+// Where released installers live. Points at `latest`, so these URLs keep
+// working across releases without the site being rebuilt. The filenames are
+// version-independent aliases uploaded by .github/workflows/release.yml —
+// `npm run check:downloads` asserts the two stay in sync.
+export const RELEASES_BASE =
+  "https://github.com/rhask87062/alterm/releases/latest/download";
+
+export const DOWNLOADS = [
+  {
+    os: "linux",
+    label: "Linux",
+    primary: { file: "alterm-linux-amd64.deb", note: "Debian / Ubuntu" },
+    alt: [{ file: "alterm-linux-amd64.tar.gz", note: "portable tarball" }],
+  },
+  {
+    os: "macos",
+    label: "macOS",
+    // Apple Silicon vs Intel is shown rather than detected: JavaScript cannot
+    // tell them apart reliably (Safari misreports it), and handing someone the
+    // wrong .pkg is worse than asking them to pick.
+    primary: { file: "alterm-macos-arm64.pkg", note: "Apple Silicon" },
+    alt: [{ file: "alterm-macos-x86_64.pkg", note: "Intel" }],
+  },
+  {
+    os: "windows",
+    label: "Windows",
+    primary: { file: "alterm-windows-x64-setup.exe", note: "64-bit" },
+    alt: [],
+  },
+];
+
 export const NAV = [
   { label: "Features", href: "/#features" },
   { label: "AI", href: "/#ai" },
   { label: "Roadmap", href: "/#roadmap" },
+  { label: "Download", href: "/download" },
   { label: "Docs", href: "/docs" },
 ];
 
@@ -146,7 +178,7 @@ export const ROADMAP = [
     phase: "Phase 4",
     name: "Extras",
     status: "current",
-    body: "Embedded browser, file preview, and Lua hooks have landed. Desktop integration and packaging (deb, rpm, homebrew, winget) are in progress.",
+    body: "Embedded browser with in-pane tabs, file preview, and Lua hooks have landed. Prebuilt installers ship for Linux (.deb, tarball), macOS (.pkg) and Windows (.exe); rpm, Homebrew and Winget are still outstanding.",
   },
   {
     phase: "Phase 5",
