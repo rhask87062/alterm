@@ -1,0 +1,199 @@
+name: Release
+
+# Builds installers for every platform and publishes them to a GitHub Release.
+#
+# Pushing a v* tag publishes a release. workflow_dispatch is a dry run: it
+# builds everything and leaves the artifacts on the run, publishing nothing,
+# so the pipeline can be validated before a tag is cut.
+#
+# Each produced file is uploaded twice — under its versioned name, and under a
+# version-independent alias. The website links the aliases via
+# releases/latest/download/, so it never needs editing when a version ships.
+# Those alias names are a contract checked by website/scripts/check-downloads.mjs;
+# keep them as literal strings.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version-guard:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        name: Read manifest version and compare against the tag
+        run: |
+          set -euo pipefail
+          manifest="$(sed -n 's/^version = "\(.*\)"/\1/p' alterm/Cargo.toml | head -n1)"
+          echo "alterm/Cargo.toml version: ${manifest}"
+          echo "version=${manifest}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "${tag}" != "${manifest}" ]; then
+              echo "::error::Tag v${tag} does not match alterm/Cargo.toml version ${manifest}. Bump the manifest or retag."
+              exit 1
+            fi
+            echo "Tag matches manifest."
+          else
+            echo "Dry run — skipping tag comparison."
+          fi
+
+  linux:
+    needs: version-guard
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ github.ref_type != 'tag' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev build-essential
+      - name: Build .deb and portable tarball
+        run: ./packaging/build-release.sh linux
+      - name: Add stable aliases
+        run: |
+          set -euo pipefail
+          v="${{ needs.version-guard.outputs.version }}"
+          cp "dist/alterm_${v}_amd64.deb" "dist/alterm-linux-amd64.deb"
+          cp "dist/alterm-${v}-linux-amd64.tar.gz" "dist/alterm-linux-amd64.tar.gz"
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/*
+          if-no-files-found: error
+
+  macos-arm:
+    needs: version-guard
+    runs-on: macos-latest
+    continue-on-error: ${{ github.ref_type != 'tag' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build .pkg
+        run: ./packaging/build-release.sh macos
+      - name: Add stable alias
+        run: |
+          set -euo pipefail
+          v="${{ needs.version-guard.outputs.version }}"
+          cp "dist/alterm-${v}-macos-arm64.pkg" "dist/alterm-macos-arm64.pkg"
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-arm
+          path: dist/*.pkg
+          if-no-files-found: error
+
+  macos-x64:
+    needs: version-guard
+    runs-on: macos-13
+    continue-on-error: ${{ github.ref_type != 'tag' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build .pkg
+        run: ./packaging/build-release.sh macos
+      - name: Add stable alias
+        run: |
+          set -euo pipefail
+          v="${{ needs.version-guard.outputs.version }}"
+          cp "dist/alterm-${v}-macos-x86_64.pkg" "dist/alterm-macos-x86_64.pkg"
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-x64
+          path: dist/*.pkg
+          if-no-files-found: error
+
+  windows:
+    needs: version-guard
+    runs-on: windows-latest
+    continue-on-error: ${{ github.ref_type != 'tag' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Add Inno Setup to PATH
+        shell: pwsh
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6" |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Build setup.exe
+        shell: pwsh
+        run: pwsh -File .\packaging\windows\build-installer.ps1
+      - name: Add stable alias
+        shell: pwsh
+        run: |
+          $v = "${{ needs.version-guard.outputs.version }}"
+          Copy-Item "dist\alterm-$v-windows-x64-setup.exe" `
+                    "dist\alterm-windows-x64-setup.exe" -Force
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/*.exe
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [version-guard, linux, macos-arm, macos-x64, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect artifacts and checksum them
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f -exec cp -n {} dist/ \;
+          cd dist
+          # Written outside dist first so the glob can't pick up the file
+          # being created.
+          sha256sum * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          cat SHA256SUMS
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+      - name: Verify every advertised download resolves
+        run: |
+          set -euo pipefail
+          # The website links these exact names. If any does not resolve, the
+          # download page has a dead button — fail loudly here instead.
+          for f in alterm-linux-amd64.deb \
+                   alterm-linux-amd64.tar.gz \
+                   alterm-macos-arm64.pkg \
+                   alterm-macos-x86_64.pkg \
+                   alterm-windows-x64-setup.exe; do
+            url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${f}"
+            code=000
+            for attempt in 1 2 3; do
+              code="$(curl -sSL -o /dev/null -w '%{http_code}' "${url}" || echo 000)"
+              [ "${code}" = "200" ] && break
+              echo "attempt ${attempt}: ${code} for ${f}, retrying..."
+              sleep 5
+            done
+            echo "${code}  ${url}"
+            if [ "${code}" != "200" ]; then
+              echo "::error::${f} is not downloadable at ${url}"
+              exit 1
+            fi
+          done
