@@ -9,7 +9,8 @@
     "preview": "astro preview",
     "check": "astro check",
     "check:downloads": "node scripts/check-downloads.mjs",
-    "check:page": "node scripts/check-download-page.mjs"
+    "check:page": "node scripts/check-download-page.mjs",
+    "check:copy": "node scripts/check-install-copy.mjs"
   },
   "dependencies": {
     "@fontsource-variable/hanken-grotesk": "^5.1.0",
