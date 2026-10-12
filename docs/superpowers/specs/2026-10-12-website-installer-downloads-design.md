@@ -22,7 +22,7 @@ A visitor who wants to try Alterm must install Rust and build it.
 
 - **In-app auto-update.** Installed copies do not update themselves and this
   design does not change that. A smaller follow-on piece — a launch-time
-  version-check notice ("v0.5.0 available", linking to the download page, with
+  version-check notice ("v0.6.0 available", linking to the download page, with
   no downloading or binary replacement) — is the agreed next spec.
 - **ARM Linux builds.** `ubuntu-latest` is x86_64 only. Artifact names already
   carry the arch, so adding `arm64` later is non-breaking.
@@ -64,9 +64,9 @@ thin consumer that links to stable, version-independent URLs.
   no Release, for validating the pipeline before cutting a real tag.
 
 **Version guard (first step).** Compare the tag (`v0.5.0` → `0.5.0`) against
-the version in `alterm/Cargo.toml` and fail fast on mismatch. Without this, a
-tag pushed before the manifest bump silently produces artifacts named with the
-old version.
+the version in `alterm/Cargo.toml` (the same file `packaging/common/metadata.sh`
+reads) and fail fast on mismatch. Without this, a tag pushed before the manifest
+bump silently produces artifacts named with the old version.
 
 **Build matrix.** Each job runs the packaging script that already exists, so
 this workflow adds CI plumbing, not packaging logic:
@@ -83,7 +83,7 @@ Linux runs `./packaging/build-release.sh linux`, macOS runs
 `pwsh -File .\packaging\windows\build-installer.ps1`.
 
 **Stable alias names.** Artifact names embed the version, so
-`/releases/latest/download/alterm_0.4.0_amd64.deb` breaks the moment 0.5.0
+`/releases/latest/download/alterm_0.5.0_amd64.deb` breaks the moment 0.6.0
 ships. Every produced file is therefore uploaded **twice** — once under its
 versioned name (for anyone pinning a specific build) and once under a
 version-independent alias. Five files across the four jobs, so ten assets plus
@@ -219,11 +219,22 @@ runs them on macOS and Windows.
 
 The download page's links resolve only once a Release exists, so order matters:
 
-1. Add `release.yml`; run the dry run; fix what breaks.
-2. Tag `v0.4.0` and push it — first real Release publishes.
-3. Merge the website changes, which triggers the existing `deploy-site.yml`.
+1. Bump the version to `0.5.0` in `Cargo.toml` (`[workspace.package]`),
+   `alterm/Cargo.toml`, and `SITE.version` in `website/src/lib/site.ts`. The
+   three must agree: the first feeds nothing user-facing, the second drives
+   every artifact name via `packaging/common/metadata.sh`, and the third is
+   what the download page displays. The per-crate `0.3.0` versions on
+   `terminal`, `gpu-renderer` and `workspace` are internal and stay as they
+   are — nothing reads them for packaging.
+2. Add `release.yml`; run the dry run; fix what breaks.
+3. Tag `v0.5.0` and push it — first real Release publishes.
+4. Merge the website changes, which triggers the existing `deploy-site.yml`.
 
-Doing step 3 before step 2 publishes a page of 404s.
+Doing step 4 before step 3 publishes a page of 404s.
+
+`v0.5.0` rather than `v0.4.0`: 0.4.0 was never cut as a release, and this is
+the first published build, so it ships the browser-tabs work under a fresh
+minor version rather than retroactively claiming an unreleased number.
 
 ## Risks / contingencies
 
