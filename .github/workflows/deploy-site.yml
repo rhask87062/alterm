@@ -8,6 +8,8 @@ on:
     paths:
       - "website/**"
       - ".github/workflows/deploy-site.yml"
+      # Renaming a release alias must re-run the drift check.
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
@@ -35,7 +37,12 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
       - run: npm ci
+      # Fails the deploy if the site links an installer the release workflow
+      # does not upload — a dead download button is worse than a late deploy.
+      - run: npm run check:downloads
       - run: npm run build
+      - run: npm run check:page
+      - run: npm run check:copy
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

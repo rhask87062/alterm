@@ -1,5 +1,6 @@
 ---
 import DocsLayout from "../../layouts/DocsLayout.astro";
+import { url } from "../../lib/site";
 ---
 
 <DocsLayout
@@ -7,8 +8,12 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   description="Build Alterm from source with Cargo, or package a release for Linux, macOS, or Windows."
 >
   <p>
-    Alterm is currently distributed as source. Building it takes one Cargo command. Packaged
-    installers (<code>.deb</code>, <code>.rpm</code>, Homebrew, Winget) are on the roadmap.
+    Prebuilt installers are available for Linux, macOS, and Windows on the
+    <a href={url("/download")}>download page</a>. Builds are unsigned, so macOS and
+    Windows warn on first launch — that page says how to get past it.
+  </p>
+  <p>
+    Prefer to build it yourself? That takes one Cargo command.
   </p>
 
   <h2>Build from source</h2>
@@ -52,9 +57,9 @@ cargo install --path alterm</code></pre>
     (<code>ISCC.exe</code>) on your <code>PATH</code>.
   </p>
 
-  <h2>Planned distribution</h2>
+  <h2>Not yet packaged</h2>
   <ul>
-    <li><code>.deb</code> (Debian / Ubuntu) and <code>.rpm</code> (Fedora / RHEL)</li>
+    <li><code>.rpm</code> (Fedora / RHEL)</li>
     <li>Homebrew formula (macOS)</li>
     <li>Winget / MSIX (Windows)</li>
     <li>Flatpak (cross-distro Linux)</li>

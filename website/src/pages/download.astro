@@ -1,0 +1,184 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE, DOWNLOADS, RELEASES_BASE, url } from "../lib/site";
+
+// Builds are unsigned — no Apple or Windows signing certificates. Saying so
+// up front is kinder than letting someone hit an OS block and conclude the
+// download is broken.
+const FIRST_RUN: Record<string, string> = {
+  linux:
+    "Install the .deb with your package manager, or extract the tarball and run bin/alterm.",
+  macos:
+    "Unsigned: the first launch needs right-click → Open, then Open again to confirm.",
+  windows: "Unsigned: SmartScreen may warn. Choose More info → Run anyway.",
+};
+---
+
+<BaseLayout
+  title="Download"
+  description={`Download Alterm ${SITE.version} for Linux, macOS, or Windows.`}
+>
+  <section class="container dl">
+    <p class="eyebrow">Download</p>
+    <h1>Alterm <span class="ver">v{SITE.version}</span></h1>
+    <p class="lede">
+      Prebuilt installers for Linux, macOS, and Windows. Builds are unsigned, so
+      macOS and Windows warn on first launch — the note on each card says how to
+      get past it.
+    </p>
+
+    <div class="grid" id="dl-grid">
+      {
+        DOWNLOADS.map((d) => (
+          <article class="card dl-card" data-os={d.os}>
+            <h2>{d.label}</h2>
+            <a class="btn btn-primary" href={`${RELEASES_BASE}/${d.primary.file}`}>
+              Download for {d.label}
+            </a>
+            <p class="fname">
+              <code>{d.primary.file}</code>
+              <span class="note">{d.primary.note}</span>
+            </p>
+            {d.alt.length > 0 && (
+              <ul class="alts">
+                {d.alt.map((a) => (
+                  <li>
+                    <a href={`${RELEASES_BASE}/${a.file}`}>
+                      <code>{a.file}</code>
+                    </a>
+                    <span class="note">{a.note}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p class="firstrun">{FIRST_RUN[d.os]}</p>
+          </article>
+        ))
+      }
+    </div>
+
+    <p class="meta">
+      <a href={`${RELEASES_BASE}/SHA256SUMS`}>Checksums</a>
+      <span aria-hidden="true">·</span>
+      <a href={`${SITE.repo}/releases`}>All releases</a>
+      <span aria-hidden="true">·</span>
+      <a href={url("/docs/installation")}>Build from source</a>
+    </p>
+  </section>
+
+  <script is:inline>
+    // Progressive enhancement only: moves the visitor's platform to the front
+    // and marks it primary. Every platform is already in the HTML, so with no
+    // JS (or an unrecognised platform) this page is a plain three-card list.
+    (function () {
+      var probe = (navigator.platform || "") + " " + (navigator.userAgent || "");
+      var os = /Win/i.test(probe)
+        ? "windows"
+        : /Mac|iPhone|iPad/i.test(probe)
+          ? "macos"
+          : /Linux|X11|Android|CrOS/i.test(probe)
+            ? "linux"
+            : null;
+      if (!os) return;
+      var grid = document.getElementById("dl-grid");
+      if (!grid) return;
+      var card = grid.querySelector('[data-os="' + os + '"]');
+      if (!card) return;
+      grid.prepend(card);
+      card.classList.add("is-detected");
+    })();
+  </script>
+</BaseLayout>
+
+<style>
+  .dl {
+    padding: clamp(40px, 6vw, 80px) 0 clamp(56px, 8vw, 96px);
+  }
+  .dl h1 {
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 4.4vw, 3rem);
+    margin: 0 0 10px;
+  }
+  .ver {
+    font-family: var(--font-mono);
+    font-size: 0.5em;
+    color: var(--text-muted);
+    vertical-align: middle;
+  }
+  .lede {
+    color: var(--text-muted);
+    max-width: 62ch;
+    margin: 0 0 34px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 18px;
+  }
+  .dl-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 22px;
+  }
+  .dl-card h2 {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    margin: 0;
+  }
+  /* The detected platform reads as the recommended one. Without JS no card
+     carries this class and all three stay visually equal. */
+  .dl-card.is-detected {
+    box-shadow: var(--glow);
+    border-color: var(--line-bright);
+  }
+  .fname {
+    margin: 0;
+    font-size: 0.82rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .fname code,
+  .alts code {
+    font-family: var(--font-mono);
+    font-size: 0.95em;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+  }
+  .note {
+    color: var(--text-faint);
+    font-size: 0.8rem;
+  }
+  .alts {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.82rem;
+  }
+  .alts li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .firstrun {
+    margin: auto 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    color: var(--text-faint);
+    font-size: 0.8rem;
+  }
+  .meta {
+    margin: 30px 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 0.86rem;
+    color: var(--text-muted);
+  }
+</style>
