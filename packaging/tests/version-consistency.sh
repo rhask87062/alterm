@@ -15,7 +15,16 @@ echo "workspace Cargo.toml : ${workspace}"
 echo "alterm/Cargo.toml    : ${binary}"
 echo "website site.ts      : ${site}"
 
-expected="0.5.0"
+# alterm/Cargo.toml is the source of truth: packaging/common/metadata.sh reads
+# it, so it decides every artifact name. The others must follow it. Deriving
+# rather than hardcoding means a version bump touches three files, not four.
+expected="${binary}"
+echo "expected (from alterm/Cargo.toml): ${expected}"
+if [ -z "${expected}" ]; then
+    echo "FAIL: could not read a version from alterm/Cargo.toml" >&2
+    exit 1
+fi
+
 for pair in "workspace:${workspace}" "binary:${binary}" "site:${site}"; do
     name="${pair%%:*}"; value="${pair#*:}"
     if [ "${value}" != "${expected}" ]; then

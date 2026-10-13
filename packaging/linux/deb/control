@@ -3,7 +3,7 @@ Version: __VERSION__
 Section: utils
 Priority: optional
 Architecture: __ARCH__
-Depends: libwebkit2gtk-4.1-0, libgtk-3-0
+Depends: __DEPENDS__
 Maintainer: Russell Haskell <rhask87062@gmail.com>
 Description: GPU-accelerated terminal workspace with AI integration
  Alterm is a cross-platform terminal emulator built in Rust

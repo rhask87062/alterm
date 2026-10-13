@@ -23,16 +23,24 @@ const FIRST_RUN: Record<string, string> = {
     <h1>Alterm <span class="ver">v{SITE.version}</span></h1>
     <p class="lede">
       Prebuilt installers for Linux, macOS, and Windows. Builds are unsigned, so
-      macOS and Windows warn on first launch — the note on each card says how to
-      get past it.
+      macOS and Windows warn on first launch — each card says how to get past
+      it.
     </p>
 
+    {/*
+      All three platforms render statically. The inline script adds
+      `has-detection` here and `is-detected` to the match, which is what
+      promotes one card and demotes the rest. With no JS, none of those classes
+      exist and this stays three equal cards — the same page, just without a
+      recommendation.
+    */}
     <div class="grid" id="dl-grid">
       {
         DOWNLOADS.map((d) => (
           <article class="card dl-card" data-os={d.os}>
+            <p class="recommended">Recommended for you</p>
             <h2>{d.label}</h2>
-            <a class="btn btn-primary" href={`${RELEASES_BASE}/${d.primary.file}`}>
+            <a class="btn btn-primary dl-btn" href={`${RELEASES_BASE}/${d.primary.file}`}>
               Download for {d.label}
             </a>
             <p class="fname">
@@ -55,6 +63,7 @@ const FIRST_RUN: Record<string, string> = {
           </article>
         ))
       }
+      <p class="others-label">Other platforms</p>
     </div>
 
     <p class="meta">
@@ -66,27 +75,21 @@ const FIRST_RUN: Record<string, string> = {
     </p>
   </section>
 
-  <script is:inline>
-    // Progressive enhancement only: moves the visitor's platform to the front
-    // and marks it primary. Every platform is already in the HTML, so with no
-    // JS (or an unrecognised platform) this page is a plain three-card list.
-    (function () {
-      var probe = (navigator.platform || "") + " " + (navigator.userAgent || "");
-      var os = /Win/i.test(probe)
-        ? "windows"
-        : /Mac|iPhone|iPad/i.test(probe)
-          ? "macos"
-          : /Linux|X11|Android|CrOS/i.test(probe)
-            ? "linux"
-            : null;
-      if (!os) return;
-      var grid = document.getElementById("dl-grid");
-      if (!grid) return;
-      var card = grid.querySelector('[data-os="' + os + '"]');
-      if (!card) return;
-      grid.prepend(card);
+  <script>
+    // Bundled (not is:inline) so it shares detectOs with the unit tests in
+    // scripts/check-detect-os.mjs. Detection is progressive enhancement: it
+    // only reorders and restyles cards that are already in the HTML.
+    import { detectOs } from "../lib/detect-os.js";
+
+    const os = detectOs(navigator.platform, navigator.userAgent);
+    const grid = document.getElementById("dl-grid");
+    const card = os && grid?.querySelector(`[data-os="${os}"]`);
+
+    // No match (phone, ChromeOS, unknown) leaves the page exactly as served.
+    if (grid && card) {
       card.classList.add("is-detected");
-    })();
+      grid.classList.add("has-detection");
+    }
   </script>
 </BaseLayout>
 
@@ -110,6 +113,9 @@ const FIRST_RUN: Record<string, string> = {
     max-width: 62ch;
     margin: 0 0 34px;
   }
+
+  /* ---------- Baseline: no JS, or an unrecognised platform ---------- */
+  /* Three equal cards. Nothing is hidden and nothing is recommended. */
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -126,12 +132,86 @@ const FIRST_RUN: Record<string, string> = {
     font-size: 1.15rem;
     margin: 0;
   }
-  /* The detected platform reads as the recommended one. Without JS no card
-     carries this class and all three stay visually equal. */
-  .dl-card.is-detected {
-    box-shadow: var(--glow);
-    border-color: var(--line-bright);
+  /* Both only ever appear once detection has run. */
+  .recommended,
+  .others-label {
+    display: none;
   }
+
+  /* ---------- Enhanced: detection succeeded ---------- */
+  /* One dominant card, then a label, then the rest compact underneath. */
+  .grid.has-detection {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .grid.has-detection .is-detected {
+    order: -1;
+    padding: 28px;
+    border-color: var(--accent-dim);
+    box-shadow: var(--glow);
+  }
+  .grid.has-detection .others-label {
+    display: block;
+    order: 0;
+    margin: 18px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .grid.has-detection .dl-card:not(.is-detected) {
+    order: 1;
+  }
+
+  .is-detected .recommended {
+    display: block;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .is-detected h2 {
+    font-size: 1.5rem;
+  }
+
+  /* Demote the other platforms to a single compact row each: no big button,
+     no first-run note — that belongs with the download you actually take. */
+  .grid.has-detection .dl-card:not(.is-detected) {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+  .grid.has-detection .dl-card:not(.is-detected) h2 {
+    font-size: 0.95rem;
+    min-width: 72px;
+  }
+  .grid.has-detection .dl-card:not(.is-detected) .dl-btn {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    font-size: 0.85rem;
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  /* A compact row is a signpost, not a menu. Hiding .alts matters as much as
+     hiding .fname: showing only the alternate (macOS's Intel .pkg) while the
+     primary arm64 filename is hidden reads as "macOS means Intel", which is
+     wrong. Anyone who needs the arch choice is on macOS, where that card is
+     the detected one and shows both. */
+  .grid.has-detection .dl-card:not(.is-detected) .fname,
+  .grid.has-detection .dl-card:not(.is-detected) .alts,
+  .grid.has-detection .dl-card:not(.is-detected) .firstrun {
+    display: none;
+  }
+
+  /* ---------- Shared bits ---------- */
   .fname {
     margin: 0;
     font-size: 0.82rem;
