@@ -35,7 +35,10 @@ for f in alterm-linux-amd64.deb alterm-linux-amd64.tar.gz \
 done
 
 echo "runners:"
-for r in "ubuntu-latest" "macos-latest" "macos-13" "windows-latest"; do
+# macos-15-intel is the Intel macOS runner. The old macos-13 label was retired
+# in December 2025 — jobs targeting it queue forever instead of failing, so
+# assert the live label explicitly.
+for r in "ubuntu-latest" "macos-latest" "macos-15-intel" "windows-latest"; do
     check "${r}" "grep -q '${r}' '${WF}'"
 done
 
@@ -60,6 +63,8 @@ assert 'tag' in cond, cond
 \""
 check "verifies download URLs after publish" \
     "grep -q 'releases/latest/download' '${WF}'"
+check "no retired runner labels" \
+    "! grep -qE 'runs-on: (macos-13|macos-12|macos-11|ubuntu-20\.04|windows-2019)' '${WF}'"
 
 DEPLOY="${REPO_ROOT}/.github/workflows/deploy-site.yml"
 echo "deploy-site.yml runs the download checks:"

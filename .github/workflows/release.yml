@@ -95,7 +95,12 @@ jobs:
 
   macos-x64:
     needs: version-guard
-    runs-on: macos-13
+    # Intel macOS. The macos-13 label was retired in December 2025 and jobs
+    # targeting it queue indefinitely rather than failing, so it looks like a
+    # slow build. GitHub drops x86_64 macOS entirely when the macOS 15 image
+    # retires in Fall 2027 — at that point either cross-compile from arm64 or
+    # drop the Intel .pkg and its alias from the site.
+    runs-on: macos-15-intel
     continue-on-error: ${{ github.ref_type != 'tag' }}
     steps:
       - uses: actions/checkout@v4
