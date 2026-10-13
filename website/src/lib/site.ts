@@ -18,27 +18,41 @@ export const SITE = {
 export const RELEASES_BASE =
   "https://github.com/rhask87062/alterm/releases/latest/download";
 
+// `variants` are CPU-architecture choices and each gets its own button.
+// `extras` are alternative formats of the same build and render as links.
+//
+// Architecture is always offered, never inferred. A browser cannot reliably
+// report the CPU it runs on — Safari misreports Apple Silicon as Intel, and
+// Linux user agents frequently omit the architecture entirely. Guessing wrong
+// hands someone a package that cannot install, which is exactly how an arm64
+// Ubuntu user ended up unable to install the amd64 .deb in 0.5.0.
 export const DOWNLOADS = [
   {
     os: "linux",
     label: "Linux",
-    primary: { file: "alterm-linux-amd64.deb", note: "Debian / Ubuntu" },
-    alt: [{ file: "alterm-linux-amd64.tar.gz", note: "portable tarball" }],
+    variants: [
+      { file: "alterm-linux-amd64.deb", note: "x86-64 · Debian / Ubuntu" },
+      { file: "alterm-linux-arm64.deb", note: "ARM64 · Debian / Ubuntu" },
+    ],
+    extras: [
+      { file: "alterm-linux-amd64.tar.gz", note: "x86-64 · portable" },
+      { file: "alterm-linux-arm64.tar.gz", note: "ARM64 · portable" },
+    ],
   },
   {
     os: "macos",
     label: "macOS",
-    // Apple Silicon vs Intel is shown rather than detected: JavaScript cannot
-    // tell them apart reliably (Safari misreports it), and handing someone the
-    // wrong .pkg is worse than asking them to pick.
-    primary: { file: "alterm-macos-arm64.pkg", note: "Apple Silicon" },
-    alt: [{ file: "alterm-macos-x86_64.pkg", note: "Intel" }],
+    variants: [
+      { file: "alterm-macos-arm64.pkg", note: "Apple Silicon" },
+      { file: "alterm-macos-x86_64.pkg", note: "Intel" },
+    ],
+    extras: [],
   },
   {
     os: "windows",
     label: "Windows",
-    primary: { file: "alterm-windows-x64-setup.exe", note: "64-bit" },
-    alt: [],
+    variants: [{ file: "alterm-windows-x64-setup.exe", note: "x86-64" }],
+    extras: [],
   },
 ];
 
