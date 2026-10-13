@@ -43,6 +43,11 @@ jobs:
       - run: npm run build
       - run: npm run check:page
       - run: npm run check:copy
+      # Refuses to deploy a page advertising downloads that do not exist yet.
+      # This enforces the rollout order: tag the release first, then deploy the
+      # site. Skipped automatically if GitHub is unreachable, so a network blip
+      # cannot block an otherwise-correct deploy.
+      - run: npm run check:live
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

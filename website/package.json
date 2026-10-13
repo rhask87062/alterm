@@ -11,7 +11,8 @@
     "check:downloads": "node scripts/check-downloads.mjs",
     "check:page": "node scripts/check-download-page.mjs",
     "check:copy": "node scripts/check-install-copy.mjs",
-    "check:detect": "node scripts/check-detect-os.mjs"
+    "check:detect": "node scripts/check-detect-os.mjs",
+    "check:live": "node scripts/check-live-downloads.mjs"
   },
   "dependencies": {
     "@fontsource-variable/hanken-grotesk": "^5.1.0",
