@@ -46,7 +46,13 @@ jobs:
 
   linux:
     needs: version-guard
-    runs-on: ubuntu-latest
+    # Pinned, NOT ubuntu-latest. dpkg-shlibdeps resolves dependencies against
+    # the build machine, so the package's Depends inherit this release's
+    # package names and versions. Building on the oldest supported LTS means
+    # the .deb installs on 24.04 and everything newer; building on the newest
+    # would silently exclude 24.04 users. ubuntu-latest also migrates to
+    # Ubuntu 26 on 2026-10-19, which would have moved this without warning.
+    runs-on: ubuntu-24.04
     continue-on-error: ${{ github.ref_type != 'tag' }}
     steps:
       - uses: actions/checkout@v4

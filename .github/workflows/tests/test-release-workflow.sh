@@ -38,7 +38,7 @@ echo "runners:"
 # macos-15-intel is the Intel macOS runner. The old macos-13 label was retired
 # in December 2025 — jobs targeting it queue forever instead of failing, so
 # assert the live label explicitly.
-for r in "ubuntu-latest" "macos-latest" "macos-15-intel" "windows-latest"; do
+for r in "ubuntu-24.04" "macos-latest" "macos-15-intel" "windows-latest"; do
     check "${r}" "grep -q '${r}' '${WF}'"
 done
 

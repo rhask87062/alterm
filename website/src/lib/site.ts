@@ -7,7 +7,7 @@ export const SITE = {
   description:
     "A GPU-accelerated, cross-platform terminal workspace built in Rust. The workspace UX of WaveTerm with the raw performance of WezTerm — without the Electron bloat.",
   repo: "https://github.com/rhask87062/alterm",
-  version: "0.5.0",
+  version: "0.5.1",
   license: "MIT",
 };
 
