@@ -24,8 +24,13 @@ A visitor who wants to try Alterm must install Rust and build it.
   design does not change that. A smaller follow-on piece — a launch-time
   version-check notice ("v0.6.0 available", linking to the download page, with
   no downloading or binary replacement) — is the agreed next spec.
-- **ARM Linux builds.** `ubuntu-latest` is x86_64 only. Artifact names already
-  carry the arch, so adding `arm64` later is non-breaking.
+- ~~**ARM Linux builds.**~~ **Implemented in 0.5.1.** This was deferred on the
+  reasoning that `ubuntu-latest` is x86_64 only, which was out of date: GitHub
+  made arm64 Linux runners generally available and free for public
+  repositories in August 2025. Deferring it also turned out to be the bug that
+  mattered — the first user to try the `.deb` was on arm64 Ubuntu, and apt
+  refused the amd64 package. Linux now builds natively on both
+  `ubuntu-24.04` and `ubuntu-24.04-arm`.
 - **`.rpm` packages.** No build script exists; writing one is separate work.
 - **Code signing / notarization.** No Apple or Windows certificates are
   available, so builds ship unsigned (see Error handling). Adding signing later
@@ -152,11 +157,14 @@ it first and styling it as primary. With JS disabled, or if detection fails,
 the visitor sees the complete list — identical to the no-JS baseline. Nothing
 is hidden by default.
 
-**macOS architecture is shown, not detected.** JavaScript cannot reliably
-distinguish Apple Silicon from Intel (Safari misreports it). Rather than hand
-someone the wrong `.pkg`, macOS visitors always see both options labelled
-"Apple Silicon" and "Intel". Linux and Windows detect cleanly and get a single
-primary button.
+**CPU architecture is always shown, never detected.** A browser cannot
+reliably report the CPU it is running on: Safari misreports Apple Silicon as
+Intel, and Linux user agents routinely omit the architecture. Every platform
+therefore lists its architectures as sibling buttons (`variants` in
+`DOWNLOADS`) — x86-64 and ARM64 for Linux, Apple Silicon and Intel for macOS.
+Only the *operating system* is detected. Guessing an architecture hands
+someone a package that cannot install, which is precisely what happened in
+0.5.0 when an arm64 Ubuntu user was offered the amd64 `.deb`.
 
 All internal links go through the existing `url()` helper — the site is served
 under the `/alterm/` base path, so a bare `/download` would 404. The GitHub

@@ -46,13 +46,24 @@ jobs:
 
   linux:
     needs: version-guard
-    # Pinned, NOT ubuntu-latest. dpkg-shlibdeps resolves dependencies against
-    # the build machine, so the package's Depends inherit this release's
-    # package names and versions. Building on the oldest supported LTS means
-    # the .deb installs on 24.04 and everything newer; building on the newest
-    # would silently exclude 24.04 users. ubuntu-latest also migrates to
-    # Ubuntu 26 on 2026-10-19, which would have moved this without warning.
-    runs-on: ubuntu-24.04
+    # Runners are pinned, NOT ubuntu-latest. dpkg-shlibdeps resolves
+    # dependencies against the build machine, so the package's Depends inherit
+    # that release's package names and versions. Building on the oldest
+    # supported LTS keeps the .deb installable on 24.04 and everything newer;
+    # building on the newest would silently exclude 24.04 users. ubuntu-latest
+    # also migrates to Ubuntu 26 on 2026-10-19, which would move this silently.
+    #
+    # arm64 is a native build on GitHub's arm64 runners (free for public
+    # repos), not a cross-compile — webkit2gtk and GTK are far easier to link
+    # natively, and the .deb's dependencies must come from an arm64 system
+    # anyway for dpkg-shlibdeps to name the right packages.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ github.ref_type != 'tag' }}
     steps:
       - uses: actions/checkout@v4
@@ -68,12 +79,13 @@ jobs:
         run: |
           set -euo pipefail
           v="${{ needs.version-guard.outputs.version }}"
-          cp "dist/alterm_${v}_amd64.deb" "dist/alterm-linux-amd64.deb"
-          cp "dist/alterm-${v}-linux-amd64.tar.gz" "dist/alterm-linux-amd64.tar.gz"
+          a="${{ matrix.arch }}"
+          cp "dist/alterm_${v}_${a}.deb" "dist/alterm-linux-${a}.deb"
+          cp "dist/alterm-${v}-linux-${a}.tar.gz" "dist/alterm-linux-${a}.tar.gz"
           ls -la dist
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-linux
+          name: dist-linux-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
@@ -189,8 +201,14 @@ jobs:
           set -euo pipefail
           # The website links these exact names. If any does not resolve, the
           # download page has a dead button — fail loudly here instead.
+          # This list is the authoritative set of names the website links.
+          # website/scripts/check-downloads.mjs greps for these literals, and
+          # every one is fetched below, so an alias the build forgot to upload
+          # fails the release instead of becoming a dead button.
           for f in alterm-linux-amd64.deb \
                    alterm-linux-amd64.tar.gz \
+                   alterm-linux-arm64.deb \
+                   alterm-linux-arm64.tar.gz \
                    alterm-macos-arm64.pkg \
                    alterm-macos-x86_64.pkg \
                    alterm-windows-x64-setup.exe; do

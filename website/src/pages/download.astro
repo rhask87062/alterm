@@ -40,16 +40,21 @@ const FIRST_RUN: Record<string, string> = {
           <article class="card dl-card" data-os={d.os}>
             <p class="recommended">Recommended for you</p>
             <h2>{d.label}</h2>
-            <a class="btn btn-primary dl-btn" href={`${RELEASES_BASE}/${d.primary.file}`}>
-              Download for {d.label}
-            </a>
-            <p class="fname">
-              <code>{d.primary.file}</code>
-              <span class="note">{d.primary.note}</span>
-            </p>
-            {d.alt.length > 0 && (
+            {/* One button per architecture. Never collapsed into a single
+                "Download" — the browser cannot tell which CPU you are on. */}
+            <div class="variants">
+              {d.variants.map((v) => (
+                <a class="btn btn-primary dl-btn" href={`${RELEASES_BASE}/${v.file}`}>
+                  <span class="vlabel">
+                    {d.variants.length > 1 ? v.note : `Download for ${d.label}`}
+                  </span>
+                  <code class="vfile">{v.file}</code>
+                </a>
+              ))}
+            </div>
+            {d.extras.length > 0 && (
               <ul class="alts">
-                {d.alt.map((a) => (
+                {d.extras.map((a) => (
                   <li>
                     <a href={`${RELEASES_BASE}/${a.file}`}>
                       <code>{a.file}</code>
@@ -200,27 +205,41 @@ const FIRST_RUN: Record<string, string> = {
     text-decoration: underline;
     text-underline-offset: 3px;
   }
-  /* A compact row is a signpost, not a menu. Hiding .alts matters as much as
-     hiding .fname: showing only the alternate (macOS's Intel .pkg) while the
-     primary arm64 filename is hidden reads as "macOS means Intel", which is
-     wrong. Anyone who needs the arch choice is on macOS, where that card is
-     the detected one and shows both. */
-  .grid.has-detection .dl-card:not(.is-detected) .fname,
+  /* A compact row is a signpost, not a menu: it links through to the platform
+     without reproducing its architecture choices or install notes. Those
+     belong on the card you actually came for. */
   .grid.has-detection .dl-card:not(.is-detected) .alts,
-  .grid.has-detection .dl-card:not(.is-detected) .firstrun {
+  .grid.has-detection .dl-card:not(.is-detected) .firstrun,
+  .grid.has-detection .dl-card:not(.is-detected) .vfile {
     display: none;
+  }
+  /* Collapse multiple architectures to the first link when demoted. */
+  .grid.has-detection .dl-card:not(.is-detected) .variants {
+    flex-direction: row;
+    gap: 14px;
   }
 
   /* ---------- Shared bits ---------- */
-  .fname {
-    margin: 0;
-    font-size: 0.82rem;
+  .variants {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: baseline;
+    flex-direction: column;
+    gap: 10px;
   }
-  .fname code,
+  .dl-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    text-align: left;
+  }
+  .vlabel {
+    font-weight: 600;
+  }
+  .vfile {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    opacity: 0.75;
+  }
   .alts code {
     font-family: var(--font-mono);
     font-size: 0.95em;

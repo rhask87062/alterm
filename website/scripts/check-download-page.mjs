@@ -20,7 +20,9 @@ try {
 
 const required = [
   "alterm-linux-amd64.deb",
+  "alterm-linux-arm64.deb",
   "alterm-linux-amd64.tar.gz",
+  "alterm-linux-arm64.tar.gz",
   "alterm-macos-arm64.pkg",
   "alterm-macos-x86_64.pkg",
   "alterm-windows-x64-setup.exe",
