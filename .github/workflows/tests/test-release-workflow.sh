@@ -72,6 +72,7 @@ check "parses"           "python3 -c \"import yaml; yaml.safe_load(open('${DEPLO
 check "check:downloads"  "grep -q 'check:downloads' '${DEPLOY}'"
 check "check:page"       "grep -q 'check:page' '${DEPLOY}'"
 check "check:copy"       "grep -q 'check:copy' '${DEPLOY}'"
+check "check:live"       "grep -q 'check:live' '${DEPLOY}'"
 
 [ "${fail}" -eq 0 ] && echo "PASS: release and deploy workflow structure is sound"
 exit "${fail}"
