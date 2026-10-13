@@ -242,9 +242,15 @@ minor version rather than retroactively claiming an unreleased number.
   has shifted across Ubuntu releases. If the current runner image lacks 4.1,
   pin the runner (e.g. `ubuntu-24.04`) rather than loosening the version, since
   `crates/browser` pins `webkit2gtk = "=2.0.2"` with feature `v2_38`.
-- **`macos-13` retirement.** GitHub retires older macOS images periodically.
-  When Intel runners go away, either drop the x86_64 `.pkg` or cross-compile;
-  the alias name makes removal a site-side one-liner.
+- **Intel macOS runner retirement.** This already bit us: the first dry run
+  used `macos-13`, which GitHub retired in December 2025. A job targeting a
+  retired label is *accepted and queued indefinitely* rather than failed, so it
+  presents as a slow build — the first dry run sat queued for an hour with no
+  runner assigned while the other three platforms finished. The Intel runner is
+  now `macos-15-intel`, and the structural test asserts no retired label is
+  used. GitHub drops x86_64 macOS entirely when the macOS 15 image retires in
+  Fall 2027; at that point either cross-compile from arm64 or drop the Intel
+  `.pkg`, which the alias name makes a site-side one-liner.
 - **Inno Setup via Chocolatey.** If `choco install innosetup` proves flaky,
   switch to the official installer download or a pinned Chocolatey version.
 - **Unsigned-download bounce rate.** Some visitors will refuse an unsigned
