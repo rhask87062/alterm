@@ -55,10 +55,28 @@ for (const os of ["linux", "macos", "windows"]) {
 // so reordering was a no-op and only a faint glow distinguished the match.
 // These assert the styling hooks that actually promote and demote exist.
 //
-// Astro scopes every selector with a [data-astro-cid-xxxx] attribute and
-// minifies, so strip the scoping before matching — otherwise the assertions
-// would have to encode a build-generated hash.
-const css = html.replace(/\[data-astro-cid-[a-z0-9]+\]/g, "");
+// Collect CSS from the page AND any stylesheet it links. Astro's
+// `inlineStylesheets: "auto"` moves styles into an external file once they
+// grow past a size threshold, so reading only the HTML silently stops
+// checking anything — which is exactly how these assertions broke once.
+//
+// Scoping attributes are stripped because Astro appends a build-generated
+// [data-astro-cid-xxxx] to every selector; encoding that hash in a test would
+// make it fail on every unrelated edit.
+const linked = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g)]
+  .map((m) => m[1].replace(/^.*?\/_astro\//, "_astro/"))
+  .map((rel) => resolve(here, "../dist", rel));
+
+let css = html;
+for (const file of linked) {
+  try {
+    css += readFileSync(file, "utf8");
+  } catch {
+    // A stylesheet we cannot read is not itself a failure; the assertions
+    // below will report whatever is genuinely missing.
+  }
+}
+css = css.replace(/\[data-astro-cid-[a-z0-9]+\]/g, "");
 
 const stylingHooks = [
   // Promotes the match beyond a border tweak.

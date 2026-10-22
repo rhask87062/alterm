@@ -9,12 +9,22 @@ import { url } from "../../lib/site";
 >
   <p>
     Prebuilt installers are available for Linux, macOS, and Windows on the
-    <a href={url("/download")}>download page</a>. Builds are unsigned, so macOS and
-    Windows warn on first launch — that page says how to get past it.
+    <a href={url("/download")}>download page</a>. Builds are unsigned: Windows warns
+    on first launch, and macOS refuses outright until you clear the quarantine flag.
+    The download page gives the exact command for each.
   </p>
   <p>
     Prefer to build it yourself? That takes one Cargo command.
   </p>
+
+  <div class="note">
+    <p>
+      On Linux, install the <code>.deb</code> from a terminal with
+      <code>sudo apt install ./alterm-linux-&lt;arch&gt;.deb</code>. Double-clicking it
+      hands the file to GNOME Software, whose local-package installer commonly sits on
+      a progress bar indefinitely without ever installing anything.
+    </p>
+  </div>
 
   <h2>Build from source</h2>
   <p>Requires <strong>Rust 1.80+</strong>. Clone the repository and install the binary:</p>
