@@ -5,12 +5,33 @@ import { SITE, DOWNLOADS, RELEASES_BASE, url } from "../lib/site";
 // Builds are unsigned — no Apple or Windows signing certificates. Saying so
 // up front is kinder than letting someone hit an OS block and conclude the
 // download is broken.
-const FIRST_RUN: Record<string, string> = {
-  linux:
-    "Install the .deb with your package manager, or extract the tarball and run bin/alterm.",
-  macos:
-    "Unsigned: the first launch needs right-click → Open, then Open again to confirm.",
-  windows: "Unsigned: SmartScreen may warn. Choose More info → Run anyway.",
+// How to actually get each platform to run this.
+//
+// Builds are unsigned, and on macOS that is no longer a warning you can click
+// past: Apple removed the Control-click Gatekeeper override in Sequoia, so the
+// old "right-click → Open" advice leaves people stuck. The Terminal route
+// below is the one that still works.
+//
+// On Linux the obstacle is not security at all — double-clicking a .deb hands
+// it to GNOME Software, whose local-file install commonly hangs on a progress
+// bar forever. Installing from a terminal sidesteps it entirely.
+const FIRST_RUN: Record<string, { note: string; cmd?: string }> = {
+  // Commands are globbed rather than naming one architecture. Each card offers
+  // two, and a copy-pasteable command naming the wrong one is worse than none.
+  linux: {
+    note: "Install from a terminal — double-clicking the .deb hands it to GNOME Software, whose local-package installer commonly hangs on a progress bar forever. Or extract the tarball and run bin/alterm.",
+    cmd: "cd ~/Downloads\nsudo apt install ./alterm-linux-*.deb",
+  },
+  macos: {
+    // `xattr -c` rather than `-d com.apple.quarantine`: it exits cleanly when
+    // the attribute is absent. `installer` is the CLI path, which is not
+    // subject to the Gatekeeper gate that Installer.app applies.
+    note: "Unsigned build. macOS refuses it on open, and right-click → Open no longer overrides that — Apple removed the Control-click bypass in Sequoia. Install from Terminal instead:",
+    cmd: "cd ~/Downloads\nxattr -c alterm-macos-*.pkg\nsudo installer -pkg alterm-macos-*.pkg -target /",
+  },
+  windows: {
+    note: "Unsigned build. SmartScreen will warn — choose More info, then Run anyway.",
+  },
 };
 ---
 
@@ -64,7 +85,10 @@ const FIRST_RUN: Record<string, string> = {
                 ))}
               </ul>
             )}
-            <p class="firstrun">{FIRST_RUN[d.os]}</p>
+            <div class="firstrun">
+              <p>{FIRST_RUN[d.os].note}</p>
+              {FIRST_RUN[d.os].cmd && <pre><code>{FIRST_RUN[d.os].cmd}</code></pre>}
+            </div>
           </article>
         ))
       }
@@ -264,6 +288,23 @@ const FIRST_RUN: Record<string, string> = {
     flex-wrap: wrap;
     gap: 8px;
     align-items: baseline;
+  }
+  .firstrun pre {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+  }
+  .firstrun code {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    white-space: pre;
+  }
+  .firstrun p {
+    margin: 0;
   }
   .firstrun {
     margin: auto 0 0;
