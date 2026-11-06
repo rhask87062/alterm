@@ -74,7 +74,7 @@ pub fn sidebar_view<'a, M: Clone + 'a>(
             Some(map(SidebarAction::NewNote)),
             btn_size,
         ),
-        "New note".to_string(),
+        tip_text(Action::NewNote),
     );
     let settings_btn = with_tooltip(
         sidebar_svg_button(
@@ -218,8 +218,8 @@ fn sidebar_button<'a, M: Clone + 'a>(
     btn.into()
 }
 
-/// Tooltip text for a sidebar button: "Label  (Ctrl+Shift+X)".
-fn tip_text(action: Action) -> String {
+/// Tooltip text for a sidebar or tab-bar button: "Label  (Ctrl+Shift+X)".
+pub(crate) fn tip_text(action: Action) -> String {
     format!("{}  ({})", action.label(), action.shortcut_hint())
 }
 
@@ -236,8 +236,8 @@ fn with_tooltip<'a, M: 'a>(content: Element<'a, M>, hint: String) -> Element<'a,
     .into()
 }
 
-/// Styled background box for sidebar tooltips (theme-aware).
-fn tooltip_box_style(theme: &Theme) -> iced::widget::container::Style {
+/// Styled background box for sidebar and tab-bar tooltips (theme-aware).
+pub(crate) fn tooltip_box_style(theme: &Theme) -> iced::widget::container::Style {
     iced::widget::container::Style {
         background: Some(Background::Color(chrome::bg_raised(theme))),
         text_color: Some(chrome::text(theme)),

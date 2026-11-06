@@ -5,9 +5,11 @@
 /// new tabs.
 use std::rc::Rc;
 
-use iced::widget::{button, container, row, text, text_input, Row};
+use iced::widget::{button, container, row, text, text_input, tooltip, Row};
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
 use crate::chrome;
+use crate::keybindings::Action;
+use crate::sidebar::{tip_text, tooltip_box_style};
 
 /// Messages that the tab bar can produce.
 /// The consuming application maps these into its own message type.
@@ -93,6 +95,16 @@ pub fn tab_bar_view<'a, M: Clone + 'a>(
         .on_press((*map)(TabBarAction::New))
         .padding(Padding::from([6, 10]))
         .style(|theme: &Theme, status| new_tab_button_style(theme, status));
+
+    // Hover shows the shortcut, like the sidebar buttons.
+    let new_tab_btn = tooltip(
+        new_tab_btn,
+        container(text(tip_text(Action::NewTab)).size(12))
+            .padding(Padding::from([4, 8]))
+            .style(tooltip_box_style),
+        tooltip::Position::Bottom,
+    )
+    .gap(6);
 
     tabs.push(new_tab_btn.into());
 

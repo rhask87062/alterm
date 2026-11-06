@@ -1391,6 +1391,7 @@ impl Alterm {
             Action::NewTerminal => self.update(Message::SidebarNewTerminal),
             Action::NewBrowser => self.update(Message::OpenBrowser),
             Action::NewPreview => self.update(Message::OpenPreview),
+            Action::NewNote => self.update(Message::SidebarAction(SidebarAction::NewNote)),
             Action::ShowHotkeyInfo => self.update(Message::ShowHotkeyInfo),
             Action::ToggleTheme => self.update(Message::ToggleTheme),
             Action::Search => self.update(Message::SearchOpen),
@@ -4800,7 +4801,7 @@ fn hotkey_info_view<'a>(theme: &Theme) -> Element<'a, Message> {
         Action::ToggleAIChat | Action::CommandPalette | Action::OpenSettings
     )).collect();
     let windows_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,
-        Action::NewTerminal | Action::NewBrowser | Action::NewPreview |
+        Action::NewTerminal | Action::NewBrowser | Action::NewPreview | Action::NewNote |
         Action::ShowHotkeyInfo | Action::ToggleTheme
     )).collect();
     let terminal_actions: Vec<&Action> = all_actions.iter().filter(|a| matches!(a,

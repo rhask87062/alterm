@@ -31,6 +31,7 @@ pub enum Action {
     NewTerminal,
     NewBrowser,
     NewPreview,
+    NewNote,
     ShowHotkeyInfo,
     ToggleTheme,
     Search,
@@ -66,6 +67,7 @@ impl Action {
             Action::NewTerminal => "New Terminal",
             Action::NewBrowser => "New Browser",
             Action::NewPreview => "New File Preview",
+            Action::NewNote => "New Note",
             Action::ShowHotkeyInfo => "Keyboard Shortcuts",
             Action::ToggleTheme => "Toggle Theme",
             Action::Search => "Search",
@@ -101,6 +103,7 @@ impl Action {
             Action::NewTerminal => "Ctrl+Shift+Return",
             Action::NewBrowser => "Ctrl+Shift+B",
             Action::NewPreview => "Alt+Shift+F / Ctrl+Shift+O",
+            Action::NewNote => "Ctrl+Shift+N",
             Action::ShowHotkeyInfo => "Ctrl+Shift+K / H",
             Action::ToggleTheme => "Ctrl+Shift+L",
             Action::Search => "Ctrl+Shift+F",
@@ -189,6 +192,7 @@ pub fn match_shortcut(key: &Key, mods: &Modifiers) -> Option<Action> {
                 "a" => return Some(Action::ToggleAIChat),
                 "b" => return Some(Action::NewBrowser),
                 "o" => return Some(Action::NewPreview),
+                "n" => return Some(Action::NewNote),
                 "k" | "h" => return Some(Action::ShowHotkeyInfo),
                 "l" => return Some(Action::ToggleTheme),
                 "f" => return Some(Action::Search),
@@ -240,6 +244,7 @@ pub fn all_palette_actions() -> Vec<Action> {
         Action::NewTerminal,
         Action::NewBrowser,
         Action::NewPreview,
+        Action::NewNote,
         Action::ShowHotkeyInfo,
         Action::ToggleTheme,
         Action::Search,
@@ -262,7 +267,7 @@ mod tests {
 
     #[test]
     fn new_window_shortcuts_match() {
-        assert_eq!(ctrl_shift("n"), None);
+        assert_eq!(ctrl_shift("n"), Some(Action::NewNote));
         assert_eq!(ctrl_shift("b"), Some(Action::NewBrowser));
         assert_eq!(ctrl_shift("o"), Some(Action::NewPreview));
         assert_eq!(ctrl_shift("k"), Some(Action::ShowHotkeyInfo));

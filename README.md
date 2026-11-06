@@ -91,6 +91,7 @@ First steps once it's open:
 | Toggle AI chat | `Ctrl+Shift+A` |
 | New browser | `Ctrl+Shift+B` |
 | New file preview | `Alt+Shift+F` / `Ctrl+Shift+O` |
+| New note | `Ctrl+Shift+N` |
 | Keyboard shortcuts panel | `Ctrl+Shift+K` / `Ctrl+Shift+H` |
 | Open settings | `Ctrl+Shift+,` |
 | Toggle theme | `Ctrl+Shift+L` |
