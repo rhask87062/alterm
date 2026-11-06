@@ -82,26 +82,26 @@ impl Action {
     pub fn shortcut_hint(&self) -> &'static str {
         match self {
             Action::NewTab => "Ctrl+Shift+T",
-            Action::CloseTab => "Ctrl+Shift+W",
+            Action::CloseTab => "Ctrl+Shift+Q",
             Action::NextTab => "Ctrl+Tab",
             Action::PrevTab => "Ctrl+Shift+Tab",
             Action::JumpToTab(_) => "Ctrl+1-9",
             Action::RenameTab => "F2",
             Action::SplitRight => "Ctrl+Shift+D",
             Action::SplitDown => "Ctrl+Shift+E",
-            Action::ClosePane => "Ctrl+Shift+X",
-            Action::MaximizeToggle => "Ctrl+Shift+Z",
+            Action::ClosePane => "Ctrl+Shift+W / X",
+            Action::MaximizeToggle => "Ctrl+Shift+Alt+F / Z",
             Action::FocusUp => "Ctrl+Shift+Up",
             Action::FocusDown => "Ctrl+Shift+Down",
             Action::FocusLeft => "Ctrl+Shift+Left",
             Action::FocusRight => "Ctrl+Shift+Right",
-            Action::CommandPalette => "Ctrl+Shift+P",
+            Action::CommandPalette => "Ctrl+Shift+Space / P",
             Action::OpenSettings => "Ctrl+Shift+,",
             Action::ToggleAIChat => "Ctrl+Shift+A",
-            Action::NewTerminal => "Ctrl+Shift+N",
+            Action::NewTerminal => "Ctrl+Shift+Return",
             Action::NewBrowser => "Ctrl+Shift+B",
-            Action::NewPreview => "Ctrl+Shift+O",
-            Action::ShowHotkeyInfo => "Ctrl+Shift+H",
+            Action::NewPreview => "Alt+Shift+F / Ctrl+Shift+O",
+            Action::ShowHotkeyInfo => "Ctrl+Shift+K / H",
             Action::ToggleTheme => "Ctrl+Shift+L",
             Action::Search => "Ctrl+Shift+F",
             Action::Copy => "Ctrl+Shift+C",
@@ -159,24 +159,37 @@ pub fn match_shortcut(key: &Key, mods: &Modifiers) -> Option<Action> {
         }
     }
 
+    // ── Alt+Shift+F / Ctrl+Shift+Alt+F ─────────────────────────────
+    // Checked before the Ctrl+Shift block, which ignores Alt-held combos.
+    if mods.alt() && mods.shift() {
+        if let Key::Character(ref c) = key {
+            if c.as_str().eq_ignore_ascii_case("f") {
+                return Some(if mods.control() {
+                    Action::MaximizeToggle
+                } else {
+                    Action::NewPreview
+                });
+            }
+        }
+    }
+
     // ── Ctrl+Shift combos ───────────────────────────────────────────
-    if mods.control() && mods.shift() {
+    if mods.control() && mods.shift() && !mods.alt() {
         // Letter shortcuts
         if let Key::Character(ref c) = key {
             let ch = c.as_str().to_ascii_lowercase();
             match ch.as_str() {
                 "t" => return Some(Action::NewTab),
-                "w" => return Some(Action::CloseTab),
+                "q" => return Some(Action::CloseTab),
+                "w" | "x" => return Some(Action::ClosePane),
                 "d" => return Some(Action::SplitRight),
                 "e" => return Some(Action::SplitDown),
-                "x" => return Some(Action::ClosePane),
                 "z" => return Some(Action::MaximizeToggle),
                 "p" => return Some(Action::CommandPalette),
                 "a" => return Some(Action::ToggleAIChat),
-                "n" => return Some(Action::NewTerminal),
                 "b" => return Some(Action::NewBrowser),
                 "o" => return Some(Action::NewPreview),
-                "h" => return Some(Action::ShowHotkeyInfo),
+                "k" | "h" => return Some(Action::ShowHotkeyInfo),
                 "l" => return Some(Action::ToggleTheme),
                 "f" => return Some(Action::Search),
                 "c" => return Some(Action::Copy),
@@ -186,13 +199,15 @@ pub fn match_shortcut(key: &Key, mods: &Modifiers) -> Option<Action> {
             }
         }
 
-        // Arrow shortcuts for focus navigation
+        // Arrow shortcuts for focus navigation, plus Return / Space
         if let Key::Named(ref named) = key {
             match named {
                 Named::ArrowUp => return Some(Action::FocusUp),
                 Named::ArrowDown => return Some(Action::FocusDown),
                 Named::ArrowLeft => return Some(Action::FocusLeft),
                 Named::ArrowRight => return Some(Action::FocusRight),
+                Named::Enter => return Some(Action::NewTerminal),
+                Named::Space => return Some(Action::CommandPalette),
                 _ => {}
             }
         }
@@ -247,9 +262,10 @@ mod tests {
 
     #[test]
     fn new_window_shortcuts_match() {
-        assert_eq!(ctrl_shift("n"), Some(Action::NewTerminal));
+        assert_eq!(ctrl_shift("n"), None);
         assert_eq!(ctrl_shift("b"), Some(Action::NewBrowser));
         assert_eq!(ctrl_shift("o"), Some(Action::NewPreview));
+        assert_eq!(ctrl_shift("k"), Some(Action::ShowHotkeyInfo));
         assert_eq!(ctrl_shift("h"), Some(Action::ShowHotkeyInfo));
         assert_eq!(ctrl_shift("l"), Some(Action::ToggleTheme));
         assert_eq!(ctrl_shift("f"), Some(Action::Search));
@@ -268,10 +284,10 @@ mod tests {
             assert!(!action.shortcut_hint().is_empty());
             assert!(!action.label().is_empty());
         }
-        assert_eq!(Action::NewTerminal.shortcut_hint(), "Ctrl+Shift+N");
+        assert_eq!(Action::NewTerminal.shortcut_hint(), "Ctrl+Shift+Return");
         assert_eq!(Action::NewBrowser.shortcut_hint(), "Ctrl+Shift+B");
-        assert_eq!(Action::NewPreview.shortcut_hint(), "Ctrl+Shift+O");
-        assert_eq!(Action::ShowHotkeyInfo.shortcut_hint(), "Ctrl+Shift+H");
+        assert_eq!(Action::NewPreview.shortcut_hint(), "Alt+Shift+F / Ctrl+Shift+O");
+        assert_eq!(Action::ShowHotkeyInfo.shortcut_hint(), "Ctrl+Shift+K / H");
         assert_eq!(Action::ToggleTheme.shortcut_hint(), "Ctrl+Shift+L");
         assert_eq!(Action::Search.shortcut_hint(), "Ctrl+Shift+F");
     }
@@ -289,5 +305,54 @@ mod tests {
         ] {
             assert!(actions.contains(&a), "missing {a:?} in palette actions");
         }
+    }
+
+    #[test]
+    fn omarchy_aligned_named_shortcuts_match() {
+        let mods = Modifiers::CTRL | Modifiers::SHIFT;
+        assert_eq!(
+            match_shortcut(&Key::Named(Named::Enter), &mods),
+            Some(Action::NewTerminal)
+        );
+        assert_eq!(
+            match_shortcut(&Key::Named(Named::Space), &mods),
+            Some(Action::CommandPalette)
+        );
+        // Ctrl+Shift+P stays as an alias for the palette.
+        assert_eq!(ctrl_shift("p"), Some(Action::CommandPalette));
+        // Plain Ctrl+Return / Ctrl+Space stay with the terminal.
+        assert_eq!(match_shortcut(&Key::Named(Named::Enter), &Modifiers::CTRL), None);
+        assert_eq!(match_shortcut(&Key::Named(Named::Space), &Modifiers::CTRL), None);
+    }
+
+    #[test]
+    fn close_and_alt_shortcuts_match() {
+        assert_eq!(ctrl_shift("w"), Some(Action::ClosePane));
+        assert_eq!(ctrl_shift("x"), Some(Action::ClosePane));
+        assert_eq!(ctrl_shift("q"), Some(Action::CloseTab));
+        assert_eq!(ctrl_shift("z"), Some(Action::MaximizeToggle));
+        assert_eq!(ctrl_shift("o"), Some(Action::NewPreview));
+        // Search keeps plain Ctrl+Shift+F.
+        assert_eq!(ctrl_shift("f"), Some(Action::Search));
+
+        let f = Key::Character("f".into());
+        assert_eq!(
+            match_shortcut(&f, &(Modifiers::CTRL | Modifiers::SHIFT | Modifiers::ALT)),
+            Some(Action::MaximizeToggle)
+        );
+        assert_eq!(
+            match_shortcut(&f, &(Modifiers::ALT | Modifiers::SHIFT)),
+            Some(Action::NewPreview)
+        );
+        // Plain Alt+F stays with the shell (forward-word).
+        assert_eq!(match_shortcut(&f, &Modifiers::ALT), None);
+        // Alt-held variants of other Ctrl+Shift letters don't fire.
+        assert_eq!(
+            match_shortcut(
+                &Key::Character("t".into()),
+                &(Modifiers::CTRL | Modifiers::SHIFT | Modifiers::ALT)
+            ),
+            None
+        );
     }
 }

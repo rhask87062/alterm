@@ -29,7 +29,7 @@ terminal, an AI chat, a browser, a file preview, or a settings panel.
 - **Integrated AI chat** — chat panes that can see your recent terminal output for context. Multiple providers: OpenAI, Anthropic, Google Gemini, xAI (Grok), LM Studio, and Ollama (local, default).
 - **Embedded browser** — open web pages in a pane via the system webview (`wry`).
 - **File preview** — preview panes for code (syntax highlighting), images, and PowerPoint files.
-- **Command palette** — `Ctrl+Shift+P` to fuzzy-find and run any action.
+- **Command palette** — `Ctrl+Shift+Space` (or `Ctrl+Shift+P`) to fuzzy-find and run any action.
 - **Terminal search** — `Ctrl+Shift+F` opens a find bar over the focused terminal: substring by default with regex and case toggles, live highlighting across scrollback, and next/prev navigation.
 - **Settings GUI + TOML config** — edit appearance, AI providers, and terminal settings in-app, or hand-edit `~/.config/alterm/config.toml`.
 - **Themes** — dark/light themes with theme-aware chrome and a theme-adaptive keyboard-shortcut help panel. Toggle with `Ctrl+Shift+L`.
@@ -65,10 +65,10 @@ cargo install --path alterm
 
 First steps once it's open:
 
-- `Ctrl+Shift+N` — new terminal pane
+- `Ctrl+Shift+Return` — new terminal pane
 - `Ctrl+Shift+D` / `Ctrl+Shift+E` — split right / split down
-- `Ctrl+Shift+P` — command palette (discover everything)
-- `Ctrl+Shift+H` — keyboard-shortcut help panel
+- `Ctrl+Shift+Space` — command palette (discover everything)
+- `Ctrl+Shift+K` — keyboard-shortcut help panel
 - `Ctrl+Shift+,` — open settings
 
 ---
@@ -78,20 +78,20 @@ First steps once it's open:
 | Action | Shortcut |
 | --- | --- |
 | New tab | `Ctrl+Shift+T` |
-| Close tab | `Ctrl+Shift+W` |
+| Close tab | `Ctrl+Shift+Q` |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Jump to tab 1–9 | `Ctrl+1`…`Ctrl+9` |
 | Rename tab | `F2` |
 | Split right / down | `Ctrl+Shift+D` / `Ctrl+Shift+E` |
-| Close pane | `Ctrl+Shift+X` |
-| Toggle maximize pane | `Ctrl+Shift+Z` |
+| Close pane | `Ctrl+Shift+W` / `Ctrl+Shift+X` |
+| Toggle maximize pane | `Ctrl+Shift+Alt+F` / `Ctrl+Shift+Z` |
 | Focus pane (up/down/left/right) | `Ctrl+Shift+Arrow` |
-| Command palette | `Ctrl+Shift+P` |
-| New terminal | `Ctrl+Shift+N` |
+| Command palette | `Ctrl+Shift+Space` / `Ctrl+Shift+P` |
+| New terminal | `Ctrl+Shift+Return` |
 | Toggle AI chat | `Ctrl+Shift+A` |
 | New browser | `Ctrl+Shift+B` |
-| New file preview | `Ctrl+Shift+O` |
-| Keyboard shortcuts panel | `Ctrl+Shift+H` |
+| New file preview | `Alt+Shift+F` / `Ctrl+Shift+O` |
+| Keyboard shortcuts panel | `Ctrl+Shift+K` / `Ctrl+Shift+H` |
 | Open settings | `Ctrl+Shift+,` |
 | Toggle theme | `Ctrl+Shift+L` |
 | Search | `Ctrl+Shift+F` |

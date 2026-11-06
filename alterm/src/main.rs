@@ -2451,7 +2451,7 @@ impl Alterm {
                             return self.update(Message::PaletteSubmit);
                         }
                         _ => {
-                            // Let Ctrl+Shift+P toggle the palette off.
+                            // Let the palette shortcut toggle it off.
                             if let Some(Action::CommandPalette) = match_shortcut(&key, &modifiers) {
                                 self.palette.close();
                                 return Task::none();

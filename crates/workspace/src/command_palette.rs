@@ -1,6 +1,6 @@
 /// Command palette — a fuzzy-searchable overlay listing all workspace actions.
 ///
-/// Activated with Ctrl+Shift+P.  Provides a text input for filtering commands
+/// Activated with Ctrl+Shift+Space or Ctrl+Shift+P.  Provides a text input for filtering commands
 /// and a list of matches the user can navigate with Up/Down and execute with
 /// Enter.
 use crate::keybindings::{all_palette_actions, Action};
